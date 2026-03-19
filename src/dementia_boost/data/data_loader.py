@@ -43,7 +43,7 @@ class OasisDataLoader:
         if not os.path.exists(file_path):
             raise FileNotFoundError(
                 f"Processed data not found at {file_path}. "
-                "Run DataProcessor().process_and_save() first."
+                "Run OasisDataProcessor().process_and_save() first."
             )
 
         dataset = OasisDataset(
@@ -55,20 +55,19 @@ class OasisDataLoader:
             dataset,
             batch_size=self._batch_size,
             shuffle=is_train,
+            pin_memory=True,
         )
 
     def _get_transform(self) -> transforms.Compose:
         """
-        Defines the sequence of image transformations: resizing to 4x4,
-        converting to tensor, and normalizing to range [-1, 1].
+        Defines the sequence of image transformations for 32-bit float tensors.
 
         Returns:
             A composed torchvision transform.
         """
         return transforms.Compose(
             [
-                transforms.Resize((4, 4)),
-                transforms.ToTensor(),
-                transforms.Normalize((0.5,), (0.5,)),
+                transforms.Resize((128, 128), antialias=True),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
             ]
         )
