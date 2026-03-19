@@ -2,12 +2,11 @@ from collections.abc import Callable
 
 from torch import Tensor, load
 from torch.utils.data import Dataset
-from torchvision import transforms
 
 
 class OasisDataset(Dataset):
     """
-    Custom PyTorch Dataset to load the pre-processed OASIS tensors.
+    Custom PyTorch Dataset to load the pre-processed HDR tensors.
     """
 
     def __init__(
@@ -20,7 +19,7 @@ class OasisDataset(Dataset):
             `file_path`: Path to the .pt file containing the data and targets.
             `transform`: Optional callable transform to apply to the data.
         """
-        self.data, self.targets = load(file_path)
+        self.data, self.targets = load(file_path, weights_only=True)
         self.transform = transform
 
     def __len__(self) -> int:
@@ -41,8 +40,6 @@ class OasisDataset(Dataset):
         """
         img = self.data[idx]
         target = int(self.targets[idx])
-
-        img = transforms.ToPILImage()(img)
 
         if self.transform:
             img = self.transform(img)
