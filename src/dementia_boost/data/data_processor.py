@@ -56,6 +56,8 @@ class OasisDataProcessor:
 
                 tensor_volume = torch.from_numpy(volume_data).float()
 
+                tensor_volume = tensor_volume.squeeze()
+
                 tensor_volume = tensor_volume.unsqueeze(0)
 
                 data_list.append(tensor_volume)
