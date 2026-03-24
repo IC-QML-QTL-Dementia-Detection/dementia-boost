@@ -1,15 +1,16 @@
 import glob
 import os
 
-import cv2
+import nibabel as nib
 import torch
+from nibabel.spatialimages import SpatialImage
 from torch import Tensor
 
 
 class OasisDataProcessor:
     """
-    Handles the ETL process: loads raw .hdr images, converts them to
-    PyTorch float32 tensors, and saves them to .pt files for fast loading.
+    Handles the ETL process: loads raw NIfTI .hdr/.img pairs, converts them to
+    3D PyTorch tensors, and saves them to .pt files.
     """
 
     RAW_PATH = "./data/raw"
@@ -42,18 +43,28 @@ class OasisDataProcessor:
         targets_list: list[int] = []
 
         for idx, file_path in enumerate(hdr_files):
-            img = cv2.imread(file_path, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
-            if img is None:
-                print(f"Warning: Failed to load {file_path}")
+            try:
+                img_obj = nib.load(file_path)
+
+                if not isinstance(img_obj, SpatialImage):
+                    print(
+                        f"Warning: {file_path} is not a valid spatial image. Skipping."
+                    )
+                    continue
+
+                volume_data = img_obj.get_fdata()
+
+                tensor_volume = torch.from_numpy(volume_data).float()
+
+                tensor_volume = tensor_volume.unsqueeze(0)
+
+                data_list.append(tensor_volume)
+
+                targets_list.append(idx % 2)
+
+            except Exception as e:
+                print(f"Failed to load {file_path}: {e}")
                 continue
-
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-            tensor_img = torch.from_numpy(img).permute(2, 0, 1).float()
-
-            data_list.append(tensor_img)
-
-            targets_list.append(idx % 2)
 
         all_data = torch.stack(data_list)
         all_targets = torch.tensor(targets_list, dtype=torch.long)
@@ -70,4 +81,6 @@ class OasisDataProcessor:
             os.path.join(self.PROCESSED_PATH, "test.pt"),
         )
 
-        print(f"Processed {len(hdr_files)} files. Saved to {self.PROCESSED_PATH}")
+        print(
+            f"Processed {len(hdr_files)} NIfTI volumes. Saved to {self.PROCESSED_PATH}"
+        )
