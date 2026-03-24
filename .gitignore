@@ -11,3 +11,6 @@ wheels/
 
 # Environtment Variables
 .env
+
+# Dataset
+data/
