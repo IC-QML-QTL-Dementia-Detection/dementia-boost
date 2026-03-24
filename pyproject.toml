@@ -12,7 +12,6 @@ dependencies = [
     "matplotlib>=3.10.8",
     "nibabel>=5.4.2",
     "numpy>=2.4.3",
-    "opencv-python>=4.13.0.92",
     "pandas>=3.0.1",
     "torch>=2.10.0",
     "torchvision>=0.25.0",
