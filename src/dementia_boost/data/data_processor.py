@@ -6,7 +6,6 @@ import pandas as pd
 import torch
 from nibabel.spatialimages import SpatialImage
 from numpy import random
-from torch import Tensor
 
 
 class OasisDataProcessor:
@@ -37,6 +36,8 @@ class OasisDataProcessor:
         self.test_dir = os.path.join(self.PROCESSED_PATH, "test")
         os.makedirs(self.RAW_PATH, exist_ok=True)
         os.makedirs(self.PROCESSED_PATH, exist_ok=True)
+        os.makedirs(self.train_dir, exist_ok=True)
+        os.makedirs(self.test_dir, exist_ok=True)
 
     def process_and_save(
         self,
@@ -77,59 +78,11 @@ class OasisDataProcessor:
             f"{len(test_subjects)} Test subjects.",
         )
 
-        hdr_files = glob.glob(os.path.join(self.RAW_PATH, "*.hdr"))
+        print("Processing Training Data...")
+        self._process_subset(train_subjects, subject_metadata, self.train_dir)
 
-        if not hdr_files:
-            print(f"No .hdr files found in {self.RAW_PATH}")
-            return
-
-        data_list: list[Tensor] = []
-        targets_list: list[int] = []
-
-        for idx, file_path in enumerate(hdr_files):
-            try:
-                img_obj = nib.load(file_path)
-
-                if not isinstance(img_obj, SpatialImage):
-                    print(
-                        f"Warning: {file_path} is not a valid spatial image. Skipping."
-                    )
-                    continue
-
-                volume_data = img_obj.get_fdata()
-
-                tensor_volume = torch.from_numpy(volume_data).float()
-
-                tensor_volume = tensor_volume.squeeze()
-
-                tensor_volume = tensor_volume.unsqueeze(0)
-
-                data_list.append(tensor_volume)
-
-                targets_list.append(idx % 2)
-
-            except Exception as e:
-                print(f"Failed to load {file_path}: {e}")
-                continue
-
-        all_data = torch.stack(data_list)
-        all_targets = torch.tensor(targets_list, dtype=torch.long)
-
-        split_idx = int(len(all_data) * split_ratio)
-
-        torch.save(
-            (all_data[:split_idx], all_targets[:split_idx]),
-            os.path.join(self.PROCESSED_PATH, "training.pt"),
-        )
-
-        torch.save(
-            (all_data[split_idx:], all_targets[split_idx:]),
-            os.path.join(self.PROCESSED_PATH, "test.pt"),
-        )
-
-        print(
-            f"Processed {len(hdr_files)} NIfTI volumes. Saved to {self.PROCESSED_PATH}"
-        )
+        print("Processing Test Data...")
+        self._process_subset(test_subjects, subject_metadata, self.test_dir)
 
     def _parse_csv(self) -> dict[str, str]:
         """
@@ -189,3 +142,61 @@ class OasisDataProcessor:
         test_set.update(remaining[needed_for_train:])
 
         return train_set, test_set
+
+    def _process_subset(
+        self,
+        subjects: set[str],
+        metadata: dict[str, str],
+        output_dir: str,
+    ) -> None:
+        """
+        Streams, processes, and saves physical files for a specific subset of subjects.
+
+        For every subject in the provided set, this method searches the raw data
+        directory for all associated visits and exams. It loads each NIfTI file
+        dynamically using Nibabel, standardizes the tensor dimensions (squeezing empty
+        spatial dimensions and unsqueezing a channel dimension to yield [1, H, W]),
+        and saves it as an isolated `.pt` file alongside its categorical label.
+
+        Args:
+            subjects (set[str]): The specific Subject IDs routed to this subset.
+            metadata (dict[str, str]): The dict containing the label for each subject.
+            output_dir (str): The destination directory path for the processed files.
+        """
+        processed_count = 0
+
+        for subject_id in subjects:
+            label = metadata[subject_id]
+
+            search_pattern = os.path.join(
+                self.RAW_PATH,
+                f"{subject_id}_MR*",
+                "RAW",
+                "*.hdr",
+            )
+            exam_files = glob.glob(search_pattern)
+
+            for file_path in exam_files:
+                try:
+                    img_obj = nib.load(file_path)
+                    if not isinstance(img_obj, SpatialImage):
+                        continue
+
+                    volume_data = img_obj.get_fdata()
+                    tensor_volume = torch.from_numpy(volume_data).float()
+
+                    tensor_volume = tensor_volume.squeeze().unsqueeze(0)
+
+                    parts = file_path.split(os.sep)
+                    visit_folder = parts[-3]
+                    exam_name = parts[-1].replace(".nifti.hdr", "")
+
+                    save_name = f"{visit_folder}_{exam_name}.pt"
+                    save_path = os.path.join(output_dir, save_name)
+
+                    torch.save((tensor_volume, label), save_path)
+                    processed_count += 1
+                except Exception as e:
+                    print(f"Failed to process {file_path}: {e}")
+
+            print(f" -> Saved {processed_count} files to {output_dir}")

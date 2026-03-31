@@ -1,3 +1,5 @@
+import glob
+import os
 from collections.abc import Callable
 
 from torch import Tensor, load
@@ -6,27 +8,29 @@ from torch.utils.data import Dataset
 
 class OasisDataset(Dataset):
     """
-    Custom PyTorch Dataset to load the pre-processed HDR tensors.
+    Custom PyTorch Dataset to load pre-processed tensor files.
     """
 
     def __init__(
         self,
-        file_path: str,
+        directory_path: str,
         transform: Callable | None = None,
     ) -> None:
         """
         Args:
-            `file_path`: Path to the .pt file containing the data and targets.
+            `directory_path`: Path to the 'train' or 'test' directory containing
+                .pt files.
             `transform`: Optional callable transform to apply to the data.
         """
-        self.data, self.targets = load(file_path, weights_only=True)
+        self.directory_path = directory_path
+        self.file_list = glob.glob(os.path.join(directory_path, "*.pt"))
         self.transform = transform
 
     def __len__(self) -> int:
         """
         Returns the total number of samples in the dataset.
         """
-        return len(self.data)
+        return len(self.file_list)
 
     def __getitem__(self, idx: int) -> tuple[Tensor, int]:
         """
@@ -38,8 +42,9 @@ class OasisDataset(Dataset):
         Returns:
             A tuple containing the transformed image tensor and its label.
         """
-        img = self.data[idx]
-        target = int(self.targets[idx])
+        file_path = self.file_list[idx]
+
+        img, target = load(file_path, weights_only=True)
 
         if self.transform:
             img = self.transform(img)

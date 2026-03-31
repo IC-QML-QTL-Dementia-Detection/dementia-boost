@@ -37,17 +37,17 @@ class OasisDataLoader:
             `FileNotFoundError`: If the processed data files do not exist.
         """
 
-        filename = "training.pt" if is_train else "test.pt"
-        file_path = os.path.join(self.PROCESSED_PATH, filename)
+        dir_name = "train" if is_train else "test"
+        dir_path = os.path.join(self.PROCESSED_PATH, dir_name)
 
-        if not os.path.exists(file_path):
+        if not os.path.exists(dir_path) or not os.listdir(dir_path):
             raise FileNotFoundError(
-                f"Processed data not found at {file_path}. "
+                f"Processed data not found at {dir_path}. "
                 "Run OasisDataProcessor().process_and_save() first."
             )
 
         dataset = OasisDataset(
-            file_path=file_path,
+            directory_path=dir_path,
             transform=self._get_transform(),
         )
 
