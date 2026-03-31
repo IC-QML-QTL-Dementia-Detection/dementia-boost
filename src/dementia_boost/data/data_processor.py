@@ -2,6 +2,7 @@ import glob
 import os
 
 import nibabel as nib
+import pandas as pd
 import torch
 from nibabel.spatialimages import SpatialImage
 from torch import Tensor
@@ -9,21 +10,23 @@ from torch import Tensor
 
 class OasisDataProcessor:
     """
-    Handles the ETL process: loads raw NIfTI .hdr/.img pairs, converts them to
-    3D PyTorch tensors, and saves them to .pt files.
+    Handles metadata parsing, subject-level splitting to prevent data leakage,
+    and memory-safe streaming of NIfTI files to individual PyTorch tensors.
     """
 
     RAW_PATH = "./data/raw"
     PROCESSED_PATH = "./data/results"
 
-    def __init__(self) -> None:
+    def __init__(self, csv_path: str) -> None:
         """
         Initializes the processor and ensures the necessary directories exist.
         """
+        self.csv_path = csv_path
+
+        self.train_dir = os.path.join(self.PROCESSED_PATH, "train")
+        self.test_dir = os.path.join(self.PROCESSED_PATH, "test")
         os.makedirs(self.RAW_PATH, exist_ok=True)
         os.makedirs(self.PROCESSED_PATH, exist_ok=True)
-
-    pass
 
     # TODO: implement the same split logic as the paper
     def process_and_save(self, split_ratio: float) -> None:
@@ -86,3 +89,11 @@ class OasisDataProcessor:
         print(
             f"Processed {len(hdr_files)} NIfTI volumes. Saved to {self.PROCESSED_PATH}"
         )
+
+    def _parse_csv(self) -> dict[str, str]:
+        """Reads CSV, filters out label "Converted", returns {Subject_ID: Group}."""
+        df = pd.read_csv(self.csv_path)
+
+        df_filtered = df[df["Group"] != "Converted"]
+
+        return dict(zip(df_filtered["Subject ID"], df_filtered["Group"], strict=True))

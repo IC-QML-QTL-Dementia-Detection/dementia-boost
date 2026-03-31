@@ -11,7 +11,7 @@ def main() -> None:
     # Step 1: Run the ETL process (Extract, Transform, Load)
     # ---------------------------------------------------------
     print("\n[1] Running Data Processor...")
-    processor = OasisDataProcessor()
+    processor = OasisDataProcessor("./data/raw/oasis_longitudinal_demographics.csv")
 
     processor.process_and_save(split_ratio=0.8)
 
