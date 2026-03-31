@@ -5,6 +5,7 @@ import nibabel as nib
 import pandas as pd
 import torch
 from nibabel.spatialimages import SpatialImage
+from numpy import random
 from torch import Tensor
 
 
@@ -28,14 +29,35 @@ class OasisDataProcessor:
         os.makedirs(self.RAW_PATH, exist_ok=True)
         os.makedirs(self.PROCESSED_PATH, exist_ok=True)
 
-    # TODO: implement the same split logic as the paper
-    def process_and_save(self, split_ratio: float) -> None:
+    def process_and_save(
+        self,
+        split_ratio: float = 0.7,
+        manual_train_ids: list[str] | None = None,
+        manual_test_ids: list[str] | None = None,
+    ) -> None:
         """
         Reads .hdr files from RAW_PATH, converts them, and saves to PROCESSED_PATH.
 
         Args:
             split_ratio: Percentage of data to use for training.
         """
+        manual_train_ids = manual_train_ids or []
+        manual_test_ids = manual_test_ids or []
+
+        subject_metadata = self._parse_csv()
+
+        train_subjects, test_subjects = self._split_subjects(
+            subject_metadata,
+            split_ratio,
+            manual_train_ids,
+            manual_test_ids,
+        )
+
+        print(
+            f"Splitting complete: {len(train_subjects)} Train subjects, ",
+            f"{len(test_subjects)} Test subjects.",
+        )
+
         hdr_files = glob.glob(os.path.join(self.RAW_PATH, "*.hdr"))
 
         if not hdr_files:
@@ -97,3 +119,27 @@ class OasisDataProcessor:
         df_filtered = df[df["Group"] != "Converted"]
 
         return dict(zip(df_filtered["Subject ID"], df_filtered["Group"], strict=True))
+
+    def _split_subjects(
+        self,
+        metadata: dict[str, str],
+        ratio: float,
+        manual_train: list[str],
+        manual_test: list[str],
+    ) -> tuple[set[str], set[str]]:
+        """Splits data by Subject ID to prevent leakage."""
+        all_subjects = set(metadata.keys())
+
+        train_set = set(manual_train)
+        test_set = set(manual_test)
+
+        remaining = list(all_subjects - train_set - test_set)
+        random.shuffle(remaining)
+
+        target_train_size = int(len(all_subjects) * ratio)
+        needed_for_train = max(0, target_train_size - len(train_set))
+
+        train_set.update(remaining[:needed_for_train])
+        test_set.update(remaining[needed_for_train:])
+
+        return train_set, test_set

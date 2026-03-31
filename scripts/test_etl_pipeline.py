@@ -13,7 +13,10 @@ def main() -> None:
     print("\n[1] Running Data Processor...")
     processor = OasisDataProcessor("./data/raw/oasis_longitudinal_demographics.csv")
 
-    processor.process_and_save(split_ratio=0.8)
+    processor.process_and_save(
+        split_ratio=0.7,
+        manual_test_ids=["OAS2_0001", "OAS2_0002"],
+    )
 
     # ---------------------------------------------------------
     # Step 2: Initialize the DataLoader
