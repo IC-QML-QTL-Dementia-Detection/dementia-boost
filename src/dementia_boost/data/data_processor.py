@@ -11,8 +11,12 @@ from torch import Tensor
 
 class OasisDataProcessor:
     """
-    Handles metadata parsing, subject-level splitting to prevent data leakage,
-    and memory-safe streaming of NIfTI files to individual PyTorch tensors.
+    Handles the ETL process for NIfTI medical images.
+
+    This processor is designed to handle large datasets safely by streaming files from
+    disk, preventing Out-Of-Memory (OOM) errors. Crucially, it prevents data leakage
+    by ensuring all exams and visits for a single subject are routed strictly to either
+    the training or testing set, never both.
     """
 
     RAW_PATH = "./data/raw"
@@ -20,7 +24,12 @@ class OasisDataProcessor:
 
     def __init__(self, csv_path: str) -> None:
         """
-        Initializes the processor and ensures the necessary directories exist.
+        Initializes the processor, sets up file paths, and ensures output directories
+        exist.
+
+        Args:
+            csv_path (str): The absolute or relative path to the metadata CSV file
+                containing subject IDs and their corresponding categorical labels.
         """
         self.csv_path = csv_path
 
@@ -36,10 +45,20 @@ class OasisDataProcessor:
         manual_test_ids: list[str] | None = None,
     ) -> None:
         """
-        Reads .hdr files from RAW_PATH, converts them, and saves to PROCESSED_PATH.
+        Executes the full ETL pipeline safely.
+
+        This acts as the main orchestrator. It parses the metadata, splits the unique
+        Subject IDs to prevent data leakage, and streams the NIfTI files from disk to
+        process and save them as individual `.pt` tensors in their respective
+        train/test directories.
 
         Args:
-            split_ratio: Percentage of data to use for training.
+            split_ratio (float, optional): The target percentage of subjects to allocate
+                to the training set. Defaults to 0.7 (70%).
+            manual_train_ids (list[str] | None, optional): A list of specific Subject ID
+                forced into the training set. Defaults to None.
+            manual_test_ids (list[str] | None, optional): A list of specific Subject IDs
+                forced into the testing set. Defaults to None.
         """
         manual_train_ids = manual_train_ids or []
         manual_test_ids = manual_test_ids or []
@@ -113,7 +132,17 @@ class OasisDataProcessor:
         )
 
     def _parse_csv(self) -> dict[str, str]:
-        """Reads CSV, filters out label "Converted", returns {Subject_ID: Group}."""
+        """
+        Reads the metadata CSV, filters out excluded categories, and maps subjects
+        to labels.
+
+        This method specifically drops any subjects marked with the exclusion label
+        to ensure they do not contaminate the training or testing pools.
+
+        Returns:
+            dict[str, str]: A dictionary mapping the Subject ID (key) to its
+                categorical label (value).
+        """
         df = pd.read_csv(self.csv_path)
 
         df_filtered = df[df["Group"] != "Converted"]
@@ -127,7 +156,24 @@ class OasisDataProcessor:
         manual_train: list[str],
         manual_test: list[str],
     ) -> tuple[set[str], set[str]]:
-        """Splits data by Subject ID to prevent leakage."""
+        """
+        Splits the dataset strictly by Subject ID rather than by individual images.
+
+        This ensures that all longitudinal data (multiple visits/exams) for a single
+        patient ends up in the same cohort, preventing cross-contamination (leakage)
+        between the train and test sets. It respects manual ID assignments before
+        randomly distributing the remaining subjects to meet the target `ratio`.
+
+        Args:
+            metadata (dict[str, str]): The parsed dict of available SubjectID and label.
+            ratio (float): The desired ratio of training data (e.g., 0.7).
+            manual_train (list[str]): Subject IDs manually assigned to the training set.
+            manual_test (list[str]): Subject IDs manually assigned to the testing set.
+
+        Returns:
+            tuple[set[str], set[str]]: Two sets containing the partitioned Subject IDs
+                for training and testing, respectively.
+        """
         all_subjects = set(metadata.keys())
 
         train_set = set(manual_train)
