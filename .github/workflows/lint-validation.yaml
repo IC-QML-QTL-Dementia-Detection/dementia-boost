@@ -1,16 +1,16 @@
-name: Validation Pull Request 
+name: Validation Pull Request
 
-on: 
+on:
   pull_request:
     branches:
-      - main 
+      - main
 
-jobs: 
+jobs:
   validate:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository 
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Install uv
@@ -22,6 +22,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version-file: ".python-version"
+
+      - name: Install Dependencies
+        run: uv sync
 
       - name: Run Pre-Commit
         uses: pre-commit/action@v3.0.1
