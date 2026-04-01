@@ -1,7 +1,6 @@
 import sys
 
-from dementia_boost.data.data_loader import OasisDataLoader
-from dementia_boost.data.data_processor import OasisDataProcessor
+from dementia_boost.data import OasisDataLoader, OasisDataProcessor
 
 
 def main() -> None:
