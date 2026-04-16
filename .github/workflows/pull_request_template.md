@@ -1,16 +1,16 @@
-# Merge Request 
+# Pull Request
 
-## Descreva sua mudança
+## Describe your changes
 
-## Tipo de mudança? 
+## Type of change?
 
 feat/fix/update
 
-## Checklist antes de pedir uma review 
-- [ ] Eu realizei uma autoavaliação do meu código.
-- [ ] Se for uma funcionalidade essencial, adicionei testes completos.
+## Checklist before requesting a review
 
-## Como esse código foi testado?
+- [ ] I have performed a self-review of my code.
+- [ ] If it is an essential feature, I have tested completely.
 
+## How was this code tested?
 
-## Instalou alguma dependência? Qual? 
+## Did you install any dependencies? Which ones?

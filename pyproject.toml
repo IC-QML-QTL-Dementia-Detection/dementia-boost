@@ -1,14 +1,22 @@
 [project]
 name = "dementia-boost"
-version = "0.1.0"
+version = "1.0.0"
 description = "QML for classifying patients with dementia "
 readme = "README.md"
 authors = [
     { name = "Kaue Miziara", email = "kauemiziara@gmail.com" },
-    { name = "Julia Santos", email = "juliasantos7652@gmail.com" }
+    { name = "Julia Santos", email = "juliasantos7652@gmail.com" },
+    { name = "Guilherme Pagani", email = "guilhermemoraespagani@gmail.com" },
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "matplotlib>=3.10.8",
+    "nibabel>=5.4.2",
+    "numpy>=2.4.3",
+    "pandas>=3.0.1",
+    "torch>=2.10.0",
+    "torchvision>=0.25.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.22,<0.10.0"]
