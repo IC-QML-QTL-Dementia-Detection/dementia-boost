@@ -1,13 +1,9 @@
 [project]
 name = "dementia-boost"
-version = "1.0.0"
+version = "1.0.1"
 description = "QML for classifying patients with dementia "
 readme = "README.md"
-authors = [
-    { name = "Kaue Miziara", email = "kauemiziara@gmail.com" },
-    { name = "Julia Santos", email = "juliasantos7652@gmail.com" },
-    { name = "Guilherme Pagani", email = "guilhermemoraespagani@gmail.com" },
-]
+authors = [{ name = "Kaue Miziara", email = "kauemiziara@gmail.com" }]
 requires-python = ">=3.14"
 dependencies = [
     "matplotlib>=3.10.8",
