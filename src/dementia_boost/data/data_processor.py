@@ -84,27 +84,37 @@ class OasisDataProcessor:
         print("Processing Test Data...")
         self._process_subset(test_subjects, subject_metadata, self.test_dir)
 
-    def _parse_csv(self) -> dict[str, str]:
+    def _parse_csv(self) -> dict[str, int]:
         """
         Reads the metadata CSV, filters out excluded categories, and maps subjects
-        to labels.
+        to integer labels (0 for Nondemented, 1 for Demented).
 
         This method specifically drops any subjects marked with the exclusion label
         to ensure they do not contaminate the training or testing pools.
 
         Returns:
             dict[str, str]: A dictionary mapping the Subject ID (key) to its
-                categorical label (value).
+                binary integer label (value).
         """
         df = pd.read_csv(self.csv_path)
 
+        label_mapping: dict[str, int] = {"Nondemented": 0, "Demented": 1}
+
         df_filtered = df[df["Group"] != "Converted"]
 
-        return dict(zip(df_filtered["Subject ID"], df_filtered["Group"], strict=True))
+        return {
+            str(subj): label_mapping[str(group)]
+            for subj, group in zip(
+                df_filtered["Subject ID"],
+                df_filtered["Group"],
+                strict=False,
+            )
+            if str(group) in label_mapping
+        }
 
     def _split_subjects(
         self,
-        metadata: dict[str, str],
+        metadata: dict[str, int],
         ratio: float,
         manual_train: list[str],
         manual_test: list[str],
@@ -118,7 +128,7 @@ class OasisDataProcessor:
         randomly distributing the remaining subjects to meet the target `ratio`.
 
         Args:
-            metadata (dict[str, str]): The parsed dict of available SubjectID and label.
+            metadata (dict[str, int]): The parsed dict of available SubjectID and label.
             ratio (float): The desired ratio of training data (e.g., 0.7).
             manual_train (list[str]): Subject IDs manually assigned to the training set.
             manual_test (list[str]): Subject IDs manually assigned to the testing set.
@@ -146,7 +156,7 @@ class OasisDataProcessor:
     def _process_subset(
         self,
         subjects: set[str],
-        metadata: dict[str, str],
+        metadata: dict[str, int],
         output_dir: str,
     ) -> None:
         """
@@ -160,7 +170,7 @@ class OasisDataProcessor:
 
         Args:
             subjects (set[str]): The specific Subject IDs routed to this subset.
-            metadata (dict[str, str]): The dict containing the label for each subject.
+            metadata (dict[str, int]): The dict containing the label for each subject.
             output_dir (str): The destination directory path for the processed files.
         """
         processed_count = 0
