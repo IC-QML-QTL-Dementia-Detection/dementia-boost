@@ -2,6 +2,7 @@ import glob
 import os
 
 import nibabel as nib
+import numpy as np
 import pandas as pd
 import torch
 from nibabel.spatialimages import SpatialImage
@@ -192,10 +193,21 @@ class OasisDataProcessor:
                     if not isinstance(img_obj, SpatialImage):
                         continue
 
-                    volume_data = img_obj.get_fdata()
-                    tensor_volume = torch.from_numpy(volume_data).float()
+                    volume_data = np.squeeze(img_obj.get_fdata())
 
-                    tensor_volume = tensor_volume.squeeze().unsqueeze(0)
+                    if volume_data.ndim != 3:
+                        print(
+                            f"Skipping {file_path}: unexpected dimensions",
+                            f"{volume_data.shape}",
+                        )
+                        continue
+
+                    middle_idx = volume_data.shape[0] // 2
+                    slice_2d = volume_data[middle_idx, :, :]
+
+                    tensor_2d = torch.from_numpy(slice_2d).float()
+
+                    tensor_volume = tensor_2d.unsqueeze(0)
 
                     parts = file_path.split(os.sep)
                     visit_folder = parts[-3]
