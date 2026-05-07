@@ -1,5 +1,6 @@
 import os
 
+from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
@@ -60,7 +61,7 @@ class OasisDataLoader:
 
     def _get_transform(self) -> transforms.Compose:
         """
-        Defines the sequence of image transformations for 32-bit float tensors.
+        Defines the sequence of image transformations for raw NIfTI float tensors.
 
         Returns:
             A composed torchvision transform.
@@ -68,6 +69,22 @@ class OasisDataLoader:
         return transforms.Compose(
             [
                 transforms.Resize((128, 128), antialias=True),
+                MinMaxNormalize(),
                 transforms.Normalize(mean=[0.5], std=[0.5]),
             ]
         )
+
+
+class MinMaxNormalize:
+    """
+    Custom transform to scale unbounded medical image tensors to the [0.0, 1.0] range.
+    Performs scaling on a per-image basis to preserve local contrast.
+    """
+
+    def __call__(self, tensor: Tensor) -> Tensor:
+        min_val = tensor.min()
+        max_val = tensor.max()
+
+        if max_val - min_val > 1e-6:
+            return (tensor - min_val) / (max_val - min_val)
+        return tensor
