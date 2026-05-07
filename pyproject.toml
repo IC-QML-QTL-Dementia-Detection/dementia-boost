@@ -1,6 +1,6 @@
 [project]
 name = "dementia-boost"
-version = "1.0.1"
+version = "1.1.0"
 description = "QML for classifying patients with dementia "
 readme = "README.md"
 authors = [{ name = "Kaue Miziara", email = "kauemiziara@gmail.com" }]
