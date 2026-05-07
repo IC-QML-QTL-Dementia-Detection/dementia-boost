@@ -11,13 +11,13 @@ class ClassicalClassifierHead(nn.Module):
     indicating the likelihood of dementia.
     """
 
-    def __init__(self, in_features: int = 64 * 6 * 6) -> None:
+    def __init__(self, in_features: int = 64 * 7 * 7) -> None:
         """
         Initializes the classification head.
 
         Args:
             in_features (int): The number of features received from the flattened
-                output of the feature extractor. Defaults to 2304 (64 * 6 * 6).
+                output of the feature extractor. Defaults to 3136 (64 * 7 * 7).
         """
         super().__init__()
 
