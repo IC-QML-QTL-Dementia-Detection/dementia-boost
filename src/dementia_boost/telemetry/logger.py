@@ -1,20 +1,14 @@
 import logging
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
 def setup_logger(name: str, log_dir: str = "logs") -> logging.Logger:
     """
     Configures and returns a standardized logger that outputs to both
-    stdout (console) and a persistent log file.
-
-    Args:
-        name (str): The name of the logger (typically __name__ of the calling module).
-        log_dir (str): The directory where log files should be saved.
-
-    Returns:
-        logging.Logger: The configured logger instance.
+    stdout and a unique, timestamped persistent log file.
     """
     logger = logging.getLogger(name)
 
@@ -36,12 +30,12 @@ def setup_logger(name: str, log_dir: str = "logs") -> logging.Logger:
     logger.addHandler(console_handler)
 
     Path(log_dir).mkdir(parents=True, exist_ok=True)
-    log_file_path = os.path.join(log_dir, "training_pipeline.log")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file_path = os.path.join(log_dir, f"{timestamp}_{name}.log")
 
     file_handler = logging.FileHandler(log_file_path)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
     logger.propagate = False
-
     return logger

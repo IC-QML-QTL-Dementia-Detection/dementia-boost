@@ -7,7 +7,7 @@ from dementia_boost.telemetry.logger import setup_logger
 
 def main() -> None:
     set_seed(42)
-    logger = setup_logger(__name__)
+    logger = setup_logger("etl_pipeline")
 
     logger.info("Testing NIfTI Data Pipeline")
 

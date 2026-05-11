@@ -25,7 +25,7 @@ def get_device() -> torch.device:
 
 def main() -> None:
     set_seed(42)
-    logger = setup_logger(__name__)
+    logger = setup_logger("baseline_train")
 
     logger.info("Initializing Baseline Training Prototype")
 
