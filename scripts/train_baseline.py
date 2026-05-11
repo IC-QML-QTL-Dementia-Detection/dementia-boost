@@ -5,12 +5,14 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 
+from dementia_boost.core.reproducibility import set_seed
 from dementia_boost.data import OasisDataLoader
 from dementia_boost.models.classical_cnn import (
     ClassicalClassifierHead,
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
+from dementia_boost.telemetry.logger import setup_logger
 
 
 def get_device() -> torch.device:
@@ -22,21 +24,24 @@ def get_device() -> torch.device:
 
 
 def main() -> None:
-    print("--- Initializing Baseline Training Prototype ---")
+    set_seed(42)
+    logger = setup_logger(__name__)
+
+    logger.info("Initializing Baseline Training Prototype")
 
     device = get_device()
-    print(f"[*] Target Device: {device}")
+    logger.info(f"Target Device: {device}")
 
     loader_manager = OasisDataLoader(batch_size=4)
     try:
         train_loader = loader_manager.get_data_loader(is_train=True)
         test_loader = loader_manager.get_data_loader(is_train=False)
-        print(
-            f"[*] Data loaded: {len(train_loader)} training batches,"
+        logger.info(
+            f"Data loaded: {len(train_loader)} training batches, "
             f"{len(test_loader)} test batches."
         )
     except FileNotFoundError as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         sys.exit(1)
 
     extractor = LeNetFeatureExtractor()
@@ -51,7 +56,9 @@ def main() -> None:
 
     epochs = 5
 
-    print("\n--- Starting Training ---")
+    print()
+
+    logger.info("Starting Training")
     for epoch in range(epochs):
         model.train()
         running_loss = 0.0
@@ -82,12 +89,13 @@ def main() -> None:
         epoch_loss = running_loss / total_samples
         epoch_acc = correct_predictions / total_samples
 
-        print(
-            f"Epoch [{epoch + 1}/{epochs}] |"
+        logger.info(
+            f"Epoch [{epoch + 1}/{epochs}] | "
             f"Train Loss: {epoch_loss:.4f} | Train Acc: {epoch_acc:.4f}"
         )
 
-    print("\n--- Training Complete ---")
+    print()
+    logger.info("Training Complete")
 
     model.eval()
     val_loss = 0.0
@@ -107,8 +115,8 @@ def main() -> None:
             val_correct += (predictions == labels).sum().item()
             val_total += labels.size(0)
 
-    print(f"[*] Final Test Loss: {val_loss / val_total:.4f}")
-    print(f"Final Test Acc: {val_correct / val_total:.4f}")
+    logger.info(f"Final Test Loss: {val_loss / val_total:.4f}")
+    logger.info(f"Final Test Acc: {val_correct / val_total:.4f}")
 
 
 if __name__ == "__main__":
