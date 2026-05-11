@@ -29,7 +29,7 @@ class LeNetFeatureExtractor(nn.Module):
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=1),
             # Block 4
-            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=1),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=1),
             nn.ReLU(),
         )
 

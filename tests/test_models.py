@@ -24,8 +24,8 @@ def test_feature_extractor_output_shape(batch_size: int) -> None:
 
     output = extractor(dummy_input)
 
-    # Expected shape based on 4 Convs and 3 MaxPools is [Batch, 64, 7, 7]
-    expected_shape = (batch_size, 64, 7, 7)
+    # Expected shape based on 4 Convs and 3 MaxPools is [Batch, 64, 6, 6]
+    expected_shape = (batch_size, 64, 6, 6)
     assert output.shape == expected_shape, (
         f"Expected {expected_shape}, got {output.shape}",
     )
@@ -37,7 +37,7 @@ def test_classifier_head_output_shape_and_bounds(batch_size: int) -> None:
     a valid probability bounded between 0.0 and 1.0.
     """
     # 64 channels * 7 height * 7 width = 3164 features
-    in_features = 3136
+    in_features = 2304
     dummy_flattened_features = torch.randn(batch_size, in_features)
     head = ClassicalClassifierHead(in_features=in_features)
 
@@ -61,7 +61,7 @@ def test_dementia_classifier_integration(batch_size: int) -> None:
     """
     dummy_input = torch.randn(batch_size, 1, 128, 128)
     extractor = LeNetFeatureExtractor()
-    head = ClassicalClassifierHead(in_features=3136)
+    head = ClassicalClassifierHead(in_features=2304)
     model = DementiaClassifier(feature_extractor=extractor, classifier_head=head)
 
     output = model(dummy_input)

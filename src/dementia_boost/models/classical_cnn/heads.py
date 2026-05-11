@@ -11,7 +11,7 @@ class ClassicalClassifierHead(nn.Module):
     indicating the likelihood of dementia.
     """
 
-    def __init__(self, in_features: int = 64 * 7 * 7) -> None:
+    def __init__(self, in_features: int = 64 * 6 * 6) -> None:
         """
         Initializes the classification head.
 
