@@ -18,19 +18,19 @@ class LeNetFeatureExtractor(nn.Module):
         self.features = nn.Sequential(
             # Block 1
             nn.Conv2d(in_channels=1, out_channels=8, kernel_size=4, stride=2),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=1),
             # Block 2
             nn.Conv2d(in_channels=8, out_channels=16, kernel_size=8, stride=2),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=1),
             # Block 3
             nn.Conv2d(in_channels=16, out_channels=32, kernel_size=8, stride=2),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=1),
             # Block 4
             nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=1),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
         )
 
     def forward(self, x: Tensor) -> Tensor:
