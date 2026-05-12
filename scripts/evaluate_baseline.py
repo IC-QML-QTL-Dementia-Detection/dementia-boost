@@ -23,7 +23,7 @@ def get_device() -> torch.device:
 
 
 def main() -> None:
-    logger = setup_logger(__name__)
+    logger = setup_logger("evaluate_baseline")
     device = get_device()
     models_dir = "./data/results/trained_models"
     results_dir = "./data/results/metrics"
@@ -44,7 +44,8 @@ def main() -> None:
         classifier_head=ClassicalClassifierHead(),
     )
 
-    loader_manager = OasisDataLoader(batch_size=64)
+    batch_size = 64
+    loader_manager = OasisDataLoader(batch_size=batch_size)
     test_loader = loader_manager.get_data_loader(is_train=False)
     evaluator = ModelEvaluator(model=base_model, device=device)
 
@@ -72,12 +73,24 @@ def main() -> None:
     logger.info(f"Success! Batch evaluation complete. Results saved to {output_json}")
 
     logger.info(
-        f"Mean AUC: {aggregated_stats['auc'].mean:.4f} "
-        f"\\pm {aggregated_stats['auc'].std:.4f}"
-    )
-    logger.info(
         f"Mean Acc: {aggregated_stats['accuracy'].mean:.4f} "
         f"\\pm {aggregated_stats['accuracy'].std:.4f}"
+    )
+    logger.info(
+        f"Mean Precision: {aggregated_stats['precision'].mean:.4f} "
+        f"\\pm {aggregated_stats['precision'].std:.4f}"
+    )
+    logger.info(
+        f"Mean Recall: {aggregated_stats['recall'].mean:.4f} "
+        f"\\pm {aggregated_stats['recall'].std:.4f}"
+    )
+    logger.info(
+        f"Mean F1: {aggregated_stats['f1_score'].mean:.4f} "
+        f"\\pm {aggregated_stats['f1_score'].std:.4f}"
+    )
+    logger.info(
+        f"Mean AUC: {aggregated_stats['auc'].mean:.4f} "
+        f"\\pm {aggregated_stats['auc'].std:.4f}"
     )
 
 
