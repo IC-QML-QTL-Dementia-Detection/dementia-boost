@@ -54,11 +54,10 @@ def main() -> None:
     y_true, y_prob = evaluator.predict(test_loader)
 
     logger.info("Calculating metrics...")
-    metrics = MetricsAnalyzer.calculate_metrics(y_true, y_prob)
+    metrics = MetricsAnalyzer.calculate_metrics("seed_1", y_true, y_prob)
 
     logger.info("\n--- Evaluation Results ---")
-    for key, value in metrics.items():
-        logger.info(f"{key.capitalize():<16}: {value}")
+    logger.info(metrics)
 
 
 if __name__ == "__main__":
