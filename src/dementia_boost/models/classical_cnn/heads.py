@@ -17,7 +17,7 @@ class ClassicalClassifierHead(nn.Module):
 
         Args:
             in_features (int): The number of features received from the flattened
-                output of the feature extractor. Defaults to 3136 (64 * 7 * 7).
+                output of the feature extractor. Defaults to 2304 (64 * 6 * 6).
         """
         super().__init__()
 

@@ -36,7 +36,7 @@ def test_classifier_head_output_shape_and_bounds(batch_size: int) -> None:
     Ensures the Dense head accepts the flattened features and outputs
     a valid probability bounded between 0.0 and 1.0.
     """
-    # 64 channels * 7 height * 7 width = 3164 features
+    # 64 channels * 6 height * 6 width = 2304 features
     in_features = 2304
     dummy_flattened_features = torch.randn(batch_size, in_features)
     head = ClassicalClassifierHead(in_features=in_features)
