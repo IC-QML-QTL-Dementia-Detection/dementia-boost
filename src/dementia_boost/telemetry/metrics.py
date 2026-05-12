@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -9,6 +10,30 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
+
+
+@dataclass
+class EvaluationResult:
+    """DTO for a single model's evaluation metrics."""
+
+    run_id: str
+    accuracy: float
+    precision: float
+    recall: float
+    f1_score: float
+    auc: float
+    confusion_matrix: list[list[int]]
+
+
+@dataclass
+class AggregateMetrics:
+    """DTO for statistical aggregations across multiple runs."""
+
+    metric_name: str
+    mean: float
+    std: float
+    min_val: float
+    max_val: float
 
 
 class MetricsAnalyzer:
