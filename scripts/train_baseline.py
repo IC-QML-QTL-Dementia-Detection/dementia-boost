@@ -25,10 +25,13 @@ def get_device() -> torch.device:
 def main() -> None:
     logger = setup_logger("baseline_train")
     device = get_device()
-
     logger.info(f"Target Device: {device}")
 
-    loader_manager = OasisDataLoader(batch_size=4)
+    experiment_seeds = range(1, 101)
+    epochs_per_run = 5
+    batch_size = 5
+
+    loader_manager = OasisDataLoader(batch_size=batch_size)
     train_loader = loader_manager.get_data_loader(is_train=True)
     test_loader = loader_manager.get_data_loader(is_train=False)
     logger.info(
@@ -36,34 +39,34 @@ def main() -> None:
         f"{len(test_loader)} test batches."
     )
 
-    logger.info("Starting Baseline Training")
-    set_seed(42)
+    for seed in experiment_seeds:
+        run_id = f"seed_{seed}"
+        logger.info(f"=== Starting Experiment: {run_id} ===")
+        set_seed(seed)
 
-    extractor = LeNetFeatureExtractor()
-    head = ClassicalClassifierHead()
-    model = DementiaClassifier(feature_extractor=extractor, classifier_head=head)
-    model = model.to(device)
+        model = DementiaClassifier(
+            feature_extractor=LeNetFeatureExtractor(),
+            classifier_head=ClassicalClassifierHead(),
+        ).to(device)
 
-    criterion = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
-    scheduler = StepLR(optimizer, step_size=10, gamma=0.75)
+        criterion = nn.BCELoss()
+        optimizer = optim.Adam(model.parameters(), lr=1e-4)
+        scheduler = StepLR(optimizer, step_size=10, gamma=0.75)
 
-    epochs = 5
+        trainer = BaselineTrainer(
+            model=model,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            criterion=criterion,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            device=device,
+            logger=logger,
+            save_dir="./data/results/trained_models",
+        )
 
-    trainer = BaselineTrainer(
-        model=model,
-        train_loader=train_loader,
-        test_loader=test_loader,
-        criterion=criterion,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        device=device,
-        logger=logger,
-        save_dir="./data/results/trained_models",
-    )
-
-    trainer.train(epochs=epochs, run_id="42")
-    logger.info("Completed Experiment")
+        trainer.train(epochs=epochs_per_run, run_id=run_id)
+        logger.info(f"=== Completed Experiment: {run_id} ===\n")
 
 
 if __name__ == "__main__":
