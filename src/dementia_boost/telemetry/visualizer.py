@@ -115,3 +115,73 @@ class MetricsVisualizer:
         save_path = os.path.join(self.output_dir, f"{prefix}_roc_curves.png")
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.close()
+
+    def plot_isolated_roc(self, json_filepath: str, run_id: str, prefix: str) -> None:
+        """
+        Generates a single ROC curve for a specific run and saves it.
+
+        This method extracts the ground truth labels and predicted probabilities
+        for the given run ID, computes its ROC curve, and creates a standalone
+        figure.
+        The run must exist in the JSON file and contain "y_true" and "y_prob" fields.
+
+        Args:
+            json_filepath (str): Path to the JSON file containing evaluation results.
+            run_id (str): Unique identifier of the run to plot.
+            prefix (str): Prefix used in the output filename and plot title.
+
+        Raises:
+            ValueError: If the provided run_id is not found in the JSON data.
+        """
+        with open(json_filepath) as f:
+            data = json.load(f)
+
+        run_data = self._get_run_data(data, run_id)
+
+        plt.figure(figsize=(7, 7))
+        plt.plot([0, 1], [0, 1], linestyle="--", color="gray", label="Random Guess")
+
+        fpr, tpr, _ = roc_curve(run_data["y_true"], run_data["y_prob"])
+        auc_score = run_data["auc"]
+        plt.plot(
+            fpr,
+            tpr,
+            color="darkorange",
+            linewidth=2,
+            label=f"{run_id} (AUC={auc_score:.4f})",
+        )
+
+        plt.title(f"{prefix.capitalize()} ROC Curve: {run_id}")
+        plt.xlabel("False Positive Rate")
+        plt.ylabel("True Positive Rate")
+        plt.legend(loc="lower right")
+
+        save_path = os.path.join(self.output_dir, f"{prefix}_isolated_roc_{run_id}.png")
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.close()
+
+    def _get_run_data(self, data: dict, run_id: str) -> dict:
+        """
+        Retrieves the data dictionary for a specific run from the JSON structure.
+
+        This helper method searches the "individual_runs" list for an entry with
+        the matching run_id.
+
+        Args:
+            data (dict): The full JSON data as a dictionary, expected to contain
+                an "individual_runs" key with a list of run dictionaries.
+            run_id (str): The unique identifier of the run to retrieve.
+
+        Returns:
+            dict: The run dictionary corresponding to the given run_id.
+
+        Raises:
+            ValueError: If no run with the specified run_id is found.
+        """
+        run_data = next(
+            (run for run in data.get("individual_runs", []) if run["run_id"] == run_id),
+            None,
+        )
+        if not run_data:
+            raise ValueError(f"Run ID '{run_id}' not found in the provided JSON.")
+        return run_data

@@ -11,6 +11,8 @@ def main() -> None:
     results_json_path = "./data/results/metrics/baseline_results.json"
     plots_output_dir = "./data/results/plots"
 
+    optimal_run_id = "baseline_seed_2"
+
     if not os.path.exists(results_json_path):
         logger.error(f"Results file not found at: {results_json_path}")
         logger.error("Please run evaluate_baselines.py first.")
@@ -25,6 +27,13 @@ def main() -> None:
 
         logger.info("Generating Comparative ROC Curves...")
         visualizer.plot_comparative_roc(results_json_path, prefix="baseline")
+
+        logger.info(f"Generating Isolated ROC Curve for {optimal_run_id}...")
+        visualizer.plot_isolated_roc(
+            results_json_path,
+            run_id=optimal_run_id,
+            prefix="baseline",
+        )
 
         logger.info("Success! All baseline visualizations have been generated.")
     except Exception as e:
