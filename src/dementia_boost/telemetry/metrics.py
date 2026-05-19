@@ -94,9 +94,9 @@ class MetricsAnalyzer:
         return EvaluationResult(
             run_id=run_id,
             accuracy=float(accuracy_score(y_true, y_pred)),
-            precision=float(precision_score(y_true, y_pred, zero_division="warn")),
-            recall=float(recall_score(y_true, y_pred, zero_division="warn")),
-            f1_score=float(f1_score(y_true, y_pred, zero_division="warn")),
+            precision=float(precision_score(y_true, y_pred, zero_division=0)),  # type: ignore
+            recall=float(recall_score(y_true, y_pred, zero_division=0)),  # type: ignore
+            f1_score=float(f1_score(y_true, y_pred, zero_division=0)),  # type: ignore
             auc=float(roc_auc_score(y_true, y_prob)),
             confusion_matrix=confusion_matrix(y_true, y_pred).tolist(),
             y_true=y_true.astype(int).tolist(),
