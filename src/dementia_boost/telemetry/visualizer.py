@@ -105,7 +105,12 @@ class MetricsVisualizer:
         plt.title(f"{prefix.capitalize()} ROC Curves Across Seeds")
         plt.xlabel("False Positive Rate")
         plt.ylabel("True Positive Rate")
-        plt.legend(loc="lower right")
+        plt.legend(
+            bbox_to_anchor=(1.05, 1),
+            loc="upper left",
+            fontsize="small",
+            borderaxespad=0,
+        )
 
         save_path = os.path.join(self.output_dir, f"{prefix}_roc_curves.png")
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
