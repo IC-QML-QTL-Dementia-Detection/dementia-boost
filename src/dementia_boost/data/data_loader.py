@@ -1,5 +1,6 @@
 import os
 
+import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -52,11 +53,13 @@ class OasisDataLoader:
             transform=self._get_transform(),
         )
 
+        use_pin_memory = torch.cuda.is_available() or torch.backends.mps.is_available()
+
         return DataLoader(
             dataset,
             batch_size=self._batch_size,
             shuffle=is_train,
-            pin_memory=True,
+            pin_memory=use_pin_memory,
         )
 
     def _get_transform(self) -> transforms.Compose:
