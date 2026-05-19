@@ -61,7 +61,14 @@ class MetricsVisualizer:
         df = pd.DataFrame(records)
 
         plt.figure(figsize=(10, 6))
-        sns.boxplot(data=df, x="Metric", y="Score", palette="Set2")
+        sns.boxplot(
+            data=df,
+            x="Metric",
+            y="Score",
+            hue="Metric",
+            palette="Set2",
+            legend=False,
+        )
         sns.stripplot(data=df, x="Metric", y="Score", color=".25", size=6, jitter=True)
 
         plt.title(f"{prefix.capitalize()} Model Metrics Distribution across Seeds")
