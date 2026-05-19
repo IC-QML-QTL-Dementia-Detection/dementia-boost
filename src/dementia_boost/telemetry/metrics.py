@@ -25,6 +25,8 @@ class EvaluationResult:
         f1_score (float): Harmonic mean of precision and recall.
         auc (float): Area under the ROC curve.
         confusion_matrix (list[list[int]]): 2x2 confusion matrix as nested list.
+        y_true (list[int]): The ground-truth binary labels.
+        y_prob (list[float]): The raw probabilities from the model.
     """
 
     run_id: str
@@ -34,6 +36,8 @@ class EvaluationResult:
     f1_score: float
     auc: float
     confusion_matrix: list[list[int]]
+    y_true: list[int]
+    y_prob: list[float]
 
 
 @dataclass
@@ -95,6 +99,8 @@ class MetricsAnalyzer:
             f1_score=float(f1_score(y_true, y_pred, zero_division="warn")),
             auc=float(roc_auc_score(y_true, y_prob)),
             confusion_matrix=confusion_matrix(y_true, y_pred).tolist(),
+            y_true=y_true.astype(int).tolist(),
+            y_prob=y_prob.astype(float).tolist(),
         )
 
     @staticmethod
