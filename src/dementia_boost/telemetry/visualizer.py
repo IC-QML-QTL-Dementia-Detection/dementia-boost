@@ -2,6 +2,7 @@ import json
 import os
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.metrics import roc_curve
@@ -157,6 +158,55 @@ class MetricsVisualizer:
         plt.legend(loc="lower right")
 
         save_path = os.path.join(self.output_dir, f"{prefix}_isolated_roc_{run_id}.png")
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.close()
+
+    def plot_confusion_matrix(
+        self,
+        json_filepath: str,
+        run_id: str,
+        prefix: str,
+    ) -> None:
+        """
+        Generates and saves a heatmap of the confusion matrix for a specific run.
+
+        The confusion matrix is extracted from the JSON data for the given run_id
+        and plotted as a seaborn heatmap. The plot uses the predefined class labels
+        "Non-Demented" and "Demented".
+
+        Args:
+            json_filepath (str): Path to the JSON file containing evaluation results.
+                The file must have an "individual_runs" list, and the specified run
+                must contain a "confusion_matrix" key with a 2x2 integer matrix.
+            run_id (str): Unique identifier of the run whose confusion matrix will
+                be plotted.
+            prefix (str): Prefix used in the output filename and plot title.
+
+        Raises:
+            ValueError: If the provided run_id is not found in the JSON data.
+        """
+        with open(json_filepath) as f:
+            data = json.load(f)
+
+        run_data = self._get_run_data(data, run_id)
+        cm = np.array(run_data["confusion_matrix"])
+
+        plt.figure(figsize=(6, 5))
+        sns.heatmap(
+            cm,
+            annot=True,
+            fmt="d",
+            cmap="Blues",
+            cbar=False,
+            xticklabels=["Non-Demented", "Demented"],
+            yticklabels=["Non-Demented", "Demented"],
+        )
+
+        plt.title(f"{prefix.capitalize()} Confusion Matrix: {run_id}")
+        plt.ylabel("Actual Diagnosis")
+        plt.xlabel("Predicted Diagnosis")
+
+        save_path = os.path.join(self.output_dir, f"{prefix}_cm_{run_id}.png")
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.close()
 

@@ -35,6 +35,13 @@ def main() -> None:
             prefix="baseline",
         )
 
+        logger.info(f"Generating Confusion Matrix Heatmap for {optimal_run_id}...")
+        visualizer.plot_confusion_matrix(
+            results_json_path,
+            run_id=optimal_run_id,
+            prefix="baseline",
+        )
+
         logger.info("Success! All baseline visualizations have been generated.")
     except Exception as e:
         logger.error(f"Failed to generate plots: {e}")
