@@ -14,3 +14,6 @@ wheels/
 
 # Dataset
 data/
+
+# Logs
+logs/

@@ -1,19 +1,17 @@
 [project]
 name = "dementia-boost"
-version = "1.0.0"
+version = "1.2.0"
 description = "QML for classifying patients with dementia "
 readme = "README.md"
-authors = [
-    { name = "Kaue Miziara", email = "kauemiziara@gmail.com" },
-    { name = "Julia Santos", email = "juliasantos7652@gmail.com" },
-    { name = "Guilherme Pagani", email = "guilhermemoraespagani@gmail.com" },
-]
+authors = [{ name = "Kaue Miziara", email = "kauemiziara@gmail.com" }]
 requires-python = ">=3.14"
 dependencies = [
     "matplotlib>=3.10.8",
     "nibabel>=5.4.2",
     "numpy>=2.4.3",
     "pandas>=3.0.1",
+    "scikit-learn>=1.8.0",
+    "seaborn>=0.13.2",
     "torch>=2.10.0",
     "torchvision>=0.25.0",
 ]
@@ -23,7 +21,7 @@ requires = ["uv_build>=0.9.22,<0.10.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = ["pre-commit>=4.5.1", "ruff>=0.15.2"]
+dev = ["pre-commit>=4.5.1", "pytest>=9.0.3", "ruff>=0.15.2"]
 
 
 [tool.ruff]
