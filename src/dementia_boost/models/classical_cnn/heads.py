@@ -43,14 +43,17 @@ class ClassicalClassifierHead(nn.Module):
         """
         return self.classifier(x)
 
-    def init_weights_glorot(self) -> None:
+    @staticmethod
+    def apply_glorot_init(module: nn.Module) -> None:
         """
         Applies Glorot (Xavier) Uniform initialization to the linear layers
         and zeroes the biases.
-        """
-        for module in self.classifier.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
+        Designed to be passed into PyTorch's native model.apply() method.
 
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
+        Args:
+            module (nn.Module): The current PyTorch submodule being evaluated.
+        """
+        if isinstance(module, nn.Linear):
+            nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
