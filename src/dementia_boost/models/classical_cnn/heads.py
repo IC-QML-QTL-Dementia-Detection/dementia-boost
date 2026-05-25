@@ -42,3 +42,15 @@ class ClassicalClassifierHead(nn.Module):
             Tensor: A probability vector of shape (Batch, 1) bounded between [0.0, 1.0].
         """
         return self.classifier(x)
+
+    def init_weights_glorot(self) -> None:
+        """
+        Applies Glorot (Xavier) Uniform initialization to the linear layers
+        and zeroes the biases.
+        """
+        for module in self.classifier.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
