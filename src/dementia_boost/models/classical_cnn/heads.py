@@ -11,24 +11,31 @@ class ClassicalClassifierHead(nn.Module):
     indicating the likelihood of dementia.
     """
 
-    def __init__(self, in_features: int = 2304) -> None:
+    def __init__(self, in_features: int = 2304, use_sigmoid: bool = True) -> None:
         """
         Initializes the classification head.
 
         Args:
             in_features (int): The number of features received from the flattened
                 output of the feature extractor. Defaults to 2304 (64 * 6 * 6).
+
+            use_sigmoid (bool): Whether there should be a Sigmoid activation function
+                or not.
         """
         super().__init__()
 
-        self.classifier = nn.Sequential(
+        layers: list[nn.Module] = [
             nn.Flatten(),
             nn.Linear(in_features=in_features, out_features=5),
             nn.Dropout(p=0.5),
             nn.ReLU(inplace=True),
             nn.Linear(in_features=5, out_features=1),
-            nn.Sigmoid(),
-        )
+        ]
+
+        if use_sigmoid:
+            layers.append(nn.Sigmoid())
+
+        self.classifier = nn.Sequential(*layers)
 
     def forward(self, x: Tensor) -> Tensor:
         """
