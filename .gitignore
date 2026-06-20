@@ -13,7 +13,7 @@ wheels/
 .env
 
 # Dataset
-data/
+/data/
 
 # Logs
 logs/
