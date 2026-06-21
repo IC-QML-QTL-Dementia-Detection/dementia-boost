@@ -14,7 +14,7 @@ def main() -> None:
     indexer.index_and_split(
         split_ratio=0.7,
         seed=158,
-        manual_train_ids=[],
+        manual_train_ids=["Oas_001", "OAS_0002"],
         manual_test_ids=[],
     )
 
