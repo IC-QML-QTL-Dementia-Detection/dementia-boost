@@ -144,7 +144,7 @@ class OasisDataLoader:
         Defines the sequence of image transformations for JPG images.
 
         The pipeline includes:
-        1. Resizing to 64x64 pixels.
+        1. Resizing to 128x128 pixels.
         2. Random horizontal flip (only during training).
         3. Conversion to tensor.
         4. Normalization with mean=0.45 and std=0.5.
@@ -157,7 +157,7 @@ class OasisDataLoader:
             transforms.Compose: A composed torchvision transform.
         """
         transform_list: list[Any] = [
-            transforms.Resize((64, 64)),
+            transforms.Resize((128, 128)),
         ]
 
         if is_train:
