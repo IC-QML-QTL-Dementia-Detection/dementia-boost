@@ -41,7 +41,7 @@ def main() -> None:
 
     base_model = DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
-        classifier_head=ClassicalClassifierHead(),
+        classifier_head=ClassicalClassifierHead(use_sigmoid=False),
     )
 
     batch_size = 64

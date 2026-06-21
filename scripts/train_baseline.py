@@ -46,10 +46,10 @@ def main() -> None:
 
         model = DementiaClassifier(
             feature_extractor=LeNetFeatureExtractor(),
-            classifier_head=ClassicalClassifierHead(),
+            classifier_head=ClassicalClassifierHead(use_sigmoid=False),
         ).to(device)
 
-        criterion = nn.BCELoss()
+        criterion = nn.BCEWithLogitsLoss()
         optimizer = optim.Adam(model.parameters(), lr=1e-4)
         scheduler = StepLR(optimizer, step_size=10, gamma=0.75)
 

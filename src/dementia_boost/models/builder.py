@@ -11,6 +11,7 @@ from .classical_cnn import (
 def build_classical_tl_model(
     baseline_weights_path: str,
     device: torch.device,
+    use_sigmoid: bool = False,
 ) -> nn.Module:
     """
     Builds a Classical Transfer Learning model by loading a pre-trained baseline,
@@ -19,6 +20,8 @@ def build_classical_tl_model(
     Args:
         baseline_weights_path (str): Filepath to the saved baseline .pt file.
         device (torch.device): The target hardware accelerator.
+        use_sigmoid (bool): Whether there should be a Sigmoid activation function
+            or not.
 
     Returns:
         nn.Module: The prepared model, ready for fine-tuning.
@@ -26,7 +29,7 @@ def build_classical_tl_model(
 
     model = DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
-        classifier_head=ClassicalClassifierHead(),
+        classifier_head=ClassicalClassifierHead(use_sigmoid=use_sigmoid),
     )
 
     state_dict = torch.load(

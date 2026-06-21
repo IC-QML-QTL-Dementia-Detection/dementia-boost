@@ -45,7 +45,7 @@ def main() -> None:
 
     base_model = DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
-        classifier_head=ClassicalClassifierHead(),
+        classifier_head=ClassicalClassifierHead(use_sigmoid=False),
     )
 
     loader_manager = OasisDataLoader(batch_size=batch_size)

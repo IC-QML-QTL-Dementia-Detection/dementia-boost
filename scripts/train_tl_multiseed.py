@@ -66,7 +66,7 @@ def main() -> None:
         trainable_params = filter(lambda p: p.requires_grad, model.parameters())
         optimizer = optim.Adam(trainable_params, lr=1e-4)
 
-        criterion = nn.BCELoss()
+        criterion = nn.BCEWithLogitsLoss()
         scheduler = StepLR(optimizer, step_size=10, gamma=0.75)
 
         trainer = BaselineTrainer(
