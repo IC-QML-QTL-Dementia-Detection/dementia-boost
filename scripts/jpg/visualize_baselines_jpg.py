@@ -11,7 +11,7 @@ def main() -> None:
     results_json_path = "./data/results/metrics/jpg/baseline_results.json"
     plots_output_dir = "./data/results/plots/jpg"
 
-    optimal_run_id = "baseline_seed_2"
+    optimal_run_id = "baseline_seed_158"
 
     if not os.path.exists(results_json_path):
         logger.error(f"Results file not found at: {results_json_path}")

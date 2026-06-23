@@ -11,7 +11,7 @@ def main() -> None:
     results_json_path = "./data/results/metrics/jpg/tl_results.json"
     plots_output_dir = "./data/results/plots/jpg/tl"
 
-    optimal_seed = "baseline_tl_seed_2"
+    optimal_seed = "baseline_tl_seed_158"
 
     if not os.path.exists(results_json_path):
         logger.error(f"Results file not found at: {results_json_path}")
