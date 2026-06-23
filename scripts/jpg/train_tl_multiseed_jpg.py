@@ -27,7 +27,7 @@ def main() -> None:
 
     baseline_dir = "./data/results/trained_models/jpg"
     tl_save_dir = "./data/results/trained_tl_models/jpg"
-    epochs = 5
+    epochs = 100
     batch_size = 64
 
     os.makedirs(tl_save_dir, exist_ok=True)

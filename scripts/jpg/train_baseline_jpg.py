@@ -28,7 +28,7 @@ def main() -> None:
     logger.info(f"Target Device: {device}")
 
     experiment_seeds = range(1, 101)
-    epochs_per_run = 5
+    epochs_per_run = 100
     batch_size = 64
 
     loader_manager = OasisDataLoader(batch_size=batch_size, mode="jpg")
