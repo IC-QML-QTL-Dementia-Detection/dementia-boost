@@ -2,8 +2,11 @@ import glob
 import os
 from collections.abc import Callable
 
+import torch
+from PIL import Image
 from torch import Tensor, load
 from torch.utils.data import Dataset
+from torchvision.transforms import ToTensor
 
 
 class OasisDataset(Dataset):
@@ -50,3 +53,50 @@ class OasisDataset(Dataset):
             img = self.transform(img)
 
         return img, target
+
+
+class JpgOasisDataset(Dataset):
+    """
+    Custom PyTorch Dataset to load JPG images dynamically using PIL.
+    """
+
+    def __init__(
+        self,
+        samples: list[tuple[str, int]],
+        transform: Callable | None = None,
+    ) -> None:
+        """
+        Args:
+            samples: A list of tuples containing (image_path, binary_label).
+            transform: Optional callable transform to apply to the data.
+        """
+        self.samples = samples
+        self.transform = transform
+
+    def __len__(self) -> int:
+        """
+        Returns the total number of samples in the dataset.
+        """
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> tuple[Tensor, Tensor]:
+        """
+        Retrieves the image from disk, converts to grayscale, applies transforms,
+        and returns the tensor paired with its float label.
+
+        Args:
+            `idx`: The index of the item to retrieve.
+
+        Returns:
+            A tensor containing the transformed image tensor and its label.
+        """
+        img_path, label = self.samples[idx]
+
+        image = Image.open(img_path).convert("L")
+
+        if self.transform:
+            tensor_image = self.transform(image)
+        else:
+            tensor_image = ToTensor()(image)
+
+        return tensor_image, torch.tensor(label, dtype=torch.float32)

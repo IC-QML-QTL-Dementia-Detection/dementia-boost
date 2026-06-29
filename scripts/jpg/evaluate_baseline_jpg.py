@@ -23,10 +23,10 @@ def get_device() -> torch.device:
 
 
 def main() -> None:
-    logger = setup_logger("evaluate_baseline")
+    logger = setup_logger("evaluate_baseline_jpg")
     device = get_device()
-    models_dir = "./data/results/trained_models"
-    results_dir = "./data/results/metrics"
+    models_dir = "./data/results/trained_models/jpg"
+    results_dir = "./data/results/metrics/jpg"
 
     os.makedirs(results_dir, exist_ok=True)
 
@@ -45,7 +45,7 @@ def main() -> None:
     )
 
     batch_size = 64
-    loader_manager = OasisDataLoader(batch_size=batch_size)
+    loader_manager = OasisDataLoader(batch_size=batch_size, mode="jpg")
     test_loader = loader_manager.get_data_loader(is_train=False)
     evaluator = ModelEvaluator(model=base_model, device=device)
 

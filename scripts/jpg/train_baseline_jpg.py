@@ -23,15 +23,15 @@ def get_device() -> torch.device:
 
 
 def main() -> None:
-    logger = setup_logger("baseline_train")
+    logger = setup_logger("baseline_train_jpg")
     device = get_device()
     logger.info(f"Target Device: {device}")
 
     experiment_seeds = range(1, 101)
-    epochs_per_run = 5
-    batch_size = 5
+    epochs_per_run = 100
+    batch_size = 64
 
-    loader_manager = OasisDataLoader(batch_size=batch_size)
+    loader_manager = OasisDataLoader(batch_size=batch_size, mode="jpg")
     train_loader = loader_manager.get_data_loader(is_train=True)
     test_loader = loader_manager.get_data_loader(is_train=False)
     logger.info(
@@ -62,7 +62,7 @@ def main() -> None:
             scheduler=scheduler,
             device=device,
             logger=logger,
-            save_dir="./data/results/trained_models",
+            save_dir="./data/results/trained_models/jpg",
         )
 
         trainer.train(epochs=epochs_per_run, run_id=run_id)

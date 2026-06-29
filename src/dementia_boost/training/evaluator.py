@@ -54,7 +54,8 @@ class ModelEvaluator:
             for images, labels in data_loader:
                 images = images.to(self.device)
 
-                probs = self.model(images).squeeze(dim=1)
+                logits = self.model(images).squeeze(dim=1)
+                probs = torch.sigmoid(logits)
 
                 all_probs.extend(probs.cpu().numpy())
                 all_labels.extend(labels.numpy())
