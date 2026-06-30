@@ -1,5 +1,6 @@
 import pennylane as qml
 import torch
+import torch.nn as nn
 from pennylane.measurements import ExpectationMP
 from pennylane.qnn.torch import TorchLayer
 
@@ -27,7 +28,7 @@ def create_quantum_layer(
 
     weight_shapes = {"weights": (n_layers, 2, n_qubits)}
     init_method = {
-        "weights": lambda shape: (torch.rand(shape) * 2 * torch.pi) - torch.pi
+        "weights": lambda tensor: nn.init.uniform_(tensor, a=-torch.pi, b=torch.pi)
     }
 
     return TorchLayer(qnode, weight_shapes=weight_shapes, init_method=init_method)
@@ -52,7 +53,7 @@ def _build_custom_ansatz(
         list[ExpectationMP]: A list of expectation values for all qubits.
     """
     for i in range(n_qubits):
-        qml.RZ(inputs[i], wires=i)  # type: ignore
+        qml.RZ(inputs[:, i], wires=i)  # type: ignore
 
     for layer in range(n_layers):
         for i in range(n_qubits):
