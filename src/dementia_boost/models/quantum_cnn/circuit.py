@@ -20,7 +20,13 @@ def create_quantum_layer(
     Returns:
         TorchLayer: A PyTorch-compatible NN layer executing the quantum circuit.
     """
-    device = qml.device("default.qubit", wires=n_qubits)
+    try:
+        device = qml.device("lightning.gpu", wires=n_qubits)
+    except Exception:
+        try:
+            device = qml.device("lightning.qubit", wires=n_qubits)
+        except Exception:
+            device = qml.device("default.qubit", wires=n_qubits)
 
     @qml.qnode(device, interface="torch", diff_method="adjoint")
     def qnode(inputs: torch.Tensor, weights: torch.Tensor) -> list[ExpectationMP]:
