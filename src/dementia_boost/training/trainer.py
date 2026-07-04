@@ -82,6 +82,7 @@ class BaselineTrainer:
                 self.optimizer.zero_grad()
 
                 outputs = self.model(images)
+                labels = labels.view(-1, 1).float()
                 loss = self.criterion(outputs, labels)
 
                 loss.backward()
