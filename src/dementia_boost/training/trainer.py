@@ -77,19 +77,17 @@ class BaselineTrainer:
 
             for images, labels in self.train_loader:
                 images = images.to(self.device)
-                labels = labels.float().unsqueeze(1).to(self.device)
+                labels = labels.float().view(-1, 1).to(self.device)
 
                 self.optimizer.zero_grad()
 
                 outputs = self.model(images)
-                labels = labels.view(-1, 1).float()
                 loss = self.criterion(outputs, labels)
 
                 loss.backward()
                 self.optimizer.step()
 
-                running_loss += loss.item() * images.size(0)
-                predictions = outputs.round()
+                predictions = (outputs >= 0.0).float()
                 correct_preds += (predictions == labels).sum().item()
                 total_samples += labels.size(0)
 
@@ -124,13 +122,14 @@ class BaselineTrainer:
         with torch.no_grad():
             for images, labels in self.test_loader:
                 images = images.to(self.device)
-                labels = labels.float().unsqueeze(1).to(self.device)
+                labels = labels.float().view(-1, 1).to(self.device)
 
                 outputs = self.model(images)
                 loss = self.criterion(outputs, labels)
 
                 val_loss += loss.item() * images.size(0)
-                predictions = outputs.round()
+
+                predictions = (outputs >= 0.0).float()
                 val_correct += (predictions == labels).sum().item()
                 val_total += labels.size(0)
 
