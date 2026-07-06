@@ -87,6 +87,8 @@ class BaselineTrainer:
                 loss.backward()
                 self.optimizer.step()
 
+                running_loss += loss.item() * images.size(0)
+
                 predictions = (outputs >= 0.0).float()
                 correct_preds += (predictions == labels).sum().item()
                 total_samples += labels.size(0)
