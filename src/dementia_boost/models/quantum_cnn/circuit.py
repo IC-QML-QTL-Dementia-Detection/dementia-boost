@@ -32,7 +32,8 @@ def create_quantum_layer(
     def qnode(inputs: torch.Tensor, weights: torch.Tensor) -> list[ExpectationMP]:
         return _build_custom_ansatz(inputs, weights, n_qubits, n_layers)
 
-    weight_shapes = {"weights": (n_layers, 2, n_qubits)}
+    n_parameters = 3
+    weight_shapes = {"weights": (n_layers, n_parameters, n_qubits)}
     init_method = {
         "weights": lambda tensor: nn.init.uniform_(tensor, a=-torch.pi, b=torch.pi)
     }
@@ -70,7 +71,11 @@ def _build_custom_ansatz(
             qml.CNOT(wires=[i, target])
 
         for i in range(n_qubits):
-            target = (i + 1) % n_qubits
-            qml.CRY(weights[layer, 1, i], wires=[i, target])
+            qml.RZ(weights[layer, 1, i], wires=i)  # type: ignore
+
+        for i in range(n_qubits):
+            control = (i + 1) % n_qubits
+            target = i
+            qml.CRY(weights[layer, 2, target], wires=[control, target])
 
     return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
