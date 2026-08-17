@@ -17,3 +17,6 @@ wheels/
 
 # Logs
 logs/
+
+# Paper
+docs/qtl_to_boost_dementia_detection.md
