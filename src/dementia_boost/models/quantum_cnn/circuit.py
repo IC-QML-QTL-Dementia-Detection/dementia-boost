@@ -1,3 +1,11 @@
+"""PennyLane variational quantum circuit (VQC) ansatz and PyTorch layer bridge.
+
+This module constructs the custom variational ansatz described by Bhowmik et al.
+(2025), implementing angle embedding via RZ rotations, an entangling ring of CNOT
+gates, parameterized RZ and controlled-RY gates, and Pauli-Z expectation value
+measurements wrapped in a PyTorch `TorchLayer`.
+"""
+
 import pennylane as qml
 import torch
 import torch.nn as nn
@@ -9,16 +17,19 @@ def create_quantum_layer(
     n_qubits: int = 6,
     n_layers: int = 4,
 ) -> TorchLayer:
-    """
-    Factory function to instantiate the PennyLane QNode and wrap it as a PyTorch Module.
-    Uses the 'default.qubit' ideal simulator.
+    """Factory function instantiating a PennyLane QNode as a PyTorch Module.
+
+    Attempts to attach high-performance state-vector backends (`lightning.gpu`,
+    `lightning.qubit`) before falling back to `default.qubit`. Configures the
+    QNode with adjoint differentiation and uniform parameter initialization
+    over `[-pi, pi]`.
 
     Args:
-        n_qubits (int): Number of qubits. Defaults to 6.
-        n_layers (int): Number of Ansatz repetitions. Defaults to 4.
+        n_qubits: Number of qubits in the circuit. Defaults to 6.
+        n_layers: Number of Ansatz layer repetitions. Defaults to 4.
 
     Returns:
-        TorchLayer: A PyTorch-compatible NN layer executing the quantum circuit.
+        A PyTorch-compatible TorchLayer executing the quantum circuit.
     """
     try:
         device = qml.device("lightning.gpu", wires=n_qubits)
@@ -47,17 +58,28 @@ def _build_custom_ansatz(
     n_qubits: int,
     n_layers: int,
 ) -> list[ExpectationMP]:
-    """
-    Builds the custom quantum circuit used in the base paper.
+    """Constructs the parameterized quantum circuit ansatz.
+
+    Implements initial state preparation using RZ angle embedding of the scaled
+    classical input features, followed by `n_layers` repetitions of:
+    1. Parameterized RZ rotation on each qubit: `RZ(weights[layer, 0, i])`
+    2. Entangling ring of CNOT gates between adjacent qubits: `CNOT(i, (i + 1) % n)`
+    3. Second parameterized RZ rotation on each qubit: `RZ(weights[layer, 1, i])`
+    4. Entangling controlled-RY gate:
+       `CRY(weights[layer, 2, i], wires=[(i + 1) % n, i])`
+
+    Finally measures the expectation value of the Pauli-Z observable on every
+    qubit.
 
     Args:
-        inputs (torch.Tensor): The scaled classical data mapped to [-pi/2, pi/2].
-        weights (torch.Tensor): The trainable parameters, shape (n_layers, 2, n_qubits).
-        n_qubits (int): The number of qubits in the circuit.
-        n_layers (int): The number of Ansatz repetitions.
+        inputs: Scaled classical feature tensor of shape `(Batch, n_qubits)`
+            bounded in `[-pi/2, pi/2]`.
+        weights: Trainable parameter tensor of shape `(n_layers, 3, n_qubits)`.
+        n_qubits: Number of qubits in the quantum circuit.
+        n_layers: Number of ansatz layer repetitions.
 
     Returns:
-        list[ExpectationMP]: A list of expectation values for all qubits.
+        A list of PennyLane Pauli-Z expectation measurements for all qubits.
     """
     for i in range(n_qubits):
         qml.RZ(inputs[:, i], wires=i)  # type: ignore

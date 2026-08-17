@@ -1,3 +1,10 @@
+"""Regex patient ID indexer and immutable train/test CSV split generator.
+
+This module provides the `JpgDataIndexer` class to parse patient identifiers
+from 2D MRI JPG filenames, enforce subject-level train/test isolation, and
+generate immutable index CSV files for downstream PyTorch DataLoaders.
+"""
+
 import csv
 import os
 import random
@@ -6,29 +13,24 @@ from collections import defaultdict
 
 
 class JpgDataIndexer:
-    """
-    Parses JPG filenames to extract Patient IDs, splits the dataset
-    by patient to prevent leakage, and saves an immutable CSV index.
+    """Parses JPG filenames, isolates patient cohorts, and exports CSV indexes.
 
-    The indexer expects a directory structure where each class is a subfolder
-    containing JPG files. It extracts patient IDs using a regex pattern, groups
-    files by patient, and creates train/test splits at the patient level to
-    avoid cross‑contamination.
+    Expects a directory containing class-specific subfolders of 2D MRI JPGs.
+    Extracts base patient IDs using regular expressions, groups image paths by
+    subject, applies manual overrides, and performs patient-level cohort splits
+    to prevent data leakage.
 
     Attributes:
-        raw_jpg_dir (str): Path to the directory containing class subfolders.
-        output_dir (str): Destination directory for the generated CSV index files.
+        raw_jpg_dir: Path to directory containing dataset class subfolders.
+        output_dir: Destination directory for generated CSV index files.
     """
 
     def __init__(self, raw_jpg_dir: str, output_dir: str) -> None:
-        """
-        Initializes the indexer and ensures the output directory exists.
+        """Initializes the indexer and ensures the output directory exists.
 
         Args:
-            raw_jpg_dir (str): Path to directory containing dataset folders.
-                The folder is expected to contain subfolders named after classes.
-            output_dir (str): Destination folder for the generated index CSVs.
-                The directory is created if it does not exist.
+            raw_jpg_dir: Path to directory containing dataset folders.
+            output_dir: Destination folder for the generated index CSVs.
         """
         self.raw_jpg_dir = raw_jpg_dir
         self.output_dir = output_dir
@@ -41,24 +43,21 @@ class JpgDataIndexer:
         manual_train_ids: list[str] | None = None,
         manual_test_ids: list[str] | None = None,
     ) -> None:
-        """
-        Groups images dynamically by extracted subject ID, enforces manual cohort
-        overrides, and saves separate deterministic indexing sets.
+        """Groups images by subject ID, applies overrides, and saves CSV indexes.
 
-        The method scans the raw_jpg_dir for images, extracts patient IDs,
-        and builds a dictionary mapping each patient to a list of (filepath, label).
-        It then applies manual overrides (if provided) and splits the remaining
-        subjects randomly (with a fixed seed) according to the split ratio.
+        Scans `raw_jpg_dir` for images, parses patient IDs, builds a mapping
+        from patient to `(filepath, label)`, applies manual cohort assignments,
+        and splits remaining subjects deterministically using the specified seed.
 
         Args:
-            split_ratio (float): Proportion of subjects to allocate to the training set.
-                Must be between 0 and 1. Defaults to 0.7.
-            seed (int): Random seed for reproducible shuffling. Defaults to 158.
-            manual_train_ids (list[str] | None): List of patient IDs to force into
-                the training set. Case‑insensitive. Defaults to None.
-            manual_test_ids (list[str] | None): List of patient IDs to force into
-                the test set. Case‑insensitive. Defaults to None.
-
+            split_ratio: Proportion of subjects to allocate to the training
+                cohort (between 0.0 and 1.0). Defaults to 0.7.
+            seed: Random seed for reproducible subject shuffling. Defaults
+                to 158.
+            manual_train_ids: Optional list of patient IDs forced into the
+                training cohort. Defaults to None.
+            manual_test_ids: Optional list of patient IDs forced into the
+                test cohort. Defaults to None.
         """
         manual_train: set[str] = {pid.lower() for pid in (manual_train_ids or [])}
         manual_test: set[str] = {pid.lower() for pid in (manual_test_ids or [])}
@@ -112,18 +111,16 @@ class JpgDataIndexer:
         )
 
     def _extract_patient_id(self, filename: str) -> str:
-        """
-        Extracts the base patient ID using Regex to handle naming inconsistencies.
+        """Extracts the normalized patient identifier from a filename using regex.
 
-        The method looks for a pattern matching "oas" or "oas2" followed by an
-        underscore and digits (e.g., "Oas_001", "OAS_0004", "Oas2_001"). It is
-        case‑insensitive and returns the matched ID in lowercase.
+        Matches patterns like "oas" or "oas2" followed by an underscore and
+        digits (e.g., "Oas_001", "OAS_0004", "Oas2_001").
 
         Args:
-            filename (str): The name of the JPG file (e.g., "Oas_001 (1).jpg").
+            filename: The name of the JPG image file.
 
         Returns:
-            str: The extracted patient ID in lowercase (e.g., "oas_001").
+            The extracted patient ID in lowercase.
 
         Raises:
             ValueError: If no valid patient ID pattern is found in the filename.
@@ -139,18 +136,13 @@ class JpgDataIndexer:
         ids: list[str],
         patient_dict: dict[str, list[tuple[str, int]]],
     ) -> None:
-        """
-        Writes the index for a given list of patient IDs to a CSV file.
-
-        The CSV contains two columns: "filepath" (absolute path) and "label"
-        (0 for NonDemented, 1 for Demented). Each image belonging to the listed
-        patients is written as a separate row.
+        """Writes patient image filepaths and labels to an immutable index CSV.
 
         Args:
-            filename (str): Name of the CSV file to create.
-            ids (list[str]): List of patient IDs to include in this index.
-            patient_dict (dict[str, list[tuple[str, int]]]): Dictionary mapping
-                patient IDs to lists of (filepath, label) tuples.
+            filename: Name of the CSV file to create within `output_dir`.
+            ids: List of patient IDs to include in this index.
+            patient_dict: Dictionary mapping patient IDs to lists of
+                `(filepath, label)` tuples.
         """
         filepath = os.path.join(self.output_dir, filename)
         with open(filepath, "w", newline="") as f:

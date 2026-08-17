@@ -1,3 +1,10 @@
+"""Model factory builders for Classical and Quantum Transfer Learning.
+
+This module provides factory functions to load pre-trained classical baseline CNN
+weights, freeze convolutional feature extraction layers, and attach newly initialized
+classical dense heads (CTL) or Dressed Quantum Network heads (QTL).
+"""
+
 import torch
 import torch.nn as nn
 
@@ -15,20 +22,22 @@ def build_classical_tl_model(
     device: torch.device,
     use_sigmoid: bool = False,
 ) -> nn.Module:
-    """
-    Builds a Classical Transfer Learning model by loading a pre-trained baseline,
-    freezing its convolutional backbone, and resetting its dense head.
+    """Builds a Classical Transfer Learning (CTL) model.
+
+    Loads a pre-trained baseline CNN checkpoint, freezes its convolutional
+    backbone parameters, and resets the weights of its classical dense
+    classification head using Glorot Uniform initialization.
 
     Args:
-        baseline_weights_path (str): Filepath to the saved baseline .pt file.
-        device (torch.device): The target hardware accelerator.
-        use_sigmoid (bool): Whether there should be a Sigmoid activation function
-            or not.
+        baseline_weights_path: Filepath to the saved baseline `.pt` weight file.
+        device: The target hardware accelerator device (CPU, CUDA, MPS).
+        use_sigmoid: Whether to include a Sigmoid activation function in the
+            classification head. Defaults to False.
 
     Returns:
-        nn.Module: The prepared model, ready for fine-tuning.
+        The prepared PyTorch module with frozen backbone and initialized head,
+        allocated on the target device.
     """
-
     model = DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
         classifier_head=ClassicalClassifierHead(use_sigmoid=use_sigmoid),
@@ -55,18 +64,22 @@ def build_quantum_tl_model(
     n_qubits: int,
     n_layers: int,
 ) -> nn.Module:
-    """
-    Builds a Quantum TL model by loading a pre-trained classical baseline, freezing
-    its convolutional backbone, and replacing its dense head with a Dressed QN.
+    """Builds a Quantum Transfer Learning (QTL) hybrid model.
+
+    Loads a pre-trained classical baseline CNN checkpoint, freezes its
+    convolutional backbone parameters, and substitutes its classification head
+    with a Dressed Quantum Network (pre-net + VQC + post-net) initialized
+    with Glorot Uniform weights.
 
     Args:
-        baseline_weights_path (str): Filepath to the saved baseline .pt file.
-        device (torch.device): The target hardware accelerator.
-        n_qubits (int): Number of qubits in the VQC. Defaults to 6.
-        n_layers (int): Number of repetitions in the ansatz. Defaults to 4.
+        baseline_weights_path: Filepath to the saved baseline `.pt` weight file.
+        device: The target hardware accelerator device (CPU, CUDA, MPS).
+        n_qubits: Number of qubits in the variational quantum circuit.
+        n_layers: Number of variational repetitions (depth) in the ansatz.
 
     Returns:
-        nn.Module: The prepared model, ready for fine-tuning.
+        The prepared hybrid PyTorch module with frozen backbone and initialized
+        quantum head, allocated on the target device.
     """
     model = DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
