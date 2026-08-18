@@ -1,3 +1,10 @@
+"""Standardized dual console and timestamped file logger setup.
+
+This module provides `setup_logger` to configure formatted logging streams
+that output simultaneously to standard output (sys.stdout) and unique timestamped
+log files on disk.
+"""
+
 import logging
 import os
 import sys
@@ -6,9 +13,20 @@ from pathlib import Path
 
 
 def setup_logger(name: str, log_dir: str = "logs") -> logging.Logger:
-    """
-    Configures and returns a standardized logger that outputs to both
-    stdout and a unique, timestamped persistent log file.
+    """Configures and returns a standardized dual-output logger.
+
+    Streams formatted log records simultaneously to stdout and to a persistent,
+    timestamped log file under `log_dir` (e.g., `logs/YYYYMMDD_HHMMSS_{name}.log`).
+    If the requested logger already has handlers configured, it is returned
+    as-is to avoid duplicate logging.
+
+    Args:
+        name: Unique name identifier for the logger instance.
+        log_dir: Directory path where timestamped log files will be saved.
+            Defaults to "logs".
+
+    Returns:
+        A configured `logging.Logger` instance.
     """
     logger = logging.getLogger(name)
 
