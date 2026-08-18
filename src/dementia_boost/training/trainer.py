@@ -1,3 +1,10 @@
+"""Training loop orchestration, epoch scheduling, and model checkpointing.
+
+This module provides `BaselineTrainer` to manage the complete training lifecycle
+for dementia classification models, decoupling epoch loops, loss computation,
+metric logging, test evaluation, and artifact saving from entry scripts.
+"""
+
 import os
 from logging import Logger
 
@@ -9,12 +16,21 @@ from torch.utils.data import DataLoader
 
 
 class BaselineTrainer:
-    """
-    Manages the training lifecycle for the classical Dementia CNN.
+    """Manages the training, logging, and evaluation lifecycle of dementia models.
 
-    This class decouples the training loop, metric tracking, and file saving
-    from the model definitions and the entry-point scripts. It executes a
-    pure training phase and evaluates/saves the model only upon completion.
+    Decouples the optimization loop, learning rate scheduling, real-time telemetry
+    logging, and test set checkpointing from model definition and entry scripts.
+
+    Attributes:
+        model: The PyTorch neural network or hybrid module to be trained.
+        train_loader: PyTorch DataLoader providing training mini-batches.
+        test_loader: PyTorch DataLoader providing test/validation mini-batches.
+        criterion: Loss function module computing objective loss.
+        optimizer: Optimization algorithm updating model parameters.
+        scheduler: Learning rate decay scheduler.
+        device: Hardware accelerator device (CPU, CUDA, MPS) running the workload.
+        logger: Telemetry logger streaming messages to console and disk.
+        save_dir: Directory where checkpoint `.pt` files are written.
     """
 
     def __init__(
@@ -29,19 +45,19 @@ class BaselineTrainer:
         logger: Logger,
         save_dir: str = "./data/results/trained_models",
     ) -> None:
-        """
-        Initializes the BaselineTrainer with all required dependencies.
+        """Initializes the BaselineTrainer with all required dependencies.
 
         Args:
-            model (nn.Module): The classical CNN model to be trained.
-            train_loader (DataLoader): DataLoader for the training dataset.
-            test_loader (DataLoader): DataLoader for the final testing dataset.
-            criterion (nn.Module): The loss function (e.g., BCELoss).
-            optimizer (Optimizer): The weight optimization algorithm (e.g., Adam).
-            scheduler (LRScheduler): The learning rate decay scheduler.
-            device (torch.device): The hardware accelerator (CPU/CUDA/MPS).
-            logger (Logger): The telemetry logger for console and file output.
-            save_dir (str): Directory where the final model weights will be saved.
+            model: The neural network model to be trained.
+            train_loader: DataLoader for the training dataset.
+            test_loader: DataLoader for the final testing dataset.
+            criterion: The loss function module (e.g., BCEWithLogitsLoss).
+            optimizer: The weight optimization algorithm (e.g., Adam).
+            scheduler: The learning rate decay scheduler.
+            device: The hardware accelerator device (CPU, CUDA, MPS).
+            logger: The telemetry logger for console and file output.
+            save_dir: Directory where final model weights will be saved.
+                Defaults to "./data/results/trained_models".
         """
         self.model = model
         self.train_loader = train_loader
@@ -56,16 +72,16 @@ class BaselineTrainer:
         os.makedirs(self.save_dir, exist_ok=True)
 
     def train(self, epochs: int, run_id: str) -> None:
-        """
-        Executes the training loop for the specified number of epochs.
+        """Executes the training loop across the requested number of epochs.
 
-        Once all epochs are complete, it evaluates the model against the test
-        set and saves the final weights to disk.
+        Runs forward and backward passes, updates optimizer and scheduler states,
+        logs per-epoch loss and accuracy metrics, and triggers evaluation and
+        checkpointing upon training completion.
 
         Args:
-            epochs (int): The total number of passes over the training dataset.
-            run_id (str): A unique identifier for this run (e.g., "seed_42").
-                Used for naming the saved model file.
+            epochs: Total number of complete passes over the training dataset.
+            run_id: Unique identifier for this run (e.g., "seed_42"), used for
+                checkpoint file naming.
         """
         self.logger.info(f"Starting training run: {run_id} for {epochs} epochs.")
 
@@ -110,11 +126,13 @@ class BaselineTrainer:
         self._evaluate_and_save(run_id)
 
     def _evaluate_and_save(self, run_id: str) -> None:
-        """
-        Evaluates the trained model on the test dataset and saves the weights.
+        """Evaluates model performance on the test dataset and saves weights.
+
+        Computes final test loss and accuracy in evaluation mode without gradients,
+        logs test performance, and serializes the model state dictionary to disk.
 
         Args:
-            run_id (str): The unique identifier for file naming.
+            run_id: Unique identifier for the run used in file naming.
         """
         self.model.eval()
         val_loss = 0.0

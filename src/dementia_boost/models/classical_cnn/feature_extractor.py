@@ -1,18 +1,28 @@
+"""Convolutional spatial feature extractor based on a modified LeNet backbone.
+
+This module provides `LeNetFeatureExtractor`, which processes 2D grayscale brain
+MRI slices of shape (Batch, 1, 128, 128) through progressive convolutional and
+pooling blocks to produce high-level spatial feature maps of shape (Batch, 64, 6, 6).
+"""
+
 import torch.nn as nn
 from torch import Tensor
 
 
 class LeNetFeatureExtractor(nn.Module):
-    """
-    Extracts spatial features from 2D grayscale brain MRI images using a modified
-    LeNet architecture.
+    """Convolutional backbone extracting spatial representations from MRI slices.
 
-    The network progressively downsamples the spatial dimensions while increasing
-    the channel depth to extract high-level representations of brain tissue.
-    Expects input tensors of shape [Batch, 1, 128, 128].
+    The architecture comprises four convolutional stages with ReLU activations
+    and max pooling, downsampling (1, 128, 128) inputs to a (64, 6, 6) feature
+    map (2304 flattened features).
+
+    Attributes:
+        features: The sequential container of convolutional, activation, and
+            pooling layers.
     """
 
     def __init__(self) -> None:
+        """Initializes the LeNet convolutional backbone layers."""
         super().__init__()
 
         self.features = nn.Sequential(
@@ -34,13 +44,12 @@ class LeNetFeatureExtractor(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
-        """
-        Computes the forward pass through the convolutional feature extractor.
+        """Computes the forward pass through the convolutional backbone.
 
         Args:
-            x (Tensor): Input tensor of shape (Batch, 1, 128, 128).
+            x: Input tensor of shape `(Batch, 1, 128, 128)`.
 
         Returns:
-            Tensor: Feature map of shape (Batch, 64, 6, 6).
+            Extracted feature map tensor of shape `(Batch, 64, 6, 6)`.
         """
         return self.features(x)

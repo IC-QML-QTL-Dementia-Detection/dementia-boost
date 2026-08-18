@@ -1,3 +1,10 @@
+"""NIfTI 3D to 2D slice ETL pipeline and patient-isolated cohort splitting.
+
+This module provides the `OasisDataProcessor` class to stream raw 3D NIfTI/HDR
+brain MRI scans from disk, extract central 2D axial slices, prevent patient-level
+data leakage across longitudinal visits, and serialize tensors to `.pt` files.
+"""
+
 import glob
 import os
 
@@ -10,26 +17,32 @@ from numpy import random
 
 
 class OasisDataProcessor:
-    """
-    Handles the ETL process for NIfTI medical images.
+    """Handles the ETL process for raw NIfTI/HDR medical volume images.
 
-    This processor is designed to handle large datasets safely by streaming files from
-    disk, preventing Out-Of-Memory (OOM) errors. Crucially, it prevents data leakage
-    by ensuring all exams and visits for a single subject are routed strictly to either
-    the training or testing set, never both.
+    This processor streams files from disk to prevent out-of-memory (OOM)
+    errors when processing large MRI collections. It guarantees strict
+    patient-level train/test isolation so that multiple longitudinal visits for
+    the same subject never cross between cohorts.
+
+    Attributes:
+        RAW_PATH: Base directory where raw NIfTI/HDR scans reside. Defaults
+            to "./data/raw".
+        PROCESSED_PATH: Base directory where processed `.pt` tensor files are
+            saved. Defaults to "./data/results".
+        csv_path: Path to the metadata CSV file containing OASIS clinical data.
+        train_dir: Destination directory for training set `.pt` files.
+        test_dir: Destination directory for test set `.pt` files.
     """
 
     RAW_PATH = "./data/raw"
     PROCESSED_PATH = "./data/results"
 
     def __init__(self, csv_path: str) -> None:
-        """
-        Initializes the processor, sets up file paths, and ensures output directories
-        exist.
+        """Initializes the processor and creates necessary directories.
 
         Args:
-            csv_path (str): The absolute or relative path to the metadata CSV file
-                containing subject IDs and their corresponding categorical labels.
+            csv_path: The absolute or relative path to the metadata CSV file
+                containing subject IDs and their corresponding diagnostic groups.
         """
         self.csv_path = csv_path
 
@@ -46,21 +59,20 @@ class OasisDataProcessor:
         manual_train_ids: list[str] | None = None,
         manual_test_ids: list[str] | None = None,
     ) -> None:
-        """
-        Executes the full ETL pipeline safely.
+        """Executes the complete ETL and patient-split pipeline.
 
-        This acts as the main orchestrator. It parses the metadata, splits the unique
-        Subject IDs to prevent data leakage, and streams the NIfTI files from disk to
-        process and save them as individual `.pt` tensors in their respective
-        train/test directories.
+        Parses the metadata CSV, splits unique Subject IDs into train/test
+        cohorts respecting manual overrides, streams raw NIfTI files from disk,
+        extracts the central 2D axial slice, and serializes processed tensors
+        along with labels as `.pt` files.
 
         Args:
-            split_ratio (float, optional): The target percentage of subjects to allocate
-                to the training set. Defaults to 0.7 (70%).
-            manual_train_ids (list[str] | None, optional): A list of specific Subject ID
-                forced into the training set. Defaults to None.
-            manual_test_ids (list[str] | None, optional): A list of specific Subject IDs
-                forced into the testing set. Defaults to None.
+            split_ratio: Target proportion of subjects to allocate to the
+                training cohort. Defaults to 0.7 (70%).
+            manual_train_ids: Optional list of Subject IDs forced into the
+                training set. Defaults to None.
+            manual_test_ids: Optional list of Subject IDs forced into the
+                testing set. Defaults to None.
         """
         manual_train_ids = manual_train_ids or []
         manual_test_ids = manual_test_ids or []
@@ -86,16 +98,13 @@ class OasisDataProcessor:
         self._process_subset(test_subjects, subject_metadata, self.test_dir)
 
     def _parse_csv(self) -> dict[str, int]:
-        """
-        Reads the metadata CSV, filters out excluded categories, and maps subjects
-        to integer labels (0 for Nondemented, 1 for Demented).
+        """Reads metadata CSV and maps subjects to binary dementia labels.
 
-        This method specifically drops any subjects marked with the exclusion label
-        to ensure they do not contaminate the training or testing pools.
+        Excludes subjects marked with the 'Converted' status to preserve clean
+        binary classes ('Nondemented' -> 0, 'Demented' -> 1).
 
         Returns:
-            dict[str, str]: A dictionary mapping the Subject ID (key) to its
-                binary integer label (value).
+            A dictionary mapping each Subject ID to its binary integer label.
         """
         df = pd.read_csv(self.csv_path)
 
@@ -120,23 +129,21 @@ class OasisDataProcessor:
         manual_train: list[str],
         manual_test: list[str],
     ) -> tuple[set[str], set[str]]:
-        """
-        Splits the dataset strictly by Subject ID rather than by individual images.
+        """Splits the dataset strictly by Subject ID to prevent patient leakage.
 
-        This ensures that all longitudinal data (multiple visits/exams) for a single
-        patient ends up in the same cohort, preventing cross-contamination (leakage)
-        between the train and test sets. It respects manual ID assignments before
-        randomly distributing the remaining subjects to meet the target `ratio`.
+        Ensures that all longitudinal exams for a given patient remain within
+        the same cohort. Respects manual ID overrides and randomly allocates
+        the remaining subjects according to the split ratio.
 
         Args:
-            metadata (dict[str, int]): The parsed dict of available SubjectID and label.
-            ratio (float): The desired ratio of training data (e.g., 0.7).
-            manual_train (list[str]): Subject IDs manually assigned to the training set.
-            manual_test (list[str]): Subject IDs manually assigned to the testing set.
+            metadata: Mapping of Subject IDs to binary labels.
+            ratio: Target proportion of subjects for the training set.
+            manual_train: List of Subject IDs manually assigned to training.
+            manual_test: List of Subject IDs manually assigned to testing.
 
         Returns:
-            tuple[set[str], set[str]]: Two sets containing the partitioned Subject IDs
-                for training and testing, respectively.
+            A tuple of two sets containing the Subject IDs for the training
+            and testing cohorts, respectively.
         """
         all_subjects = set(metadata.keys())
 
@@ -160,19 +167,18 @@ class OasisDataProcessor:
         metadata: dict[str, int],
         output_dir: str,
     ) -> None:
-        """
-        Streams, processes, and saves physical files for a specific subset of subjects.
+        """Streams, extracts axial slices, and saves tensors for a subject cohort.
 
-        For every subject in the provided set, this method searches the raw data
-        directory for all associated visits and exams. It loads each NIfTI file
-        dynamically using Nibabel, standardizes the tensor dimensions (squeezing empty
-        spatial dimensions and unsqueezing a channel dimension to yield [1, H, W]),
-        and saves it as an isolated `.pt` file alongside its categorical label.
+        For each subject in the cohort, searches the raw data directory for all
+        associated visits and HDR/NIfTI volume files. Loads each volume using
+        Nibabel, extracts the central 2D axial slice, adds a channel dimension
+        to produce shape [1, H, W], and saves the (tensor, label) tuple as a
+        `.pt` file.
 
         Args:
-            subjects (set[str]): The specific Subject IDs routed to this subset.
-            metadata (dict[str, int]): The dict containing the label for each subject.
-            output_dir (str): The destination directory path for the processed files.
+            subjects: Set of Subject IDs assigned to this cohort.
+            metadata: Mapping of Subject IDs to binary integer labels.
+            output_dir: Destination directory path for the saved `.pt` files.
         """
         processed_count = 0
 

@@ -1,3 +1,10 @@
+"""Publication-ready visualization generators for evaluation metrics and ROC curves.
+
+This module provides `MetricsVisualizer` to generate Seaborn boxplots/stripplots,
+multi-run comparative and isolated ROC curves, and annotated confusion matrix
+heatmaps from serialized JSON evaluation payloads.
+"""
+
 import json
 import os
 
@@ -9,21 +16,21 @@ from sklearn.metrics import roc_curve
 
 
 class MetricsVisualizer:
-    """
-    Generates plots from evaluation results stored in JSON format.
+    """Generates publication-quality charts and plots from JSON evaluation metrics.
 
-    The visualizer reads a JSON file containing individual run metrics
-    and produces plots.
+    Reads telemetry JSON files containing individual and aggregate experiment
+    runs and renders metric distributions, ROC curves, and confusion matrices.
+
+    Attributes:
+        output_dir: Destination directory path where plots will be saved.
     """
 
-    def __init__(self, output_dir: str = "./data/results/plots"):
-        """
-        Initializes the visualizer and creates the output directory.
+    def __init__(self, output_dir: str = "./data/results/plots") -> None:
+        """Initializes the visualizer and ensures output directory exists.
 
         Args:
-            output_dir (str): Path to the directory where plots will be saved.
-                Defaults to "./data/results/plots". The directory is created
-                if it does not exist.
+            output_dir: Path to directory where generated plots will be saved.
+                Defaults to "./data/results/plots".
         """
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
@@ -31,18 +38,14 @@ class MetricsVisualizer:
         sns.set_theme(style="whitegrid")
 
     def plot_metric_distributions(self, json_filepath: str, prefix: str) -> None:
-        """
-        Creates boxplots and stripplots for all primary metrics across runs.
+        """Generates Seaborn boxplots with jittered stripplots across all runs.
 
-        The metrics included are: accuracy, precision, recall, f1_score, auc.
-        The function reads the JSON file, reshapes the data, and saves a
-        combined plot to the output directory.
+        Visualizes distributions for accuracy, precision, recall, f1_score, and
+        auc across multi-seed runs, saving the resulting figure as a PNG.
 
         Args:
-            json_filepath (str): Path to the JSON file containing evaluation results.
-                The file must have an "individual_runs" key, and each run must
-                contain the metrics listed above.
-            prefix (str): Prefix used in the output filename and plot title.
+            json_filepath: Path to the JSON file containing evaluation results.
+            prefix: Prefix string used in the output filename and plot title.
         """
         with open(json_filepath) as f:
             data = json.load(f)
@@ -79,19 +82,15 @@ class MetricsVisualizer:
         plt.close()
 
     def plot_comparative_roc(self, json_filepath: str, prefix: str) -> None:
-        """
-        Plots ROC curves for all runs on a single figure.
+        """Plots comparative ROC curves for all runs on a single figure.
 
-        The JSON file is expected to contain, for each run, the ground truth
-        labels ("y_true") and predicted probabilities ("y_prob") in addition
-        to the usual metrics.
-        These fields are required to compute the ROC curve coordinates.
+        Extracts ground truth (`y_true`) and predicted probabilities (`y_prob`)
+        for each run, computes the ROC coordinates, and plots overlay curves
+        along with the random baseline diagonal.
 
         Args:
-            json_filepath (str): Path to the JSON file containing evaluation results.
-                The file must have an "individual_runs" list, and each run
-                dictionary must include "y_true", "y_prob", "run_id", and "auc".
-            prefix (str): Prefix used in the output filename and plot title.
+            json_filepath: Path to the JSON file containing evaluation results.
+            prefix: Prefix string used in the output filename and plot title.
         """
         with open(json_filepath) as f:
             data = json.load(f)
@@ -125,21 +124,15 @@ class MetricsVisualizer:
         plt.close()
 
     def plot_isolated_roc(self, json_filepath: str, run_id: str, prefix: str) -> None:
-        """
-        Generates a single ROC curve for a specific run and saves it.
-
-        This method extracts the ground truth labels and predicted probabilities
-        for the given run ID, computes its ROC curve, and creates a standalone
-        figure.
-        The run must exist in the JSON file and contain "y_true" and "y_prob" fields.
+        """Generates a standalone ROC curve for a specific model run.
 
         Args:
-            json_filepath (str): Path to the JSON file containing evaluation results.
-            run_id (str): Unique identifier of the run to plot.
-            prefix (str): Prefix used in the output filename and plot title.
+            json_filepath: Path to the JSON file containing evaluation results.
+            run_id: Unique identifier for the specific run to plot.
+            prefix: Prefix string used in the output filename and plot title.
 
         Raises:
-            ValueError: If the provided run_id is not found in the JSON data.
+            ValueError: If `run_id` is not found in the JSON file.
         """
         with open(json_filepath) as f:
             data = json.load(f)
@@ -174,23 +167,15 @@ class MetricsVisualizer:
         run_id: str,
         prefix: str,
     ) -> None:
-        """
-        Generates and saves a heatmap of the confusion matrix for a specific run.
-
-        The confusion matrix is extracted from the JSON data for the given run_id
-        and plotted as a seaborn heatmap. The plot uses the predefined class labels
-        "Non-Demented" and "Demented".
+        """Renders an annotated heatmap of the confusion matrix for a run.
 
         Args:
-            json_filepath (str): Path to the JSON file containing evaluation results.
-                The file must have an "individual_runs" list, and the specified run
-                must contain a "confusion_matrix" key with a 2x2 integer matrix.
-            run_id (str): Unique identifier of the run whose confusion matrix will
-                be plotted.
-            prefix (str): Prefix used in the output filename and plot title.
+            json_filepath: Path to the JSON file containing evaluation results.
+            run_id: Unique identifier for the specific run to plot.
+            prefix: Prefix string used in the output filename and plot title.
 
         Raises:
-            ValueError: If the provided run_id is not found in the JSON data.
+            ValueError: If `run_id` is not found in the JSON file.
         """
         with open(json_filepath) as f:
             data = json.load(f)
@@ -218,22 +203,17 @@ class MetricsVisualizer:
         plt.close()
 
     def _get_run_data(self, data: dict, run_id: str) -> dict:
-        """
-        Retrieves the data dictionary for a specific run from the JSON structure.
-
-        This helper method searches the "individual_runs" list for an entry with
-        the matching run_id.
+        """Extracts the evaluation record matching the specified run ID.
 
         Args:
-            data (dict): The full JSON data as a dictionary, expected to contain
-                an "individual_runs" key with a list of run dictionaries.
-            run_id (str): The unique identifier of the run to retrieve.
+            data: Parsed dictionary from the evaluation JSON file.
+            run_id: Unique identifier for the target run.
 
         Returns:
-            dict: The run dictionary corresponding to the given run_id.
+            Dictionary containing metrics and predictions for `run_id`.
 
         Raises:
-            ValueError: If no run with the specified run_id is found.
+            ValueError: If no entry matching `run_id` exists in `individual_runs`.
         """
         run_data = next(
             (run for run in data.get("individual_runs", []) if run["run_id"] == run_id),

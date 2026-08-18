@@ -1,3 +1,10 @@
+"""Model weight loading and batched inference evaluation engine.
+
+This module provides `ModelEvaluator` to load trained checkpoint weights onto
+target hardware devices and execute batched inference over PyTorch DataLoaders
+to extract raw prediction probabilities and ground-truth labels.
+"""
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -5,27 +12,32 @@ from torch.utils.data import DataLoader
 
 
 class ModelEvaluator:
-    """
-    Handles trained model weights loading and the execution of
-    inference over a dataset to extract raw probabilities and ground truths.
+    """Manages model checkpoint loading and batched dataset inference.
+
+    Attributes:
+        model: The PyTorch neural network or hybrid module to evaluate.
+        device: The hardware accelerator device (CPU, CUDA, MPS) where tensors
+            and model weights reside.
     """
 
     def __init__(self, model: nn.Module, device: torch.device) -> None:
-        """
+        """Initializes the evaluator with the given model and execution device.
+
         Args:
-            model (nn.Module): The uninitialized neural network architecture.
-            device (torch.device): The target hardware accelerator.
+            model: The neural network or hybrid architecture to evaluate.
+            device: The target hardware accelerator device.
         """
         self.model = model.to(device)
         self.device = device
 
     def load_weights(self, filepath: str) -> None:
-        """
-        Loads the state dictionary into the model from a .pt file.
-        Maps tensors to the current device.
+        """Loads model state dictionary weights from a serialized `.pt` checkpoint.
+
+        Maps tensors directly to `self.device` and puts the model into
+        evaluation mode (`self.model.eval()`).
 
         Args:
-            filepath (str): Path to the saved .pt file.
+            filepath: Path to the saved `.pt` checkpoint file on disk.
         """
         state_dict = torch.load(
             filepath,
@@ -36,16 +48,19 @@ class ModelEvaluator:
         self.model.eval()
 
     def predict(self, data_loader: DataLoader) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Runs the full dataset through the model and extracts predictions.
+        """Executes batched inference over a DataLoader without gradient tracking.
+
+        Passes all batches through the model in evaluation mode, applies a
+        sigmoid activation to convert raw logits to probabilities, and compiles
+        the ground-truth labels and predictions into NumPy arrays.
 
         Args:
-            data_loader (DataLoader): The dataset to evaluate.
+            data_loader: The PyTorch DataLoader containing the dataset to evaluate.
 
         Returns:
-            tuple[np.ndarray, np.ndarray]: A tuple containing:
-                - y_true: A 1D numpy array of the actual ground-truth labels.
-                - y_prob: A 1D numpy array of the model's raw probability outputs.
+            A tuple containing:
+                - `y_true`: 1D NumPy array of ground-truth target labels.
+                - `y_prob`: 1D NumPy array of raw model prediction probabilities.
         """
         all_labels = []
         all_probs = []

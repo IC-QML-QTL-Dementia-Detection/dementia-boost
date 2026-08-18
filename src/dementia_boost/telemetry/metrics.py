@@ -1,3 +1,11 @@
+"""Classification metric computation, multi-run aggregation, and JSON serialization.
+
+This module provides data transfer objects (`EvaluationResult`, `AggregateMetrics`)
+and the `MetricsAnalyzer` class to calculate standard binary classification
+metrics (Accuracy, Precision, Recall, F1, AUC, Confusion Matrix) and serialize
+summaries to disk.
+"""
+
 import json
 from dataclasses import asdict, dataclass
 
@@ -14,19 +22,18 @@ from sklearn.metrics import (
 
 @dataclass
 class EvaluationResult:
-    """
-    DTO for a single model's evaluation metrics.
+    """Data transfer object storing a single model run's evaluation metrics.
 
     Attributes:
-        run_id (str): Unique identifier for the experiment run.
-        accuracy (float): Accuracy score (TP + TN) / total.
-        precision (float): Precision score TP / (TP + FP).
-        recall (float): Recall score TP / (TP + FN).
-        f1_score (float): Harmonic mean of precision and recall.
-        auc (float): Area under the ROC curve.
-        confusion_matrix (list[list[int]]): 2x2 confusion matrix as nested list.
-        y_true (list[int]): The ground-truth binary labels.
-        y_prob (list[float]): The raw probabilities from the model.
+        run_id: Unique identifier for the experiment run.
+        accuracy: Accuracy score (TP + TN) / total.
+        precision: Precision score TP / (TP + FP).
+        recall: Recall score TP / (TP + FN).
+        f1_score: Harmonic mean of precision and recall.
+        auc: Area under the Receiver Operating Characteristic (ROC) curve.
+        confusion_matrix: 2x2 confusion matrix as a nested integer list.
+        y_true: Ground-truth binary classification labels.
+        y_prob: Predicted model probability values.
     """
 
     run_id: str
@@ -42,15 +49,14 @@ class EvaluationResult:
 
 @dataclass
 class AggregateMetrics:
-    """
-    DTO for statistical aggregations across multiple runs.
+    """Data transfer object storing statistical aggregations across multiple runs.
 
     Attributes:
-        metric_name (str): Name of the metric being aggregated.
-        mean (float): Mean value of the metric across all runs.
-        std (float): Standard deviation of the metric across runs.
-        min_val (float): Minimum value of the metric across runs.
-        max_val (float): Maximum value of the metric across runs.
+        metric_name: Name of the classification metric being summarized.
+        mean: Sample mean across all evaluation runs.
+        std: Sample standard deviation across all evaluation runs.
+        min_val: Minimum metric score observed across runs.
+        max_val: Maximum metric score observed across runs.
     """
 
     metric_name: str
@@ -61,12 +67,11 @@ class AggregateMetrics:
 
 
 class MetricsAnalyzer:
-    """
-    Utility class for classification metrics calculation and aggregation.
+    """Utility engine for computing and aggregating classification metrics.
 
-    Provides static methods to compute standard binary classification metrics
-    from probabilities, aggregate results over multiple runs, and save the
-    results to a JSON file.
+    Provides stateless static methods to calculate standard binary metrics from
+    model probability predictions, compute cross-run statistics (mean, std, min,
+    max), and serialize evaluation payloads to JSON files.
     """
 
     @staticmethod
@@ -76,18 +81,20 @@ class MetricsAnalyzer:
         y_prob: np.ndarray,
         threshold: float = 0.5,
     ) -> EvaluationResult:
-        """
-        Calculates Accuracy, Precision, Recall, F1, AUC, and the Confusion Matrix.
+        """Calculates Accuracy, Precision, Recall, F1, AUC, and Confusion Matrix.
+
+        Converts raw probabilities to discrete binary labels using `threshold`
+        and evaluates classification scores via scikit-learn.
 
         Args:
-            run_id (str): A unique identifier for this run (e.g., "seed_42").
-            y_true (np.ndarray): The ground-truth binary labels.
-            y_prob (np.ndarray): The raw probabilities from the model.
-            threshold (float): The cutoff point to convert probabilities
-                to binary predictions.
+            run_id: Unique identifier for this evaluation run.
+            y_true: 1D array of ground-truth binary labels.
+            y_prob: 1D array of raw prediction probabilities.
+            threshold: Probability decision boundary for positive class
+                assignment. Defaults to 0.5.
 
         Returns:
-            EvaluationResult: An object containing the calculated metrics.
+            An EvaluationResult instance populated with all computed metrics.
         """
         y_pred = (y_prob >= threshold).astype(int)
 
@@ -107,16 +114,17 @@ class MetricsAnalyzer:
     def aggregate_results(
         results: list[EvaluationResult],
     ) -> dict[str, AggregateMetrics]:
-        """
-        Calculates mean, std, min, and max for all primary metrics across multiple runs.
+        """Calculates summary statistics across multiple independent runs.
+
+        Computes mean, standard deviation, minimum, and maximum across all
+        primary metrics (accuracy, precision, recall, f1_score, auc).
 
         Args:
-            results (list[EvaluationResult]): A list of objects containing the
-                calculated metrics.
+            results: List of EvaluationResult instances to aggregate.
 
         Returns:
-            dict[str, AggregateMetrics]: A dictionary mapping each metric name
-                to its aggregated statistics (mean, std, min, max).
+            A dictionary mapping each metric name to its AggregateMetrics
+            summary object. Returns an empty dict if `results` is empty.
         """
         if not results:
             return {}
@@ -142,20 +150,16 @@ class MetricsAnalyzer:
         aggregated: dict[str, AggregateMetrics],
         filepath: str,
     ) -> None:
-        """
-        Serializes all results to a JSON file for future plotting/analysis.
+        """Serializes evaluation metrics and aggregate statistics to a JSON file.
 
-        The JSON structure contains two top-level keys:
-        - "aggregated_statistics": a dictionary mapping metric names to
-          the aggregated statistics (mean, std, min, max).
-        - "individual_runs": a list of dictionaries, each representing one
-          EvaluationResult object.
+        The exported JSON structure contains:
+        - `aggregated_statistics`: mapping metric names to summary statistics.
+        - `individual_runs`: list of per-run evaluation metric dictionaries.
 
         Args:
-            individual_results (list[EvaluationResult]): List of per‑run results.
-            aggregated (dict[str, AggregateMetrics]): Aggregated statistics as produced
-                by the `aggregate_results` method.
-            filepath (str): Destination file path.
+            individual_results: List of per-run EvaluationResult objects.
+            aggregated: Dictionary mapping metric names to AggregateMetrics objects.
+            filepath: Destination file path on disk.
         """
         payload = {
             "aggregated_statistics": {k: asdict(v) for k, v in aggregated.items()},

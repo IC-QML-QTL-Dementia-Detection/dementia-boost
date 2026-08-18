@@ -1,14 +1,24 @@
+"""Orchestrator module combining feature extractor backbones with classification heads.
+
+This module provides the `DementiaClassifier` container, which utilizes dependency
+injection to decouple spatial representation learning from decision heads, enabling
+seamless swapping between classical dense heads and quantum circuit heads.
+"""
+
 import torch.nn as nn
 from torch import Tensor
 
 
 class DementiaClassifier(nn.Module):
-    """
-    The orchestrator module that composes a feature extractor and a classifier head.
+    """Dependency-injected orchestrator connecting a backbone to a classifier head.
 
-    This architecture uses Dependency Injection to strictly separate the spatial
-    representation logic (the backbone) from the decision-making logic (the head),
-    allowing heads to be hot-swapped.
+    Decouples spatial feature extraction from classification logic, allowing
+    different heads (such as classical dense layers or Dressed Quantum Networks)
+    to be attached to the same pre-trained backbone.
+
+    Attributes:
+        feature_extractor: Neural network module extracting spatial features.
+        classifier_head: Classification module mapping features to predictions.
     """
 
     def __init__(
@@ -16,14 +26,13 @@ class DementiaClassifier(nn.Module):
         feature_extractor: nn.Module,
         classifier_head: nn.Module,
     ) -> None:
-        """
-        Initializes the composed classifier model.
+        """Initializes the composed classifier model.
 
         Args:
-            feature_extractor (nn.Module): The network backbone responsible for
-                extracting spatial features from the raw image.
-            classifier_head (nn.Module): The classification network responsible
-                for mapping the extracted features to a binary prediction.
+            feature_extractor: Network backbone responsible for extracting
+                spatial features from the raw image tensor.
+            classifier_head: Classification network responsible for mapping
+                extracted features to predictions.
         """
         super().__init__()
 
@@ -31,14 +40,13 @@ class DementiaClassifier(nn.Module):
         self.classifier_head = classifier_head
 
     def forward(self, x: Tensor) -> Tensor:
-        """
-        Computes the full forward pass through the entire network.
+        """Computes the full forward pass through the backbone and head.
 
         Args:
-            x (Tensor): The raw input image tensor.
+            x: Input image tensor of shape `(Batch, Channels, Height, Width)`.
 
         Returns:
-            Tensor: The final network prediction.
+            Output prediction tensor from the classification head.
         """
         features = self.feature_extractor(x)
         prediction = self.classifier_head(features)
