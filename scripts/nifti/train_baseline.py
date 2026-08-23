@@ -6,6 +6,8 @@ preprocessed NIfTI axial slices. Model checkpoints are serialized to disk
 for subsequent evaluation and transfer learning benchmarking.
 """
 
+import os
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -53,8 +55,20 @@ def main() -> None:
         f"{len(test_loader)} test batches."
     )
 
+    save_dir = "./data/results/trained_models/nifti"
+    os.makedirs(save_dir, exist_ok=True)
+
     for seed in experiment_seeds:
         run_id = f"seed_{seed}"
+        checkpoint_path = os.path.join(save_dir, f"baseline_{run_id}.pt")
+
+        if os.path.exists(checkpoint_path):
+            logger.info(
+                f"Checkpoint already exists for {run_id} at {checkpoint_path}. "
+                "Skipping execution."
+            )
+            continue
+
         logger.info(f"=== Starting Experiment: {run_id} ===")
         set_seed(seed)
 
@@ -76,7 +90,7 @@ def main() -> None:
             scheduler=scheduler,
             device=device,
             logger=logger,
-            save_dir="./data/results/trained_models/nifti",
+            save_dir=save_dir,
         )
 
         trainer.train(epochs=epochs_per_run, run_id=run_id)

@@ -118,6 +118,15 @@ def main() -> None:
 
     for seed in experiment_seeds:
         run_id = f"tl_seed_{seed}"
+        checkpoint_path = os.path.join(tl_save_dir, f"baseline_{run_id}.pt")
+
+        if os.path.exists(checkpoint_path):
+            logger.info(
+                f"Checkpoint already exists for {run_id} at {checkpoint_path}. "
+                "Skipping execution."
+            )
+            continue
+
         logger.info(
             f"=== Starting CTL Experiment: {run_id} (Backbone: {best_run_id}) ==="
         )
