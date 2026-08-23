@@ -1,9 +1,9 @@
-"""Multiseed Quantum Transfer Learning (QTL) training on optimal NIfTI baseline.
+"""Multiseed Quantum Transfer Learning (QTL) training with embedding caching.
 
 This script identifies the optimal pre-trained classical CNN baseline from
-telemetry metrics, freezes its convolutional feature extractor, and trains a
-hybrid Dressed Quantum Network (DQN) classification head across multiple random
-seeds (0 to 100) using BCEWithLogitsLoss on NIfTI axial slices.
+telemetry metrics, extracts and caches feature representations once, and
+trains a hybrid Dressed Quantum Network (DQN) classification head across
+multiple random seeds (0 to 100) using BCEWithLogitsLoss on NIfTI axial slices.
 """
 
 import json
@@ -17,9 +17,29 @@ from torch.optim.lr_scheduler import StepLR
 
 from dementia_boost.core.reproducibility import set_seed
 from dementia_boost.data.data_loader import OasisDataLoader
-from dementia_boost.models.builder import build_quantum_tl_model
+from dementia_boost.data.embedding_cache import FeatureCacheManager
+from dementia_boost.models.builder import (
+    assemble_dementia_classifier,
+    load_baseline_backbone,
+)
+from dementia_boost.models.quantum_cnn import QuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.training.trainer import BaselineTrainer
+
+DEFAULT_BASELINE_METRICS_PATH: str = (
+    "./data/results/metrics/nifti/baseline_results.json"
+)
+DEFAULT_BASELINE_DIR: str = "./data/results/trained_models/nifti"
+DEFAULT_QTL_SAVE_DIR: str = "./data/results/trained_qtl_models/nifti"
+DEFAULT_EXPERIMENT_SEEDS: range = range(0, 101)
+DEFAULT_EPOCHS_PER_RUN: int = 100
+DEFAULT_BATCH_SIZE: int = 64
+DEFAULT_LEARNING_RATE: float = 1e-4
+DEFAULT_LR_STEP_SIZE: int = 10
+DEFAULT_LR_GAMMA: float = 0.75
+DEFAULT_FEATURE_DIM: int = 2304
+DEFAULT_N_QUBITS: int = 6
+DEFAULT_N_LAYERS: int = 4
 
 
 def get_device() -> torch.device:
@@ -35,13 +55,14 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
-def select_best_baseline(metrics_json_path: str) -> str:
+def select_best_baseline(metrics_json_path: str = DEFAULT_BASELINE_METRICS_PATH) -> str:
     """Identifies the optimal baseline model run from telemetry results JSON.
 
     Selects the run maximizing Accuracy, with F1-score and AUC as tie-breakers.
 
     Args:
         metrics_json_path: Filepath to the serialized baseline results JSON.
+            Defaults to DEFAULT_BASELINE_METRICS_PATH.
 
     Returns:
         The run_id string of the top-performing baseline model.
@@ -75,25 +96,14 @@ def select_best_baseline(metrics_json_path: str) -> str:
 
 
 def main() -> None:
-    """Executes Quantum Transfer Learning sweep across seeds on the optimal baseline."""
+    """Executes Quantum Transfer Learning sweep across seeds on cached embeddings."""
     logger = setup_logger("qtl_multiseed_nifti")
     device = get_device()
 
-    baseline_metrics_path = "./data/results/metrics/nifti/baseline_results.json"
-    baseline_dir = "./data/results/trained_models/nifti"
-    qtl_save_dir = "./data/results/trained_qtl_models/nifti"
-
-    experiment_seeds = range(0, 101)
-    epochs_per_run = 100
-    batch_size = 64
-
-    n_qubits = 6
-    n_layers = 4
-
-    os.makedirs(qtl_save_dir, exist_ok=True)
+    os.makedirs(DEFAULT_QTL_SAVE_DIR, exist_ok=True)
 
     try:
-        best_run_id = select_best_baseline(baseline_metrics_path)
+        best_run_id = select_best_baseline(DEFAULT_BASELINE_METRICS_PATH)
     except Exception as error:
         logger.error(f"Failed to select optimal baseline model: {error}")
         sys.exit(1)
@@ -101,7 +111,7 @@ def main() -> None:
     checkpoint_name = (
         best_run_id if best_run_id.endswith(".pt") else f"{best_run_id}.pt"
     )
-    baseline_weights_path = os.path.join(baseline_dir, checkpoint_name)
+    baseline_weights_path = os.path.join(DEFAULT_BASELINE_DIR, checkpoint_name)
 
     if not os.path.exists(baseline_weights_path):
         logger.error(
@@ -114,17 +124,50 @@ def main() -> None:
         f"Selected Optimal Baseline Backbone: '{best_run_id}' ({baseline_weights_path})"
     )
     logger.info(
-        f"Beginning QTL sweep ({n_qubits} qubits, {n_layers} layers) "
-        f"across {len(experiment_seeds)} seeds..."
+        f"Beginning QTL sweep ({DEFAULT_N_QUBITS} qubits, {DEFAULT_N_LAYERS} layers) "
+        f"across {len(DEFAULT_EXPERIMENT_SEEDS)} seeds..."
     )
 
-    loader_manager = OasisDataLoader(batch_size=batch_size, mode="nifti")
-    train_loader = loader_manager.get_data_loader(is_train=True)
-    test_loader = loader_manager.get_data_loader(is_train=False)
+    feature_extractor = load_baseline_backbone(baseline_weights_path, device)
 
-    for seed in experiment_seeds:
+    raw_loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE, mode="nifti")
+    raw_train_loader = raw_loader_manager.get_data_loader(is_train=True)
+    raw_test_loader = raw_loader_manager.get_data_loader(is_train=False)
+
+    logger.info("Extracting and caching training embeddings from baseline backbone...")
+    train_features, train_labels = FeatureCacheManager.extract_features(
+        feature_extractor=feature_extractor,
+        data_loader=raw_train_loader,
+        device=device,
+    )
+    logger.info("Extracting and caching test embeddings from baseline backbone...")
+    test_features, test_labels = FeatureCacheManager.extract_features(
+        feature_extractor=feature_extractor,
+        data_loader=raw_test_loader,
+        device=device,
+    )
+
+    train_loader = FeatureCacheManager.create_cached_loader(
+        features=train_features,
+        labels=train_labels,
+        batch_size=DEFAULT_BATCH_SIZE,
+        shuffle=True,
+    )
+    test_loader = FeatureCacheManager.create_cached_loader(
+        features=test_features,
+        labels=test_labels,
+        batch_size=DEFAULT_BATCH_SIZE,
+        shuffle=False,
+    )
+
+    logger.info(
+        "Beginning fast in-memory QTL sweep across "
+        f"{len(DEFAULT_EXPERIMENT_SEEDS)} seeds..."
+    )
+
+    for seed in DEFAULT_EXPERIMENT_SEEDS:
         run_id = f"qtl_seed_{seed}"
-        checkpoint_path = os.path.join(qtl_save_dir, f"baseline_{run_id}.pt")
+        checkpoint_path = os.path.join(DEFAULT_QTL_SAVE_DIR, f"baseline_{run_id}.pt")
 
         if os.path.exists(checkpoint_path):
             logger.info(
@@ -139,21 +182,28 @@ def main() -> None:
 
         set_seed(seed)
 
-        model = build_quantum_tl_model(
-            baseline_weights_path=baseline_weights_path,
-            device=device,
-            n_qubits=n_qubits,
-            n_layers=n_layers,
+        head = QuantumClassifierHead(
+            in_features=DEFAULT_FEATURE_DIM,
+            n_qubits=DEFAULT_N_QUBITS,
+            n_layers=DEFAULT_N_LAYERS,
+        ).to(device)
+        head.apply(QuantumClassifierHead.apply_glorot_init)
+
+        full_model = assemble_dementia_classifier(
+            feature_extractor=feature_extractor,
+            classifier_head=head,
         )
 
-        trainable_params = filter(lambda p: p.requires_grad, model.parameters())
-        optimizer = optim.Adam(trainable_params, lr=1e-4)
-
+        optimizer = optim.Adam(head.parameters(), lr=DEFAULT_LEARNING_RATE)
         criterion = nn.BCEWithLogitsLoss()
-        scheduler = StepLR(optimizer, step_size=10, gamma=0.75)
+        scheduler = StepLR(
+            optimizer,
+            step_size=DEFAULT_LR_STEP_SIZE,
+            gamma=DEFAULT_LR_GAMMA,
+        )
 
         trainer = BaselineTrainer(
-            model=model,
+            model=head,
             train_loader=train_loader,
             test_loader=test_loader,
             criterion=criterion,
@@ -161,10 +211,11 @@ def main() -> None:
             scheduler=scheduler,
             device=device,
             logger=logger,
-            save_dir=qtl_save_dir,
+            save_dir=DEFAULT_QTL_SAVE_DIR,
+            save_model=full_model,
         )
 
-        trainer.train(epochs=epochs_per_run, run_id=run_id)
+        trainer.train(epochs=DEFAULT_EPOCHS_PER_RUN, run_id=run_id)
         logger.info(f"=== Completed QTL Experiment: {run_id} ===\n")
 
     logger.info("Quantum Transfer Learning multi-seed sweep complete.")

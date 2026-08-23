@@ -2,8 +2,8 @@
 
 This module provides factory functions to load pre-trained classical baseline CNN
 weights, freeze convolutional feature extraction layers, attach newly initialized
-classical dense heads (CTL) or Dressed Quantum Network heads (QTL), and assemble
-complete DementiaClassifier models from separate components.
+classical dense heads (CTL) or Dressed Quantum Network heads (QTL), extract baseline
+backbones, and assemble complete DementiaClassifier models from separate components.
 """
 
 import torch
@@ -16,6 +16,38 @@ from .classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
+
+
+def load_baseline_backbone(
+    baseline_weights_path: str,
+    device: torch.device,
+) -> LeNetFeatureExtractor:
+    """Loads pre-trained baseline backbone weights and freezes parameters.
+
+    Args:
+        baseline_weights_path: Filepath to the serialized baseline checkpoint.
+        device: Hardware accelerator device where backbone tensors reside.
+
+    Returns:
+        A frozen LeNetFeatureExtractor module allocated on device.
+    """
+    extractor = LeNetFeatureExtractor().to(device)
+    temp_model = DementiaClassifier(
+        feature_extractor=extractor,
+        classifier_head=ClassicalClassifierHead(use_sigmoid=False),
+    )
+
+    state_dict = torch.load(
+        baseline_weights_path,
+        map_location=device,
+        weights_only=True,
+    )
+    temp_model.load_state_dict(state_dict)
+
+    for param in extractor.parameters():
+        param.requires_grad = False
+
+    return extractor
 
 
 def build_classical_tl_model(
@@ -62,8 +94,8 @@ def build_classical_tl_model(
 def build_quantum_tl_model(
     baseline_weights_path: str,
     device: torch.device,
-    n_qubits: int,
-    n_layers: int,
+    n_qubits: int = QuantumClassifierHead.DEFAULT_N_QUBITS,
+    n_layers: int = QuantumClassifierHead.DEFAULT_N_LAYERS,
 ) -> nn.Module:
     """Builds a Quantum Transfer Learning (QTL) hybrid model.
 
@@ -98,7 +130,7 @@ def build_quantum_tl_model(
         param.requires_grad = False
 
     model.classifier_head = QuantumClassifierHead(
-        in_features=2304,
+        in_features=QuantumClassifierHead.DEFAULT_IN_FEATURES,
         n_qubits=n_qubits,
         n_layers=n_layers,
     )

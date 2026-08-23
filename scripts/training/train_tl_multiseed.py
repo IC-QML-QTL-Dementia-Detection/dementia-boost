@@ -18,12 +18,11 @@ from torch.optim.lr_scheduler import StepLR
 from dementia_boost.core.reproducibility import set_seed
 from dementia_boost.data.data_loader import OasisDataLoader
 from dementia_boost.data.embedding_cache import FeatureCacheManager
-from dementia_boost.models.builder import assemble_dementia_classifier
-from dementia_boost.models.classical_cnn import (
-    ClassicalClassifierHead,
-    DementiaClassifier,
-    LeNetFeatureExtractor,
+from dementia_boost.models.builder import (
+    assemble_dementia_classifier,
+    load_baseline_backbone,
 )
+from dementia_boost.models.classical_cnn import ClassicalClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.training.trainer import BaselineTrainer
 
@@ -92,38 +91,6 @@ def select_best_baseline(metrics_json_path: str = DEFAULT_BASELINE_METRICS_PATH)
     )
 
     return str(best_run["run_id"])
-
-
-def load_baseline_backbone(
-    baseline_weights_path: str,
-    device: torch.device,
-) -> LeNetFeatureExtractor:
-    """Loads pre-trained baseline backbone weights and freezes parameters.
-
-    Args:
-        baseline_weights_path: Filepath to the serialized baseline checkpoint.
-        device: Hardware accelerator device where backbone tensors reside.
-
-    Returns:
-        A frozen LeNetFeatureExtractor module allocated on device.
-    """
-    extractor = LeNetFeatureExtractor().to(device)
-    temp_model = DementiaClassifier(
-        feature_extractor=extractor,
-        classifier_head=ClassicalClassifierHead(use_sigmoid=False),
-    )
-
-    state_dict = torch.load(
-        baseline_weights_path,
-        map_location=device,
-        weights_only=True,
-    )
-    temp_model.load_state_dict(state_dict)
-
-    for param in extractor.parameters():
-        param.requires_grad = False
-
-    return extractor
 
 
 def main() -> None:
