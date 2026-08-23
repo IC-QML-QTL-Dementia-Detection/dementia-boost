@@ -193,6 +193,7 @@ sequenceDiagram
     autonumber
     participant D as OASIS-II Dataset
     participant Base as Classical Baseline CNN
+    participant Cache as FeatureCacheManager
     participant CTL as Classical Transfer Learning (CTL)
     participant QTL as Quantum Transfer Learning (QTL)
 
@@ -200,13 +201,19 @@ sequenceDiagram
     D->>Base: Train LeNet Feature Extractor + Classical Dense Head
     Base-->>Base: Evaluate variance & save weights (baseline_seed_*.pt)
 
-    Note over CTL,QTL: Step 2: Transfer Learning (Backbone Frozen)
-    Base->>CTL: Load backbone weights & Freeze parameters
-    CTL->>CTL: Re-initialize Dense Head (Glorot Uniform) & Fine-tune
+    Note over Cache: Step 2: Extract & Cache Invariant Embeddings
+    Base->>Cache: Load optimal backbone weights & Freeze parameters
+    D->>Cache: Extract train & test spatial embeddings (2304-dim)
+    Cache-->>Cache: Store contiguous in-memory tensors (Zero I/O)
 
-    Base->>QTL: Load backbone weights & Freeze parameters
-    QTL->>QTL: Attach Dressed Quantum Network (Pre-Net + VQC + Post-Net)
-    QTL->>QTL: Optimize Quantum + Classical Head Parameters
+    Note over CTL,QTL: Step 3: Fast In-Memory Transfer Learning
+    Cache->>CTL: Stream in-memory feature batches (Seeds 0..100)
+    CTL->>CTL: Initialize Dense Head (Glorot Uniform) & Train directly on embeddings
+    CTL-->>Base: Assemble full DementiaClassifier and save checkpoint
+
+    Cache->>QTL: Stream in-memory feature batches (Seeds 0..100)
+    QTL->>QTL: Optimize Dressed Quantum Network (Pre-Net + VQC + Post-Net)
+    QTL-->>Base: Assemble full DementiaClassifier and save checkpoint
 ```
 
 ---
