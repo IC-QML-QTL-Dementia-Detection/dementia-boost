@@ -282,10 +282,39 @@ dementia-boost/
 │           ├── metrics.py                 # MetricsAnalyzer and DTO definitions
 │           └── visualizer.py              # Publication-ready Seaborn/Matplotlib plots
 ├── scripts/                               # CLI entry-points for training and evaluation
-│   ├── cherrypicked_baseline/             # Reference baseline execution scripts
-│   ├── jpg/                               # Training and evaluation scripts for JPG pipeline
-│   ├── metrics/                           # Quantitative comparison and delta report generators
-│   ├── nifti/                             # Training, ETL, and evaluation scripts for NIfTI pipeline
-│   └── qtl/                               # Multi-seed QTL training scripts
+│   ├── cherrypicked_baseline/             # Reference cherrypicked baseline execution scripts
+│   │   ├── generate_improvement_report_jpg.py # Delta improvement report for cherrypicked baseline
+│   │   ├── train_ctl_multiseed_jpg.py     # Fine-tune CTL on cherrypicked baseline (JPG)
+│   │   └── train_qtl_multiseed_jpg.py     # Train QTL on cherrypicked baseline (JPG)
+│   ├── jpg/                               # Training, evaluation & viz for 2D JPG slice pipeline
+│   │   ├── evaluate_baseline_jpg.py       # Batch evaluation of classical baseline models
+│   │   ├── evaluate_tl_jpg.py             # Batch evaluation of CTL models
+│   │   ├── run_jpg_indexing.py            # Regex patient-level indexing and CSV generator
+│   │   ├── train_baseline_jpg.py          # Multi-seed baseline CNN training
+│   │   ├── train_baseline_jpg_seed158.py  # Single-seed (seed 158) baseline CNN training
+│   │   ├── train_tl_multiseed_jpg.py      # Multi-seed CTL training
+│   │   ├── train_tl_seed158.py            # Single-seed (seed 158) CTL training
+│   │   ├── visualize_baselines_jpg.py     # Publication plots for baseline models
+│   │   └── visualize_tl_jpg.py            # Publication plots for CTL models
+│   ├── metrics/                           # Top-level quantitative delta reporting
+│   │   └── generate_improvement_report_jpg.py # Delta improvement report (Baseline vs CTL vs QTL)
+│   ├── nifti/                             # End-to-end pipeline for raw 3D NIfTI/HDR volumes
+│   │   ├── etl_pipeline.py                # 3D NIfTI to 2D slice ETL & patient-split orchestrator
+│   │   ├── metrics/                       # Batch evaluation and delta improvement report scripts
+│   │   │   ├── evaluate_baseline.py       # Multiseed evaluation of classical baseline models
+│   │   │   ├── evaluate_qtl.py            # Multiseed evaluation of QTL models
+│   │   │   ├── evaluate_tl.py             # Multiseed evaluation of CTL models
+│   │   │   └── generate_improvement_report.py # Quantitative improvement delta report
+│   │   ├── training/                      # Multi-seed training scripts with checkpoint resumption
+│   │   │   ├── train_baseline.py          # Classical baseline CNN training
+│   │   │   ├── train_qtl_multiseed.py     # Quantum Transfer Learning (QTL) training
+│   │   │   └── train_tl_multiseed.py      # Classical Transfer Learning (CTL) training
+│   │   └── viz/                           # Telemetry plotting and visualization scripts
+│   │       ├── visualize_baselines.py     # Boxplots, ROC curves, confusion matrices for baseline
+│   │       ├── visualize_qtl.py           # Boxplots, ROC curves, confusion matrices for QTL
+│   │       └── visualize_tl.py            # Boxplots, ROC curves, confusion matrices for CTL
+│   └── qtl/                               # Multi-seed QTL training scripts (JPG pipeline)
+│       ├── train_qtl_multiseed_jpg.py     # Multi-seed QTL training on JPG dataset
+│       └── train_qtl_seed1_jpg.py         # Single-seed (seed 1) QTL training on JPG dataset
 └── tests/                                 # Unit and integration test suites
 ```

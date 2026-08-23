@@ -101,15 +101,15 @@ python scripts/jpg/run_jpg_indexing.py
 
 ```bash
 # Train classical baseline CNN across multiple random seeds
-python scripts/nifti/train_baseline.py
+python scripts/nifti/training/train_baseline.py
 python scripts/jpg/train_baseline_jpg.py
 
 # Train Classical Transfer Learning (CTL) dense heads on optimal baseline
-python scripts/nifti/train_tl_multiseed.py
+python scripts/nifti/training/train_tl_multiseed.py
 python scripts/jpg/train_tl_multiseed_jpg.py
 
 # Train Quantum Transfer Learning (QTL) Dressed Quantum Network
-python scripts/nifti/train_qtl_multiseed.py
+python scripts/nifti/training/train_qtl_multiseed.py
 python scripts/qtl/train_qtl_multiseed_jpg.py
 ```
 
@@ -117,18 +117,18 @@ python scripts/qtl/train_qtl_multiseed_jpg.py
 
 ```bash
 # Evaluate models and generate metrics JSON
-python scripts/nifti/evaluate_baseline.py
-python scripts/nifti/evaluate_tl.py
-python scripts/nifti/evaluate_qtl.py
+python scripts/nifti/metrics/evaluate_baseline.py
+python scripts/nifti/metrics/evaluate_tl.py
+python scripts/nifti/metrics/evaluate_qtl.py
 
 # Generate comparison and delta improvement report
-python scripts/nifti/generate_improvement_report.py
+python scripts/nifti/metrics/generate_improvement_report.py
 python scripts/metrics/generate_improvement_report_jpg.py
 
 # Plot metric distributions, ROC curves, and confusion matrices
-python scripts/nifti/visualize_baselines.py
-python scripts/nifti/visualize_tl.py
-python scripts/nifti/visualize_qtl.py
+python scripts/nifti/viz/visualize_baselines.py
+python scripts/nifti/viz/visualize_tl.py
+python scripts/nifti/viz/visualize_qtl.py
 ```
 
 ---
