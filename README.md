@@ -90,20 +90,22 @@ source .venv/bin/activate
 ### 2. Data Indexing & ETL Pipeline
 
 ```bash
-# Generate deterministic patient-split CSV index for JPG dataset
-python scripts/jpg/run_jpg_indexing.py
+# Process raw 3D NIfTI/HDR files into 2D slice tensors
+python scripts/nifti/etl_pipeline.py
 
-# Or process raw 3D NIfTI/HDR files into 2D slice tensors
-python scripts/etl_pipeline.py
+# Or generate deterministic patient-split CSV index for JPG dataset
+python scripts/jpg/run_jpg_indexing.py
 ```
 
 ### 3. Training Models
 
 ```bash
 # Train classical baseline CNN across multiple random seeds
+python scripts/nifti/train_baseline.py
 python scripts/jpg/train_baseline_jpg.py
 
-# Train Classical Transfer Learning (CTL) dense heads
+# Train Classical Transfer Learning (CTL) dense heads on optimal baseline
+python scripts/nifti/train_tl_multiseed.py
 python scripts/jpg/train_tl_multiseed_jpg.py
 
 # Train Quantum Transfer Learning (QTL) Dressed Quantum Network
@@ -114,15 +116,16 @@ python scripts/qtl/train_qtl_multiseed_jpg.py
 
 ```bash
 # Evaluate models and generate metrics JSON
-python scripts/jpg/evaluate_baseline_jpg.py
-python scripts/jpg/evaluate_tl_jpg.py
+python scripts/nifti/evaluate_baseline.py
+python scripts/nifti/evaluate_tl.py
 
 # Generate comparison and delta improvement report
+python scripts/nifti/generate_improvement_report.py
 python scripts/metrics/generate_improvement_report_jpg.py
 
 # Plot metric distributions, ROC curves, and confusion matrices
-python scripts/jpg/visualize_baselines_jpg.py
-python scripts/jpg/visualize_tl_jpg.py
+python scripts/nifti/visualize_baselines.py
+python scripts/nifti/visualize_tl.py
 ```
 
 ---

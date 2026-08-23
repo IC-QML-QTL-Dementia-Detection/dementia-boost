@@ -285,6 +285,7 @@ dementia-boost/
 │   ├── cherrypicked_baseline/             # Reference baseline execution scripts
 │   ├── jpg/                               # Training and evaluation scripts for JPG pipeline
 │   ├── metrics/                           # Quantitative comparison and delta report generators
+│   ├── nifti/                             # Training, ETL, and evaluation scripts for NIfTI pipeline
 │   └── qtl/                               # Multi-seed QTL training scripts
 └── tests/                                 # Unit and integration test suites
 ```
