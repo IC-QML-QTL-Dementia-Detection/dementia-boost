@@ -91,44 +91,37 @@ source .venv/bin/activate
 
 ```bash
 # Process raw 3D NIfTI/HDR files into 2D slice tensors
-python scripts/nifti/etl_pipeline.py
-
-# Or generate deterministic patient-split CSV index for JPG dataset
-python scripts/jpg/run_jpg_indexing.py
+python scripts/etl_pipeline.py
 ```
 
 ### 3. Training Models
 
 ```bash
 # Train classical baseline CNN across multiple random seeds
-python scripts/nifti/training/train_baseline.py
-python scripts/jpg/train_baseline_jpg.py
+python scripts/training/train_baseline.py
 
 # Train Classical Transfer Learning (CTL) dense heads on optimal baseline
-python scripts/nifti/training/train_tl_multiseed.py
-python scripts/jpg/train_tl_multiseed_jpg.py
+python scripts/training/train_tl_multiseed.py
 
 # Train Quantum Transfer Learning (QTL) Dressed Quantum Network
-python scripts/nifti/training/train_qtl_multiseed.py
-python scripts/qtl/train_qtl_multiseed_jpg.py
+python scripts/training/train_qtl_multiseed.py
 ```
 
 ### 4. Evaluation & Telemetry Visualization
 
 ```bash
 # Evaluate models and generate metrics JSON
-python scripts/nifti/metrics/evaluate_baseline.py
-python scripts/nifti/metrics/evaluate_tl.py
-python scripts/nifti/metrics/evaluate_qtl.py
+python scripts/metrics/evaluate_baseline.py
+python scripts/metrics/evaluate_tl.py
+python scripts/metrics/evaluate_qtl.py
 
 # Generate comparison and delta improvement report
-python scripts/nifti/metrics/generate_improvement_report.py
-python scripts/metrics/generate_improvement_report_jpg.py
+python scripts/metrics/generate_improvement_report.py
 
 # Plot metric distributions, ROC curves, and confusion matrices
-python scripts/nifti/viz/visualize_baselines.py
-python scripts/nifti/viz/visualize_tl.py
-python scripts/nifti/viz/visualize_qtl.py
+python scripts/viz/visualize_baselines.py
+python scripts/viz/visualize_tl.py
+python scripts/viz/visualize_qtl.py
 ```
 
 ---
