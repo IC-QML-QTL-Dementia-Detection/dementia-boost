@@ -19,6 +19,7 @@ flowchart TD
         ETL_JPG["JpgDataIndexer<br/>(Regex Patient ID Indexing & Split)"]
         DS["OasisDataset / JpgOasisDataset<br/>(PyTorch Dataset Abstractions)"]
         DL["OasisDataLoader<br/>(Unified DataLoader & MinMax Normalization)"]
+        CACHE["FeatureCacheManager / CachedEmbeddingDataset<br/>(In-Memory Feature Embeddings & I/O-Free Streaming)"]
     end
 
     subgraph Models ["Model Architectures Layer"]
@@ -72,6 +73,10 @@ The data pipeline eliminates patient-level data leakage across longitudinal MRI 
 - **`data_loader.py`**:
   - `OasisDataLoader`: Unified factory creating PyTorch `DataLoader` instances for both `nifti` and `jpg` modalities.
   - `MinMaxNormalize`: Custom transform performing per-sample dynamic range squashing into `[0.0, 1.0]`.
+
+- **`embedding_cache.py`**:
+  - `CachedEmbeddingDataset`: High-throughput in-memory dataset storing pre-extracted feature tensors and diagnostic labels.
+  - `FeatureCacheManager`: Static manager for one-time backbone feature extraction, disk cache serialization, and fast in-memory `DataLoader` generation for transfer learning.
 
 ```mermaid
 flowchart LR
@@ -264,6 +269,7 @@ dementia-boost/
 │       │   ├── data_loader.py             # Unified DataLoader & normalization transforms
 │       │   ├── data_processor.py          # NIfTI 3D/2D ETL & patient-split orchestrator
 │       │   ├── dataset.py                 # OasisDataset & JpgOasisDataset classes
+│       │   ├── embedding_cache.py         # In-memory feature embedding caching & loaders
 │       │   └── jpg_indexer.py             # Regex patient ID parser & CSV indexer
 │       ├── models/                        # Neural & Quantum network architectures
 │       │   ├── builder.py                 # Factory functions for CTL and QTL models

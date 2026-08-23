@@ -38,7 +38,7 @@ The codebase enforces strict modularity and MLOps practices, keeping neural netw
 
 - **`core/`**: Centralized determinism and seed locking across Python, NumPy, PyTorch, and cuDNN (`reproducibility.py`).
 
-- **`data/`**: Data loading and ETL pipelines with patient-level leakage prevention, dynamic PIL/NIfTI loaders, and custom `MinMaxNormalize` transforms (`data_loader.py`, `data_processor.py`, `jpg_indexer.py`, `dataset.py`).
+- **`data/`**: Data loading and ETL pipelines with patient-level leakage prevention, dynamic PIL/NIfTI loaders, custom `MinMaxNormalize` transforms, and in-memory feature embedding caching for fast transfer learning (`data_loader.py`, `data_processor.py`, `jpg_indexer.py`, `dataset.py`, `embedding_cache.py`).
 
 - **`models/`**: Dependency-injected architectures pairing a `LeNetFeatureExtractor` backbone with interchangeable heads: `ClassicalClassifierHead` (CTL) or `QuantumClassifierHead` (DQN / QTL) built via `builder.py`.
 

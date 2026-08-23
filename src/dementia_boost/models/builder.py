@@ -1,8 +1,9 @@
 """Model factory builders for Classical and Quantum Transfer Learning.
 
 This module provides factory functions to load pre-trained classical baseline CNN
-weights, freeze convolutional feature extraction layers, and attach newly initialized
-classical dense heads (CTL) or Dressed Quantum Network heads (QTL).
+weights, freeze convolutional feature extraction layers, attach newly initialized
+classical dense heads (CTL) or Dressed Quantum Network heads (QTL), and assemble
+complete DementiaClassifier models from separate components.
 """
 
 import torch
@@ -104,3 +105,26 @@ def build_quantum_tl_model(
 
     model.classifier_head.apply(QuantumClassifierHead.apply_glorot_init)
     return model.to(device)
+
+
+def assemble_dementia_classifier(
+    feature_extractor: nn.Module,
+    classifier_head: nn.Module,
+) -> DementiaClassifier:
+    """Assembles a full DementiaClassifier orchestrator from components.
+
+    Connects a trained or frozen spatial feature extraction backbone with a
+    trained classical or quantum classification head into a single unified
+    module suitable for end-to-end inference and checkpoint serialization.
+
+    Args:
+        feature_extractor: Feature extraction backbone module.
+        classifier_head: Classification head module mapping features to logits.
+
+    Returns:
+        A composed DementiaClassifier instance.
+    """
+    return DementiaClassifier(
+        feature_extractor=feature_extractor,
+        classifier_head=classifier_head,
+    )
