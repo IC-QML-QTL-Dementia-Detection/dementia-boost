@@ -12,10 +12,14 @@ import torch.nn as nn
 from pennylane.measurements import ExpectationMP
 from pennylane.qnn.torch import TorchLayer
 
+DEFAULT_N_QUBITS: int = 6
+DEFAULT_N_LAYERS: int = 4
+PARAMETERS_PER_LAYER: int = 3
+
 
 def create_quantum_layer(
-    n_qubits: int = 6,
-    n_layers: int = 4,
+    n_qubits: int = DEFAULT_N_QUBITS,
+    n_layers: int = DEFAULT_N_LAYERS,
 ) -> TorchLayer:
     """Factory function instantiating a PennyLane QNode as a PyTorch Module.
 
@@ -43,8 +47,7 @@ def create_quantum_layer(
     def qnode(inputs: torch.Tensor, weights: torch.Tensor) -> list[ExpectationMP]:
         return _build_custom_ansatz(inputs, weights, n_qubits, n_layers)
 
-    n_parameters = 3
-    weight_shapes = {"weights": (n_layers, n_parameters, n_qubits)}
+    weight_shapes = {"weights": (n_layers, PARAMETERS_PER_LAYER, n_qubits)}
     init_method = {
         "weights": lambda tensor: nn.init.uniform_(tensor, a=-torch.pi, b=torch.pi)
     }

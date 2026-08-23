@@ -17,16 +17,35 @@ class ClassicalClassifierHead(nn.Module):
     and projects down to a single output unit (5 -> 1).
 
     Attributes:
+        DEFAULT_IN_FEATURES: Default number of flattened input features (2304).
+        DEFAULT_HIDDEN_FEATURES: Default number of hidden units (5).
+        DEFAULT_OUT_FEATURES: Default number of classification outputs (1).
+        DEFAULT_DROPOUT_RATE: Default dropout probability (0.5).
         classifier: Sequential container of flattening, linear, dropout, and
             activation layers.
     """
 
-    def __init__(self, in_features: int = 2304, use_sigmoid: bool = True) -> None:
+    DEFAULT_IN_FEATURES: int = 2304
+    DEFAULT_HIDDEN_FEATURES: int = 5
+    DEFAULT_OUT_FEATURES: int = 1
+    DEFAULT_DROPOUT_RATE: float = 0.5
+
+    def __init__(
+        self,
+        in_features: int = DEFAULT_IN_FEATURES,
+        hidden_features: int = DEFAULT_HIDDEN_FEATURES,
+        out_features: int = DEFAULT_OUT_FEATURES,
+        dropout_rate: float = DEFAULT_DROPOUT_RATE,
+        use_sigmoid: bool = True,
+    ) -> None:
         """Initializes the classical classification head.
 
         Args:
-            in_features: The number of flattened features from the extractor
-                backbone. Defaults to 2304 (64 * 6 * 6).
+            in_features: Number of flattened features from the extractor backbone.
+                Defaults to 2304.
+            hidden_features: Number of intermediate dense features. Defaults to 5.
+            out_features: Number of output classification units. Defaults to 1.
+            dropout_rate: Dropout probability during training. Defaults to 0.5.
             use_sigmoid: Whether to append a Sigmoid activation function to the
                 final linear layer. Defaults to True.
         """
@@ -34,10 +53,10 @@ class ClassicalClassifierHead(nn.Module):
 
         layers: list[nn.Module] = [
             nn.Flatten(),
-            nn.Linear(in_features=in_features, out_features=5),
-            nn.Dropout(p=0.5),
+            nn.Linear(in_features=in_features, out_features=hidden_features),
+            nn.Dropout(p=dropout_rate),
             nn.ReLU(inplace=True),
-            nn.Linear(in_features=5, out_features=1),
+            nn.Linear(in_features=hidden_features, out_features=out_features),
         ]
 
         if use_sigmoid:
@@ -49,8 +68,8 @@ class ClassicalClassifierHead(nn.Module):
         """Computes the forward pass through the dense classifier head.
 
         Args:
-            x: Spatial feature map tensor from the backbone of shape
-                `(Batch, Channels, Height, Width)`.
+            x: Spatial feature map tensor or flattened embedding tensor of shape
+                `(Batch, Channels, Height, Width)` or `(Batch, Features)`.
 
         Returns:
             Output prediction tensor of shape `(Batch, 1)`.

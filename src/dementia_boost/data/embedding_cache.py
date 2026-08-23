@@ -65,7 +65,12 @@ class FeatureCacheManager:
     Provides static utility methods to extract spatial feature maps from a
     convolutional backbone, serialize representations to disk, and instantiate
     high-throughput in-memory PyTorch DataLoaders.
+
+    Attributes:
+        DEFAULT_BATCH_SIZE: Default batch size for cached DataLoader (64).
     """
+
+    DEFAULT_BATCH_SIZE: int = 64
 
     @staticmethod
     def extract_features(
@@ -117,7 +122,7 @@ class FeatureCacheManager:
     def create_cached_loader(
         features: Tensor,
         labels: Tensor,
-        batch_size: int = 64,
+        batch_size: int = DEFAULT_BATCH_SIZE,
         shuffle: bool = True,
     ) -> DataLoader:
         """Instantiates a PyTorch DataLoader over cached in-memory embeddings.

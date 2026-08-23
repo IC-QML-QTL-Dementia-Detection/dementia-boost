@@ -23,6 +23,15 @@ from dementia_boost.models.classical_cnn import (
 )
 from dementia_boost.models.quantum_cnn import QuantumClassifierHead
 
+TEST_NUM_SAMPLES: int = 16
+TEST_FEATURE_DIM: int = 2304
+TEST_BATCH_SIZE: int = 4
+TEST_IMAGE_SIZE: int = 128
+TEST_IMAGE_CHANNELS: int = 1
+TEST_NUM_IMAGES: int = 12
+TEST_N_QUBITS: int = 2
+TEST_N_LAYERS: int = 1
+
 
 @pytest.fixture
 def sample_feature_data() -> tuple[Tensor, Tensor]:
@@ -31,8 +40,8 @@ def sample_feature_data() -> tuple[Tensor, Tensor]:
     Returns:
         A tuple of feature tensor (16, 2304) and label tensor (16, 1).
     """
-    features = torch.randn(16, 2304)
-    labels = torch.randint(0, 2, (16, 1)).float()
+    features = torch.randn(TEST_NUM_SAMPLES, TEST_FEATURE_DIM)
+    labels = torch.randint(0, 2, (TEST_NUM_SAMPLES, 1)).float()
     return features, labels
 
 
@@ -43,10 +52,15 @@ def mock_image_dataloader() -> DataLoader:
     Returns:
         A DataLoader yielding batches of shape (4, 1, 128, 128) and (4, 1).
     """
-    images = torch.randn(12, 1, 128, 128)
+    images = torch.randn(
+        TEST_NUM_IMAGES,
+        TEST_IMAGE_CHANNELS,
+        TEST_IMAGE_SIZE,
+        TEST_IMAGE_SIZE,
+    )
     labels = torch.tensor([[0.0], [1.0], [0.0], [1.0]] * 3)
     dataset = TensorDataset(images, labels)
-    return DataLoader(dataset, batch_size=4, shuffle=False)
+    return DataLoader(dataset, batch_size=TEST_BATCH_SIZE, shuffle=False)
 
 
 def test_cached_embedding_dataset_len_and_getitem(
@@ -56,10 +70,10 @@ def test_cached_embedding_dataset_len_and_getitem(
     features, labels = sample_feature_data
     dataset = CachedEmbeddingDataset(features=features, labels=labels)
 
-    assert len(dataset) == 16
+    assert len(dataset) == TEST_NUM_SAMPLES
 
     feat_item, label_item = dataset[0]
-    assert feat_item.shape == (2304,)
+    assert feat_item.shape == (TEST_FEATURE_DIM,)
     assert label_item.shape == (1,)
     assert torch.equal(feat_item, features[0])
     assert torch.equal(label_item, labels[0])
@@ -78,8 +92,8 @@ def test_extract_features_shape_and_values(
         device=device,
     )
 
-    assert features.shape == (12, 2304)
-    assert labels.shape == (12, 1)
+    assert features.shape == (TEST_NUM_IMAGES, TEST_FEATURE_DIM)
+    assert labels.shape == (TEST_NUM_IMAGES, 1)
 
     first_batch_images, _ = next(iter(mock_image_dataloader))
     with torch.no_grad():
@@ -88,7 +102,7 @@ def test_extract_features_shape_and_values(
         )
 
     assert torch.allclose(
-        features[:4],
+        features[:TEST_BATCH_SIZE],
         expected_first_batch_features,
         atol=1e-5,
     )
@@ -100,14 +114,14 @@ def test_create_cached_loader(sample_feature_data: tuple[Tensor, Tensor]) -> Non
     loader = FeatureCacheManager.create_cached_loader(
         features=features,
         labels=labels,
-        batch_size=4,
+        batch_size=TEST_BATCH_SIZE,
         shuffle=True,
     )
 
     assert isinstance(loader, DataLoader)
     batch_features, batch_labels = next(iter(loader))
-    assert batch_features.shape == (4, 2304)
-    assert batch_labels.shape == (4, 1)
+    assert batch_features.shape == (TEST_BATCH_SIZE, TEST_FEATURE_DIM)
+    assert batch_labels.shape == (TEST_BATCH_SIZE, 1)
 
 
 def test_cache_disk_serialization(
@@ -139,21 +153,31 @@ def test_heads_forward_with_cached_features(
 ) -> None:
     """Validates direct forward pass through heads using cached feature vectors."""
     features, _ = sample_feature_data
-    batch_features = features[:4]
+    batch_features = features[:TEST_BATCH_SIZE]
 
-    classical_head = ClassicalClassifierHead(in_features=2304, use_sigmoid=False)
+    classical_head = ClassicalClassifierHead(
+        in_features=TEST_FEATURE_DIM,
+        use_sigmoid=False,
+    )
     classical_output = classical_head(batch_features)
-    assert classical_output.shape == (4, 1)
+    assert classical_output.shape == (TEST_BATCH_SIZE, 1)
 
-    quantum_head = QuantumClassifierHead(in_features=2304, n_qubits=2, n_layers=1)
+    quantum_head = QuantumClassifierHead(
+        in_features=TEST_FEATURE_DIM,
+        n_qubits=TEST_N_QUBITS,
+        n_layers=TEST_N_LAYERS,
+    )
     quantum_output = quantum_head(batch_features)
-    assert quantum_output.shape == (4, 1)
+    assert quantum_output.shape == (TEST_BATCH_SIZE, 1)
 
 
 def test_assemble_dementia_classifier() -> None:
     """Validates assembling a DementiaClassifier from separate extractor and head."""
     extractor = LeNetFeatureExtractor()
-    head = ClassicalClassifierHead(in_features=2304, use_sigmoid=False)
+    head = ClassicalClassifierHead(
+        in_features=TEST_FEATURE_DIM,
+        use_sigmoid=False,
+    )
 
     model = assemble_dementia_classifier(
         feature_extractor=extractor,
@@ -165,7 +189,12 @@ def test_assemble_dementia_classifier() -> None:
     extractor.eval()
     head.eval()
 
-    dummy_input = torch.randn(2, 1, 128, 128)
+    dummy_input = torch.randn(
+        2,
+        TEST_IMAGE_CHANNELS,
+        TEST_IMAGE_SIZE,
+        TEST_IMAGE_SIZE,
+    )
 
     with torch.no_grad():
         combined_output = model(dummy_input)
