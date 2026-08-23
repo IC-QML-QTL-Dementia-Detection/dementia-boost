@@ -109,6 +109,7 @@ python scripts/nifti/train_tl_multiseed.py
 python scripts/jpg/train_tl_multiseed_jpg.py
 
 # Train Quantum Transfer Learning (QTL) Dressed Quantum Network
+python scripts/nifti/train_qtl_multiseed.py
 python scripts/qtl/train_qtl_multiseed_jpg.py
 ```
 
@@ -118,6 +119,7 @@ python scripts/qtl/train_qtl_multiseed_jpg.py
 # Evaluate models and generate metrics JSON
 python scripts/nifti/evaluate_baseline.py
 python scripts/nifti/evaluate_tl.py
+python scripts/nifti/evaluate_qtl.py
 
 # Generate comparison and delta improvement report
 python scripts/nifti/generate_improvement_report.py
@@ -126,6 +128,7 @@ python scripts/metrics/generate_improvement_report_jpg.py
 # Plot metric distributions, ROC curves, and confusion matrices
 python scripts/nifti/visualize_baselines.py
 python scripts/nifti/visualize_tl.py
+python scripts/nifti/visualize_qtl.py
 ```
 
 ---
