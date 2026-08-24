@@ -22,18 +22,36 @@ from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.metrics import MetricsAnalyzer
 from dementia_boost.training.evaluator import ModelEvaluator
 
+DEFAULT_TORCH_DEVICE: str = "cpu"
+DEFAULT_QUANTUM_DEVICE: str = "lightning.qubit"
 
-def get_device() -> torch.device:
-    """Selects the best available hardware accelerator device.
+
+def get_device(device_name: str | None = None) -> torch.device:
+    """Resolves the target PyTorch execution device with optional manual override.
+
+    When an explicit device string is provided, returns that device. If no
+    override is given, defaults to `DEFAULT_TORCH_DEVICE` to avoid unnecessary GPU
+    transfer latency for low-qubit quantum transfer learning workflows, while
+    supporting 'auto' for automatic accelerator detection.
+
+    Args:
+        device_name: Optional device string ('cpu', 'cuda', 'mps', 'auto').
+            If None, uses `DEFAULT_TORCH_DEVICE`. If 'auto', detects available
+            hardware accelerators (CUDA, MPS) with fallback to CPU.
 
     Returns:
-        A torch.device corresponding to CUDA, MPS, or CPU.
+        A torch.device instance.
     """
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
+    target = device_name if device_name is not None else DEFAULT_TORCH_DEVICE
+
+    if target == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+
+    return torch.device(target)
 
 
 def main() -> None:
@@ -77,6 +95,7 @@ def main() -> None:
             in_features=2304,
             n_qubits=n_qubits,
             n_layers=n_layers,
+            quantum_device=DEFAULT_QUANTUM_DEVICE,
         ),
     )
 
@@ -85,6 +104,8 @@ def main() -> None:
     evaluator = ModelEvaluator(model=base_model, device=device)
 
     all_results = []
+    logger.info(f"Target PyTorch Device: {device}")
+    logger.info(f"Target Quantum Device: {DEFAULT_QUANTUM_DEVICE}")
     logger.info(f"Found {len(model_files)} QTL models. Beginning evaluation...")
 
     for file_name in model_files:

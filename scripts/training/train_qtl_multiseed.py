@@ -40,19 +40,36 @@ DEFAULT_LR_GAMMA: float = 0.75
 DEFAULT_FEATURE_DIM: int = 2304
 DEFAULT_N_QUBITS: int = 6
 DEFAULT_N_LAYERS: int = 4
+DEFAULT_TORCH_DEVICE: str = "cpu"
+DEFAULT_QUANTUM_DEVICE: str = "lightning.qubit"
 
 
-def get_device() -> torch.device:
-    """Selects the best available hardware accelerator device.
+def get_device(device_name: str | None = None) -> torch.device:
+    """Resolves the target PyTorch execution device with optional manual override.
+
+    When an explicit device string is provided, returns that device. If no
+    override is given, defaults to `DEFAULT_TORCH_DEVICE` to avoid unnecessary GPU
+    transfer latency for low-qubit quantum transfer learning workflows, while
+    supporting 'auto' for automatic accelerator detection.
+
+    Args:
+        device_name: Optional device string ('cpu', 'cuda', 'mps', 'auto').
+            If None, uses `DEFAULT_TORCH_DEVICE`. If 'auto', detects available
+            hardware accelerators (CUDA, MPS) with fallback to CPU.
 
     Returns:
-        A torch.device corresponding to CUDA, MPS, or CPU.
+        A torch.device instance.
     """
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
+    target = device_name if device_name is not None else DEFAULT_TORCH_DEVICE
+
+    if target == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+
+    return torch.device(target)
 
 
 def select_best_baseline(metrics_json_path: str = DEFAULT_BASELINE_METRICS_PATH) -> str:
@@ -119,7 +136,8 @@ def main() -> None:
         )
         sys.exit(1)
 
-    logger.info(f"Target Device: {device}")
+    logger.info(f"Target PyTorch Device: {device}")
+    logger.info(f"Target Quantum Device: {DEFAULT_QUANTUM_DEVICE}")
     logger.info(
         f"Selected Optimal Baseline Backbone: '{best_run_id}' ({baseline_weights_path})"
     )
@@ -186,6 +204,7 @@ def main() -> None:
             in_features=DEFAULT_FEATURE_DIM,
             n_qubits=DEFAULT_N_QUBITS,
             n_layers=DEFAULT_N_LAYERS,
+            quantum_device=DEFAULT_QUANTUM_DEVICE,
         ).to(device)
         head.apply(QuantumClassifierHead.apply_glorot_init)
 

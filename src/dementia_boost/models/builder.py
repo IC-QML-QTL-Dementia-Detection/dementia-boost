@@ -96,6 +96,7 @@ def build_quantum_tl_model(
     device: torch.device,
     n_qubits: int = QuantumClassifierHead.DEFAULT_N_QUBITS,
     n_layers: int = QuantumClassifierHead.DEFAULT_N_LAYERS,
+    quantum_device: str | None = None,
 ) -> nn.Module:
     """Builds a Quantum Transfer Learning (QTL) hybrid model.
 
@@ -109,6 +110,7 @@ def build_quantum_tl_model(
         device: The target hardware accelerator device (CPU, CUDA, MPS).
         n_qubits: Number of qubits in the variational quantum circuit.
         n_layers: Number of variational repetitions (depth) in the ansatz.
+        quantum_device: Optional PennyLane simulation device backend name.
 
     Returns:
         The prepared hybrid PyTorch module with frozen backbone and initialized
@@ -133,6 +135,7 @@ def build_quantum_tl_model(
         in_features=QuantumClassifierHead.DEFAULT_IN_FEATURES,
         n_qubits=n_qubits,
         n_layers=n_layers,
+        quantum_device=quantum_device,
     )
 
     model.classifier_head.apply(QuantumClassifierHead.apply_glorot_init)

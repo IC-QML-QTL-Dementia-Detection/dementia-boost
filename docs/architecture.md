@@ -182,6 +182,14 @@ flowchart TD
 5. **Post-Net Classification Logit**:
    $$\hat{y}_{\text{logit}} = W_{\text{post}} \begin{bmatrix} \langle Z_1 \rangle \\ \vdots \\ \langle Z_n \rangle \end{bmatrix} + b_{\text{post}}$$
 
+### 3.2 Quantum Device Resolution & Backend Management
+
+For low-qubit variational circuits ($n_{\text{qubits}} = 6$, corresponding to a statevector of $2^6 = 64$ complex amplitudes), CPU state-vector simulation (`lightning.qubit` / `default.qubit`) provides superior execution throughput compared to GPU simulators (`lightning.gpu`), eliminating host-to-device memory transfer latency and CUDA kernel launch overhead.
+
+- **`circuit.py` (`resolve_quantum_device`)**: Resolves the PennyLane device backend, defaulting to `lightning.qubit` with deterministic fallback to `default.qubit`, while allowing manual backend specification or custom device injection.
+- **`heads.py` & `builder.py`**: Accept explicit `quantum_device` parameters to configure the underlying QNode simulator.
+- **QTL Scripts (`train_qtl_multiseed.py`, `evaluate_qtl.py`)**: Expose configurable `DEFAULT_TORCH_DEVICE` and `DEFAULT_QUANTUM_DEVICE` variables with `get_device()` manual override support.
+
 ---
 
 ## 4. Transfer Learning Pipeline

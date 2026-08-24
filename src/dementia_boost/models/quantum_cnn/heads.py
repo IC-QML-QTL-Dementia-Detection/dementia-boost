@@ -10,6 +10,7 @@ import math
 
 import torch
 import torch.nn as nn
+from pennylane.devices import Device
 from torch import Tensor
 
 from .circuit import DEFAULT_N_LAYERS, DEFAULT_N_QUBITS, create_quantum_layer
@@ -51,6 +52,8 @@ class QuantumClassifierHead(nn.Module):
         n_qubits: int = DEFAULT_N_QUBITS,
         n_layers: int = DEFAULT_N_LAYERS,
         out_features: int = DEFAULT_OUT_FEATURES,
+        quantum_device: str | Device | None = None,
+        diff_method: str = "adjoint",
     ) -> None:
         """Initializes the hybrid Dressed Quantum Network classification head.
 
@@ -61,12 +64,21 @@ class QuantumClassifierHead(nn.Module):
                 Defaults to 6.
             n_layers: Number of repetitions (depth) of the ansatz. Defaults to 4.
             out_features: Number of output classification units. Defaults to 1.
+            quantum_device: Optional PennyLane device name or instantiated device
+                instance. If None, resolves to the default CPU-optimized device.
+            diff_method: Differentiation method for the PennyLane QNode. Defaults
+                to 'adjoint'.
         """
         super().__init__()
 
         self.flatten = nn.Flatten()
         self.pre_net = nn.Linear(in_features=in_features, out_features=n_qubits)
-        self.qnn = create_quantum_layer(n_qubits=n_qubits, n_layers=n_layers)
+        self.qnn = create_quantum_layer(
+            n_qubits=n_qubits,
+            n_layers=n_layers,
+            quantum_device=quantum_device,
+            diff_method=diff_method,
+        )
         self.post_net = nn.Linear(in_features=n_qubits, out_features=out_features)
 
     def forward(self, x: Tensor) -> Tensor:
