@@ -1,3 +1,12 @@
+"""Batch evaluation engine for classical baseline CNN models on NIfTI data.
+
+This script iterates across all saved classical baseline checkpoints (.pt)
+trained on NIfTI MRI axial slices, executes inference on the isolated test
+dataset, computes comprehensive binary classification metrics (Accuracy,
+Precision, Recall, F1-score, AUC-ROC, Confusion Matrix), aggregates statistical
+distributions across runs, and serializes the telemetry payload to JSON.
+"""
+
 import os
 import sys
 
@@ -15,28 +24,34 @@ from dementia_boost.training.evaluator import ModelEvaluator
 
 
 def get_device() -> torch.device:
+    """Selects the best available hardware accelerator device.
+
+    Returns:
+        A torch.device corresponding to CUDA, MPS, or CPU.
+    """
     if torch.cuda.is_available():
         return torch.device("cuda")
-    elif torch.backends.mps.is_available():
+    if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
 
 
 def main() -> None:
-    logger = setup_logger("evaluate_baseline_jpg")
+    """Executes the batch evaluation pipeline for classical NIfTI baseline models."""
+    logger = setup_logger("evaluate_baseline_nifti")
     device = get_device()
-    models_dir = "./data/results/trained_models/jpg"
-    results_dir = "./data/results/metrics/jpg"
+    models_dir = "./data/results/trained_models/nifti"
+    results_dir = "./data/results/metrics/nifti"
 
     os.makedirs(results_dir, exist_ok=True)
 
     if not os.path.exists(models_dir):
-        logger.error(f"Directory {models_dir} not found.")
+        logger.error(f"Checkpoint directory {models_dir} not found.")
         sys.exit(1)
 
-    model_files = [f for f in os.listdir(models_dir) if f.endswith(".pt")]
+    model_files = sorted([f for f in os.listdir(models_dir) if f.endswith(".pt")])
     if not model_files:
-        logger.error("No .pt files found.")
+        logger.error(f"No .pt model checkpoint files found in {models_dir}.")
         sys.exit(1)
 
     base_model = DementiaClassifier(
@@ -45,7 +60,7 @@ def main() -> None:
     )
 
     batch_size = 64
-    loader_manager = OasisDataLoader(batch_size=batch_size, mode="jpg")
+    loader_manager = OasisDataLoader(batch_size=batch_size, mode="nifti")
     test_loader = loader_manager.get_data_loader(is_train=False)
     evaluator = ModelEvaluator(model=base_model, device=device)
 
@@ -56,7 +71,7 @@ def main() -> None:
         run_id = file_name.replace(".pt", "")
         file_path = os.path.join(models_dir, file_name)
 
-        logger.info(f"Evaluating: {run_id}...")
+        logger.info(f"Evaluating model checkpoint: {run_id}...")
         evaluator.load_weights(file_path)
 
         y_true, y_prob = evaluator.predict(test_loader)
@@ -64,7 +79,7 @@ def main() -> None:
         result_dto = MetricsAnalyzer.calculate_metrics(run_id, y_true, y_prob)
         all_results.append(result_dto)
 
-    logger.info("Aggregating statistics across all runs...")
+    logger.info("Aggregating statistical metrics across all runs...")
     aggregated_stats = MetricsAnalyzer.aggregate_results(all_results)
 
     output_json = os.path.join(results_dir, "baseline_results.json")

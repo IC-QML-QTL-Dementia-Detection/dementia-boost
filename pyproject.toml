@@ -1,6 +1,6 @@
 [project]
 name = "dementia-boost"
-version = "1.3.0"
+version = "1.5.0"
 description = "QML for classifying patients with dementia "
 readme = "README.md"
 authors = [{ name = "Kaue Miziara", email = "kauemiziara@gmail.com" }]
@@ -37,6 +37,7 @@ ignore = ["E741", "N806"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+"scripts/**/*.py" = ["T201"]
 "scripts/*.py" = ["T201"]
 
 [tool.ruff.format]

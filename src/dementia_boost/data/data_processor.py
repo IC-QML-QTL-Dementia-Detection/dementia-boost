@@ -56,6 +56,7 @@ class OasisDataProcessor:
     def process_and_save(
         self,
         split_ratio: float = 0.7,
+        seed: int = 42,
         manual_train_ids: list[str] | None = None,
         manual_test_ids: list[str] | None = None,
     ) -> None:
@@ -69,6 +70,8 @@ class OasisDataProcessor:
         Args:
             split_ratio: Target proportion of subjects to allocate to the
                 training cohort. Defaults to 0.7 (70%).
+            seed: Random seed for deterministic subject cohort partitioning.
+                Defaults to 42.
             manual_train_ids: Optional list of Subject IDs forced into the
                 training set. Defaults to None.
             manual_test_ids: Optional list of Subject IDs forced into the
@@ -82,6 +85,7 @@ class OasisDataProcessor:
         train_subjects, test_subjects = self._split_subjects(
             subject_metadata,
             split_ratio,
+            seed,
             manual_train_ids,
             manual_test_ids,
         )
@@ -126,6 +130,7 @@ class OasisDataProcessor:
         self,
         metadata: dict[str, int],
         ratio: float,
+        seed: int,
         manual_train: list[str],
         manual_test: list[str],
     ) -> tuple[set[str], set[str]]:
@@ -138,6 +143,7 @@ class OasisDataProcessor:
         Args:
             metadata: Mapping of Subject IDs to binary labels.
             ratio: Target proportion of subjects for the training set.
+            seed: Random seed used to shuffle remaining subjects deterministically.
             manual_train: List of Subject IDs manually assigned to training.
             manual_test: List of Subject IDs manually assigned to testing.
 
@@ -151,6 +157,7 @@ class OasisDataProcessor:
         test_set = set(manual_test)
 
         remaining = list(all_subjects - train_set - test_set)
+        random.seed(seed)
         random.shuffle(remaining)
 
         target_train_size = int(len(all_subjects) * ratio)

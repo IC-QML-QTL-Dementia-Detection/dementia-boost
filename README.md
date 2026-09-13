@@ -38,7 +38,7 @@ The codebase enforces strict modularity and MLOps practices, keeping neural netw
 
 - **`core/`**: Centralized determinism and seed locking across Python, NumPy, PyTorch, and cuDNN (`reproducibility.py`).
 
-- **`data/`**: Data loading and ETL pipelines with patient-level leakage prevention, dynamic PIL/NIfTI loaders, and custom `MinMaxNormalize` transforms (`data_loader.py`, `data_processor.py`, `jpg_indexer.py`, `dataset.py`).
+- **`data/`**: Data loading and ETL pipelines with patient-level leakage prevention, dynamic PIL/NIfTI loaders, custom `MinMaxNormalize` transforms, and in-memory feature embedding caching for fast transfer learning (`data_loader.py`, `data_processor.py`, `jpg_indexer.py`, `dataset.py`, `embedding_cache.py`).
 
 - **`models/`**: Dependency-injected architectures pairing a `LeNetFeatureExtractor` backbone with interchangeable heads: `ClassicalClassifierHead` (CTL) or `QuantumClassifierHead` (DQN / QTL) built via `builder.py`.
 
@@ -90,10 +90,7 @@ source .venv/bin/activate
 ### 2. Data Indexing & ETL Pipeline
 
 ```bash
-# Generate deterministic patient-split CSV index for JPG dataset
-python scripts/jpg/run_jpg_indexing.py
-
-# Or process raw 3D NIfTI/HDR files into 2D slice tensors
+# Process raw 3D NIfTI/HDR files into 2D slice tensors
 python scripts/etl_pipeline.py
 ```
 
@@ -101,28 +98,30 @@ python scripts/etl_pipeline.py
 
 ```bash
 # Train classical baseline CNN across multiple random seeds
-python scripts/jpg/train_baseline_jpg.py
+python scripts/training/train_baseline.py
 
-# Train Classical Transfer Learning (CTL) dense heads
-python scripts/jpg/train_tl_multiseed_jpg.py
+# Train Classical Transfer Learning (CTL) dense heads on optimal baseline
+python scripts/training/train_tl_multiseed.py
 
 # Train Quantum Transfer Learning (QTL) Dressed Quantum Network
-python scripts/qtl/train_qtl_multiseed_jpg.py
+python scripts/training/train_qtl_multiseed.py
 ```
 
 ### 4. Evaluation & Telemetry Visualization
 
 ```bash
 # Evaluate models and generate metrics JSON
-python scripts/jpg/evaluate_baseline_jpg.py
-python scripts/jpg/evaluate_tl_jpg.py
+python scripts/metrics/evaluate_baseline.py
+python scripts/metrics/evaluate_tl.py
+python scripts/metrics/evaluate_qtl.py
 
 # Generate comparison and delta improvement report
-python scripts/metrics/generate_improvement_report_jpg.py
+python scripts/metrics/generate_improvement_report.py
 
 # Plot metric distributions, ROC curves, and confusion matrices
-python scripts/jpg/visualize_baselines_jpg.py
-python scripts/jpg/visualize_tl_jpg.py
+python scripts/viz/visualize_baselines.py
+python scripts/viz/visualize_tl.py
+python scripts/viz/visualize_qtl.py
 ```
 
 ---

@@ -22,6 +22,8 @@ class BaselineTrainer:
     logging, and test set checkpointing from model definition and entry scripts.
 
     Attributes:
+        DEFAULT_SAVE_DIR: Default directory where model weights are written.
+        LOGIT_CLASSIFICATION_THRESHOLD: Logit threshold for binary decision (0.0).
         model: The PyTorch neural network or hybrid module to be trained.
         train_loader: PyTorch DataLoader providing training mini-batches.
         test_loader: PyTorch DataLoader providing test/validation mini-batches.
@@ -31,7 +33,12 @@ class BaselineTrainer:
         device: Hardware accelerator device (CPU, CUDA, MPS) running the workload.
         logger: Telemetry logger streaming messages to console and disk.
         save_dir: Directory where checkpoint `.pt` files are written.
+        save_model: Optional PyTorch module whose state dictionary is saved to
+            disk upon completion (e.g. an assembled DementiaClassifier).
     """
+
+    DEFAULT_SAVE_DIR: str = "./data/results/trained_models"
+    LOGIT_CLASSIFICATION_THRESHOLD: float = 0.0
 
     def __init__(
         self,
@@ -43,7 +50,8 @@ class BaselineTrainer:
         scheduler: LRScheduler,
         device: torch.device,
         logger: Logger,
-        save_dir: str = "./data/results/trained_models",
+        save_dir: str = DEFAULT_SAVE_DIR,
+        save_model: nn.Module | None = None,
     ) -> None:
         """Initializes the BaselineTrainer with all required dependencies.
 
@@ -58,6 +66,8 @@ class BaselineTrainer:
             logger: The telemetry logger for console and file output.
             save_dir: Directory where final model weights will be saved.
                 Defaults to "./data/results/trained_models".
+            save_model: Optional PyTorch module to serialize on disk instead of
+                `model`. Defaults to None (saves `model`).
         """
         self.model = model
         self.train_loader = train_loader
@@ -68,6 +78,7 @@ class BaselineTrainer:
         self.device = device
         self.logger = logger
         self.save_dir = save_dir
+        self.save_model = save_model
 
         os.makedirs(self.save_dir, exist_ok=True)
 
@@ -105,7 +116,7 @@ class BaselineTrainer:
 
                 running_loss += loss.item() * images.size(0)
 
-                predictions = (outputs >= 0.0).float()
+                predictions = (outputs >= self.LOGIT_CLASSIFICATION_THRESHOLD).float()
                 correct_preds += (predictions == labels).sum().item()
                 total_samples += labels.size(0)
 
@@ -149,7 +160,7 @@ class BaselineTrainer:
 
                 val_loss += loss.item() * images.size(0)
 
-                predictions = (outputs >= 0.0).float()
+                predictions = (outputs >= self.LOGIT_CLASSIFICATION_THRESHOLD).float()
                 val_correct += (predictions == labels).sum().item()
                 val_total += labels.size(0)
 
@@ -160,6 +171,7 @@ class BaselineTrainer:
             f"[*] Final Test Loss: {final_loss:.4f} | Final Test Acc: {final_acc:.4f}"
         )
 
+        target_model = self.save_model if self.save_model is not None else self.model
         save_path = os.path.join(self.save_dir, f"baseline_{run_id}.pt")
-        torch.save(self.model.state_dict(), save_path)
+        torch.save(target_model.state_dict(), save_path)
         self.logger.info(f"Final model saved to {save_path}")

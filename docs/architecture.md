@@ -19,6 +19,7 @@ flowchart TD
         ETL_JPG["JpgDataIndexer<br/>(Regex Patient ID Indexing & Split)"]
         DS["OasisDataset / JpgOasisDataset<br/>(PyTorch Dataset Abstractions)"]
         DL["OasisDataLoader<br/>(Unified DataLoader & MinMax Normalization)"]
+        CACHE["FeatureCacheManager / CachedEmbeddingDataset<br/>(In-Memory Feature Embeddings & I/O-Free Streaming)"]
     end
 
     subgraph Models ["Model Architectures Layer"]
@@ -72,6 +73,10 @@ The data pipeline eliminates patient-level data leakage across longitudinal MRI 
 - **`data_loader.py`**:
   - `OasisDataLoader`: Unified factory creating PyTorch `DataLoader` instances for both `nifti` and `jpg` modalities.
   - `MinMaxNormalize`: Custom transform performing per-sample dynamic range squashing into `[0.0, 1.0]`.
+
+- **`embedding_cache.py`**:
+  - `CachedEmbeddingDataset`: High-throughput in-memory dataset storing pre-extracted feature tensors and diagnostic labels.
+  - `FeatureCacheManager`: Static manager for one-time backbone feature extraction, disk cache serialization, and fast in-memory `DataLoader` generation for transfer learning.
 
 ```mermaid
 flowchart LR
@@ -177,6 +182,14 @@ flowchart TD
 5. **Post-Net Classification Logit**:
    $$\hat{y}_{\text{logit}} = W_{\text{post}} \begin{bmatrix} \langle Z_1 \rangle \\ \vdots \\ \langle Z_n \rangle \end{bmatrix} + b_{\text{post}}$$
 
+### 3.2 Quantum Device Resolution & Backend Management
+
+For low-qubit variational circuits ($n_{\text{qubits}} = 6$, corresponding to a statevector of $2^6 = 64$ complex amplitudes), CPU state-vector simulation (`lightning.qubit` / `default.qubit`) provides superior execution throughput compared to GPU simulators (`lightning.gpu`), eliminating host-to-device memory transfer latency and CUDA kernel launch overhead.
+
+- **`circuit.py` (`resolve_quantum_device`)**: Resolves the PennyLane device backend, defaulting to `lightning.qubit` with deterministic fallback to `default.qubit`, while allowing manual backend specification or custom device injection.
+- **`heads.py` & `builder.py`**: Accept explicit `quantum_device` parameters to configure the underlying QNode simulator.
+- **QTL Scripts (`train_qtl_multiseed.py`, `evaluate_qtl.py`)**: Expose configurable `DEFAULT_TORCH_DEVICE` and `DEFAULT_QUANTUM_DEVICE` variables with `get_device()` manual override support.
+
 ---
 
 ## 4. Transfer Learning Pipeline
@@ -188,6 +201,7 @@ sequenceDiagram
     autonumber
     participant D as OASIS-II Dataset
     participant Base as Classical Baseline CNN
+    participant Cache as FeatureCacheManager
     participant CTL as Classical Transfer Learning (CTL)
     participant QTL as Quantum Transfer Learning (QTL)
 
@@ -195,13 +209,19 @@ sequenceDiagram
     D->>Base: Train LeNet Feature Extractor + Classical Dense Head
     Base-->>Base: Evaluate variance & save weights (baseline_seed_*.pt)
 
-    Note over CTL,QTL: Step 2: Transfer Learning (Backbone Frozen)
-    Base->>CTL: Load backbone weights & Freeze parameters
-    CTL->>CTL: Re-initialize Dense Head (Glorot Uniform) & Fine-tune
+    Note over Cache: Step 2: Extract & Cache Invariant Embeddings
+    Base->>Cache: Load optimal backbone weights & Freeze parameters
+    D->>Cache: Extract train & test spatial embeddings (2304-dim)
+    Cache-->>Cache: Store contiguous in-memory tensors (Zero I/O)
 
-    Base->>QTL: Load backbone weights & Freeze parameters
-    QTL->>QTL: Attach Dressed Quantum Network (Pre-Net + VQC + Post-Net)
-    QTL->>QTL: Optimize Quantum + Classical Head Parameters
+    Note over CTL,QTL: Step 3: Fast In-Memory Transfer Learning
+    Cache->>CTL: Stream in-memory feature batches (Seeds 0..100)
+    CTL->>CTL: Initialize Dense Head (Glorot Uniform) & Train directly on embeddings
+    CTL-->>Base: Assemble full DementiaClassifier and save checkpoint
+
+    Cache->>QTL: Stream in-memory feature batches (Seeds 0..100)
+    QTL->>QTL: Optimize Dressed Quantum Network (Pre-Net + VQC + Post-Net)
+    QTL-->>Base: Assemble full DementiaClassifier and save checkpoint
 ```
 
 ---
@@ -264,6 +284,7 @@ dementia-boost/
 │       │   ├── data_loader.py             # Unified DataLoader & normalization transforms
 │       │   ├── data_processor.py          # NIfTI 3D/2D ETL & patient-split orchestrator
 │       │   ├── dataset.py                 # OasisDataset & JpgOasisDataset classes
+│       │   ├── embedding_cache.py         # In-memory feature embedding caching & loaders
 │       │   └── jpg_indexer.py             # Regex patient ID parser & CSV indexer
 │       ├── models/                        # Neural & Quantum network architectures
 │       │   ├── builder.py                 # Factory functions for CTL and QTL models
@@ -282,9 +303,19 @@ dementia-boost/
 │           ├── metrics.py                 # MetricsAnalyzer and DTO definitions
 │           └── visualizer.py              # Publication-ready Seaborn/Matplotlib plots
 ├── scripts/                               # CLI entry-points for training and evaluation
-│   ├── cherrypicked_baseline/             # Reference baseline execution scripts
-│   ├── jpg/                               # Training and evaluation scripts for JPG pipeline
-│   ├── metrics/                           # Quantitative comparison and delta report generators
-│   └── qtl/                               # Multi-seed QTL training scripts
+│   ├── etl_pipeline.py                    # 3D NIfTI to 2D slice ETL & patient-split orchestrator
+│   ├── metrics/                           # Batch evaluation and delta improvement report scripts
+│   │   ├── evaluate_baseline.py           # Multiseed evaluation of classical baseline models
+│   │   ├── evaluate_qtl.py                # Multiseed evaluation of QTL models
+│   │   ├── evaluate_tl.py                 # Multiseed evaluation of CTL models
+│   │   └── generate_improvement_report.py # Quantitative improvement delta report
+│   ├── training/                          # Multi-seed training scripts with checkpoint resumption
+│   │   ├── train_baseline.py              # Classical baseline CNN training
+│   │   ├── train_qtl_multiseed.py         # Quantum Transfer Learning (QTL) training
+│   │   └── train_tl_multiseed.py          # Classical Transfer Learning (CTL) training
+│   └── viz/                               # Telemetry plotting and visualization scripts
+│       ├── visualize_baselines.py         # Boxplots, ROC curves, confusion matrices for baseline
+│       ├── visualize_qtl.py               # Boxplots, ROC curves, confusion matrices for QTL
+│       └── visualize_tl.py                # Boxplots, ROC curves, confusion matrices for CTL
 └── tests/                                 # Unit and integration test suites
 ```

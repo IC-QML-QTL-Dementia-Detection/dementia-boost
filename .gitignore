@@ -9,7 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
-# Environtment Variables
+# Environtment
+tmp/
 .env
 
 # Dataset
