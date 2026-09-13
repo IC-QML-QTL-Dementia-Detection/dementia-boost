@@ -49,3 +49,32 @@ exclude = [".venv"]
 pythonVersion = "3.13"
 venvPath = "."
 venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+norecursedirs = [
+    ".git",
+    ".venv",
+    ".pytest_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "data",
+    "docs",
+    "logs",
+    "scripts",
+    "tmp",
+]
+
+addopts = [
+    "--verbose",        # Display each test name while running.
+    "--tb=short",       # Compact traceback format for failures.
+    "-ra",              # Print short test summary for all non-passing tests.
+    "--strict-markers", # Fail on unknown marker names to catch typos early.
+]
+
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "quantum: marks tests exercising the PennyLane or Qiskit quantum layers",
+    "integration: marks end-to-end integration tests requiring model training",
+]
