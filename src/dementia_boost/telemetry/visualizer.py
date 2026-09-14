@@ -38,7 +38,7 @@ class MetricsVisualizer:
         sns.set_theme(style="whitegrid")
 
     def plot_metric_distributions(self, json_filepath: str, prefix: str) -> None:
-        """Generates Seaborn boxplots with jittered stripplots across all runs.
+        """Generates boxplots with jittered Seaborn stripplots across all runs.
 
         Visualizes distributions for accuracy, precision, recall, f1_score, and
         auc across multi-seed runs, saving the resulting figure as a PNG.
@@ -50,36 +50,58 @@ class MetricsVisualizer:
         with open(json_filepath) as f:
             data = json.load(f)
 
+        metric_keys = ["accuracy", "precision", "recall", "f1_score", "auc"]
+        metric_labels = [key.capitalize() for key in metric_keys]
+
         records = []
         for run in data["individual_runs"]:
-            for metric in ["accuracy", "precision", "recall", "f1_score", "auc"]:
+            for key, label in zip(metric_keys, metric_labels, strict=True):
                 records.append(
                     {
                         "Run": run["run_id"],
-                        "Metric": metric.capitalize(),
-                        "Score": run[metric],
+                        "Metric": label,
+                        "Score": run[key],
                     }
                 )
 
         df = pd.DataFrame(records)
 
-        plt.figure(figsize=(10, 6))
-        sns.boxplot(
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        box_data = [
+            df.loc[df["Metric"] == label, "Score"].to_numpy() for label in metric_labels
+        ]
+        box_positions = range(len(metric_labels))
+        box_result = ax.boxplot(
+            box_data,
+            positions=box_positions,
+            tick_labels=metric_labels,
+            orientation="vertical",
+            patch_artist=True,
+        )
+        palette = sns.color_palette("Set2", n_colors=len(metric_labels))
+        for patch, color in zip(box_result["boxes"], palette, strict=True):
+            patch.set_facecolor(color)
+
+        sns.stripplot(
             data=df,
             x="Metric",
             y="Score",
-            hue="Metric",
-            palette="Set2",
-            legend=False,
+            order=metric_labels,
+            color=".25",
+            size=6,
+            jitter=True,
+            ax=ax,
         )
-        sns.stripplot(data=df, x="Metric", y="Score", color=".25", size=6, jitter=True)
 
-        plt.title(f"{prefix.capitalize()} Model Metrics Distribution across Seeds")
-        plt.ylim(-0.05, 1.05)
+        ax.set_title(f"{prefix.capitalize()} Model Metrics Distribution across Seeds")
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_xlabel("Metric")
+        ax.set_ylabel("Score")
 
         save_path = os.path.join(self.output_dir, f"{prefix}_distributions.png")
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
-        plt.close()
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
 
     def plot_comparative_roc(self, json_filepath: str, prefix: str) -> None:
         """Plots comparative ROC curves for all runs on a single figure.

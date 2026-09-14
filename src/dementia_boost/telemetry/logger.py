@@ -17,8 +17,8 @@ def setup_logger(name: str, log_dir: str = "logs") -> logging.Logger:
 
     Streams formatted log records simultaneously to stdout and to a persistent,
     timestamped log file under `log_dir` (e.g., `logs/YYYYMMDD_HHMMSS_{name}.log`).
-    If the requested logger already has handlers configured, it is returned
-    as-is to avoid duplicate logging.
+    If the requested logger already has its own handlers configured, it is
+    returned as-is to avoid duplicate logging.
 
     Args:
         name: Unique name identifier for the logger instance.
@@ -30,7 +30,7 @@ def setup_logger(name: str, log_dir: str = "logs") -> logging.Logger:
     """
     logger = logging.getLogger(name)
 
-    if logger.hasHandlers():
+    if logger.handlers:
         return logger
 
     logger.setLevel(logging.INFO)
