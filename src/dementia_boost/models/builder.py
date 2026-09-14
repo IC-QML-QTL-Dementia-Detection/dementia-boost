@@ -9,7 +9,10 @@ backbones, and assemble complete DementiaClassifier models from separate compone
 import torch
 import torch.nn as nn
 
-from dementia_boost.models.quantum_cnn import QuantumClassifierHead
+from dementia_boost.models.quantum_cnn import (
+    QiskitQuantumClassifierHead,
+    QuantumClassifierHead,
+)
 
 from .classical_cnn import (
     ClassicalClassifierHead,
@@ -139,6 +142,57 @@ def build_quantum_tl_model(
     )
 
     model.classifier_head.apply(QuantumClassifierHead.apply_glorot_init)
+    return model.to(device)
+
+
+def build_qiskit_quantum_tl_model(
+    baseline_weights_path: str,
+    device: torch.device,
+    n_qubits: int = QiskitQuantumClassifierHead.DEFAULT_N_QUBITS,
+    n_layers: int = QiskitQuantumClassifierHead.DEFAULT_N_LAYERS,
+) -> nn.Module:
+    """Builds a Qiskit-based Quantum Transfer Learning (QTL) hybrid model.
+
+    Loads a pre-trained classical baseline CNN checkpoint, freezes its
+    convolutional backbone parameters, and substitutes its classification head
+    with a Qiskit v2.x Dressed Quantum Network (pre-net + VQC + post-net)
+    initialized with Glorot Uniform weights. Independent and interchangeable
+    with `build_quantum_tl_model`, sharing the same classical backbone and
+    ansatz formulation while executing on Qiskit Primitives V2 instead of
+    PennyLane.
+
+    Args:
+        baseline_weights_path: Filepath to the saved baseline `.pt` weight file.
+        device: The target hardware accelerator device (CPU, CUDA, MPS).
+        n_qubits: Number of qubits in the variational quantum circuit.
+        n_layers: Number of variational repetitions (depth) in the ansatz.
+
+    Returns:
+        The prepared hybrid PyTorch module with frozen backbone and initialized
+        Qiskit quantum head, allocated on the target device.
+    """
+    model = DementiaClassifier(
+        feature_extractor=LeNetFeatureExtractor(),
+        classifier_head=ClassicalClassifierHead(use_sigmoid=False),
+    )
+
+    state_dict = torch.load(
+        baseline_weights_path,
+        map_location=device,
+        weights_only=True,
+    )
+    model.load_state_dict(state_dict)
+
+    for param in model.feature_extractor.parameters():
+        param.requires_grad = False
+
+    model.classifier_head = QiskitQuantumClassifierHead(
+        in_features=QiskitQuantumClassifierHead.DEFAULT_IN_FEATURES,
+        n_qubits=n_qubits,
+        n_layers=n_layers,
+    )
+
+    model.classifier_head.apply(QiskitQuantumClassifierHead.apply_glorot_init)
     return model.to(device)
 
 
