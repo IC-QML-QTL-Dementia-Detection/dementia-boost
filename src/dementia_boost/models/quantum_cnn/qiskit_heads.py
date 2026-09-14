@@ -10,6 +10,7 @@ import math
 
 import torch.nn as nn
 from qiskit.primitives import BaseEstimatorV2
+from qiskit_machine_learning.gradients import BaseEstimatorGradient
 from torch import Tensor, tanh
 
 from .qiskit_circuit import DEFAULT_N_LAYERS, DEFAULT_N_QUBITS
@@ -54,6 +55,7 @@ class QiskitQuantumClassifierHead(nn.Module):
         n_layers: int = DEFAULT_N_LAYERS,
         out_features: int = DEFAULT_OUT_FEATURES,
         estimator: BaseEstimatorV2 | None = None,
+        gradient: BaseEstimatorGradient | None = None,
     ) -> None:
         """Initializes the hybrid Dressed Quantum Network classification head.
 
@@ -66,6 +68,10 @@ class QiskitQuantumClassifierHead(nn.Module):
             out_features: Number of output classification units. Defaults to 1.
             estimator: Optional Qiskit Primitives V2 estimator instance. If
                 None, resolves to a noiseless `StatevectorEstimator`.
+            gradient: Optional gradient estimator strategy. If None, defaults
+                to exact parameter-shift, which becomes impractically slow for
+                training at the default 6-qubit, 4-layer depth. Training
+                scripts should inject a `SPSAEstimatorGradient` instead.
         """
         super().__init__()
 
@@ -75,6 +81,7 @@ class QiskitQuantumClassifierHead(nn.Module):
             n_qubits=n_qubits,
             n_layers=n_layers,
             estimator=estimator,
+            gradient=gradient,
         )
         self.post_net = nn.Linear(in_features=n_qubits, out_features=out_features)
 

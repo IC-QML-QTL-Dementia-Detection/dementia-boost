@@ -9,6 +9,7 @@ upstream classical inputs.
 import torch
 from qiskit.primitives import BaseEstimatorV2, StatevectorEstimator
 from qiskit_machine_learning.connectors import TorchConnector
+from qiskit_machine_learning.gradients import BaseEstimatorGradient
 from qiskit_machine_learning.neural_networks import EstimatorQNN
 
 from .qiskit_circuit import DEFAULT_N_LAYERS, DEFAULT_N_QUBITS, build_qiskit_ansatz
@@ -18,6 +19,7 @@ def create_qiskit_quantum_layer(
     n_qubits: int = DEFAULT_N_QUBITS,
     n_layers: int = DEFAULT_N_LAYERS,
     estimator: BaseEstimatorV2 | None = None,
+    gradient: BaseEstimatorGradient | None = None,
 ) -> TorchConnector:
     """Instantiates a Qiskit EstimatorQNN wrapped in a PyTorch TorchConnector.
 
@@ -35,6 +37,13 @@ def create_qiskit_quantum_layer(
         n_layers: Number of ansatz layer repetitions. Defaults to 4.
         estimator: Optional Qiskit Primitives V2 estimator instance. If None,
             defaults to a noiseless `StatevectorEstimator`.
+        gradient: Optional gradient estimator strategy. If None, `EstimatorQNN`
+            defaults to exact parameter-shift, whose cost scales linearly with
+            the number of differentiable parameters (weights and inputs) and
+            becomes impractical at the default 6-qubit, 4-layer, `n_layers`
+            depth. Pass a `SPSAEstimatorGradient` for training workloads,
+            which evaluates only 2 circuits per gradient step regardless of
+            parameter count at the expense of exactness.
 
     Returns:
         A TorchConnector instance executing the circuit on the given
@@ -53,6 +62,7 @@ def create_qiskit_quantum_layer(
         input_params=list(input_params),
         weight_params=all_weight_params,
         estimator=estimator if estimator is not None else StatevectorEstimator(),
+        gradient=gradient,
         input_gradients=True,
         default_precision=0.0,
     )
