@@ -6,8 +6,12 @@ This module validates:
 - ``MetricsAnalyzer.aggregate_results`` cross-run statistical aggregation
   and empty-input safety.
 - ``MetricsAnalyzer.save_to_json`` schema integrity through a round trip.
+- ``MetricsAnalyzer.save_history`` / ``load_history`` lossless round trip of
+  ``TrainingHistory``, including epochs without validation values.
 - ``setup_logger`` dual-output configuration and singleton handler reuse.
 - ``MetricsVisualizer`` PNG artifact generation across all plotting methods.
+- ``MetricsVisualizer`` loss-curve plots tolerating sparse validation values,
+  ragged epoch counts, and empty history directories.
 
 Regression coverage
 -------------------
@@ -18,6 +22,8 @@ Regression coverage
 - Aggregate statistics diverging from ground-truth NumPy computations.
 - Corrupted or incomplete JSON telemetry payloads breaking downstream
   visualization scripts.
+- Per-epoch training histories losing fields or ``None`` validation values
+  when persisted and reloaded.
 - Duplicate log handlers accumulating across repeated `setup_logger` calls.
 - Visualization methods silently failing to write plot artifacts to disk.
 """
@@ -30,7 +36,12 @@ import numpy as np
 import pytest
 
 from dementia_boost.telemetry.logger import setup_logger
-from dementia_boost.telemetry.metrics import EvaluationResult, MetricsAnalyzer
+from dementia_boost.telemetry.metrics import (
+    EpochRecord,
+    EvaluationResult,
+    MetricsAnalyzer,
+    TrainingHistory,
+)
 from dementia_boost.telemetry.visualizer import MetricsVisualizer
 
 _KNOWN_METRIC_KEYS: tuple[str, ...] = (
@@ -197,6 +208,29 @@ class TestMetricsAnalyzerSaveToJson:
             )
 
 
+class TestTrainingHistorySerialization:
+    """Validates lossless JSON persistence of per-epoch training histories."""
+
+    def test_history_round_trip_is_lossless(self, tmp_path: Path) -> None:
+        """Saves a history mixing evaluated and skipped epochs, reloads it, and
+        asserts equality, so ``None`` validation values and the config dict
+        survive the trip."""
+        history = TrainingHistory(
+            run_id="seed_7",
+            paradigm="qtl",
+            config={"lr": 1e-4, "batch_size": 64, "n_qubits": 6, "lr_step_size": 10},
+            epochs=[
+                EpochRecord(1, 0.69, 0.51, 0.70, 0.50, 1e-4, 1.5),
+                EpochRecord(2, 0.65, 0.58, None, None, 1e-4, 1.4),
+            ],
+        )
+        filepath = tmp_path / "history.json"
+
+        MetricsAnalyzer.save_history(history, str(filepath))
+
+        assert MetricsAnalyzer.load_history(str(filepath)) == history
+
+
 class TestSetupLogger:
     """Validates dual-output configuration and singleton reuse."""
 
@@ -276,3 +310,77 @@ class TestMetricsVisualizerPlotGeneration:
             artifact_path = Path(output_dir) / filename
             assert artifact_path.exists()
             assert artifact_path.stat().st_size > 0
+
+
+class TestMetricsVisualizerLossPlots:
+    """Validates the loss-curve plots against histories with awkward shapes."""
+
+    def _write_histories(self, directory: Path, n_runs: int = 3) -> Path:
+        """Writes histories with sparse validation values and unequal lengths.
+
+        The first run is shorter than the others and every run only evaluates
+        on even epochs, so the plots must tolerate missing values and ragged
+        epoch counts.
+
+        Args:
+            directory: Directory receiving one JSON file per run.
+            n_runs: Number of histories to write.
+
+        Returns:
+            The directory containing the written histories.
+        """
+        directory.mkdir(parents=True)
+        for i in range(n_runs):
+            n_epochs = 4 if i == 0 else 6
+            epochs = [
+                EpochRecord(
+                    epoch=e,
+                    train_loss=0.7 - 0.05 * e + 0.01 * i,
+                    train_acc=0.5 + 0.05 * e,
+                    val_loss=0.72 - 0.04 * e if e % 2 == 0 else None,
+                    val_acc=0.5 + 0.04 * e if e % 2 == 0 else None,
+                    lr=1e-4,
+                    duration_s=1.0,
+                )
+                for e in range(1, n_epochs + 1)
+            ]
+            history = TrainingHistory(
+                run_id=f"seed_{i}",
+                paradigm="qtl",
+                config={"lr_step_size": 2},
+                epochs=epochs,
+            )
+            MetricsAnalyzer.save_history(history, str(directory / f"seed_{i}.json"))
+        return directory
+
+    def test_loss_plots_write_nonzero_png_files(self, tmp_path: Path) -> None:
+        """Feeds sparse, ragged histories into all three loss plots and asserts
+        each expected PNG exists with non-zero size."""
+        qtl_dir = self._write_histories(tmp_path / "qtl")
+        ctl_dir = self._write_histories(tmp_path / "ctl")
+        output_dir = Path(tmp_path / "plots")
+        visualizer = MetricsVisualizer(output_dir=str(output_dir))
+
+        visualizer.plot_loss_curve(str(qtl_dir / "seed_1.json"), prefix="qtl")
+        visualizer.plot_loss_distribution(str(qtl_dir), prefix="qtl")
+        visualizer.plot_loss_comparison({"QTL": str(qtl_dir), "CTL": str(ctl_dir)})
+
+        for filename in (
+            "qtl_seed_1_loss.png",
+            "qtl_loss_distribution.png",
+            "loss_comparison.png",
+        ):
+            assert (output_dir / filename).stat().st_size > 0
+
+    def test_loss_distribution_rejects_directory_without_histories(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Asserts that an empty history directory raises instead of silently
+        writing a blank figure."""
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        visualizer = MetricsVisualizer(output_dir=str(tmp_path / "plots"))
+
+        with pytest.raises(ValueError, match="No training histories"):
+            visualizer.plot_loss_distribution(str(empty_dir), prefix="qtl")
