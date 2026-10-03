@@ -3,13 +3,16 @@
 This script parses classical baseline evaluation results, identifies the
 best-performing baseline model checkpoint, extracts and caches feature
 representations once, and trains newly initialized classical dense heads
-across multiple random seeds (0 to 100) using BCEWithLogitsLoss.
+across multiple random seeds (0 to 100) using BCEWithLogitsLoss. Each run also
+persists its per-epoch training history and renders a loss-curve plot as soon as
+it finishes, followed by a multi-seed loss distribution plot at the end.
 """
 
 import json
 import os
 import sys
 
+import matplotlib
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -24,6 +27,7 @@ from dementia_boost.models.builder import (
 )
 from dementia_boost.models.classical_cnn import ClassicalClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
+from dementia_boost.telemetry.visualizer import MetricsVisualizer
 from dementia_boost.training.trainer import BaselineTrainer
 
 DEFAULT_BASELINE_METRICS_PATH: str = (
@@ -38,6 +42,10 @@ DEFAULT_LEARNING_RATE: float = 1e-4
 DEFAULT_LR_STEP_SIZE: int = 10
 DEFAULT_LR_GAMMA: float = 0.75
 DEFAULT_FEATURE_DIM: int = 2304
+DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/ctl"
+DEFAULT_LOSS_PLOTS_DIR: str = "./data/results/plots/nifti/loss"
+DEFAULT_EVAL_EVERY: int = 1
+PARADIGM: str = "ctl"
 
 
 def get_device() -> torch.device:
@@ -95,10 +103,12 @@ def select_best_baseline(metrics_json_path: str = DEFAULT_BASELINE_METRICS_PATH)
 
 def main() -> None:
     """Executes Classical Transfer Learning on cached baseline embeddings."""
+    matplotlib.use("Agg")
     logger = setup_logger("classical_tl_multiseed_nifti")
     device = get_device()
 
     os.makedirs(DEFAULT_TL_SAVE_DIR, exist_ok=True)
+    visualizer = MetricsVisualizer(output_dir=DEFAULT_LOSS_PLOTS_DIR)
 
     try:
         best_run_id = select_best_baseline(DEFAULT_BASELINE_METRICS_PATH)
@@ -195,6 +205,7 @@ def main() -> None:
             gamma=DEFAULT_LR_GAMMA,
         )
 
+        history_path = os.path.join(DEFAULT_HISTORY_DIR, f"{run_id}.json")
         trainer = BaselineTrainer(
             model=head,
             train_loader=train_loader,
@@ -206,10 +217,19 @@ def main() -> None:
             logger=logger,
             save_dir=DEFAULT_TL_SAVE_DIR,
             save_model=full_model,
+            history_path=history_path,
+            eval_every=DEFAULT_EVAL_EVERY,
+            paradigm=PARADIGM,
         )
 
         trainer.train(epochs=DEFAULT_EPOCHS_PER_RUN, run_id=run_id)
+        visualizer.plot_loss_curve(history_path, prefix=PARADIGM)
         logger.info(f"=== Completed CTL Experiment: {run_id} ===\n")
+
+    try:
+        visualizer.plot_loss_distribution(DEFAULT_HISTORY_DIR, prefix=PARADIGM)
+    except ValueError as error:
+        logger.warning(f"Skipping loss distribution plot: {error}")
 
     logger.info("Classical Transfer Learning multi-seed sweep complete.")
 

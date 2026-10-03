@@ -3,11 +3,14 @@
 This script trains the baseline LeNet-based Convolutional Neural Network across
 100 random seeds (1 to 100) using raw logits output and BCEWithLogitsLoss on
 preprocessed NIfTI axial slices. Model checkpoints are serialized to disk
-for subsequent evaluation and transfer learning benchmarking.
+for subsequent evaluation and transfer learning benchmarking. Each run also
+persists its per-epoch training history and renders a loss-curve plot as soon
+as it finishes, followed by a multi-seed loss distribution plot at the end.
 """
 
 import os
 
+import matplotlib
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -21,7 +24,13 @@ from dementia_boost.models.classical_cnn import (
     LeNetFeatureExtractor,
 )
 from dementia_boost.telemetry.logger import setup_logger
+from dementia_boost.telemetry.visualizer import MetricsVisualizer
 from dementia_boost.training.trainer import BaselineTrainer
+
+DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/baseline"
+DEFAULT_LOSS_PLOTS_DIR: str = "./data/results/plots/nifti/loss"
+DEFAULT_EVAL_EVERY: int = 1
+PARADIGM: str = "baseline"
 
 
 def get_device() -> torch.device:
@@ -39,6 +48,7 @@ def get_device() -> torch.device:
 
 def main() -> None:
     """Executes the multiseed training loop for the classical CNN on NIfTI data."""
+    matplotlib.use("Agg")
     logger = setup_logger("baseline_train_nifti")
     device = get_device()
     logger.info(f"Target Device: {device}")
@@ -57,6 +67,7 @@ def main() -> None:
 
     save_dir = "./data/results/trained_models/nifti"
     os.makedirs(save_dir, exist_ok=True)
+    visualizer = MetricsVisualizer(output_dir=DEFAULT_LOSS_PLOTS_DIR)
 
     for seed in experiment_seeds:
         run_id = f"seed_{seed}"
@@ -81,6 +92,7 @@ def main() -> None:
         optimizer = optim.Adam(model.parameters(), lr=1e-4)
         scheduler = StepLR(optimizer, step_size=10, gamma=0.75)
 
+        history_path = os.path.join(DEFAULT_HISTORY_DIR, f"{run_id}.json")
         trainer = BaselineTrainer(
             model=model,
             train_loader=train_loader,
@@ -91,10 +103,19 @@ def main() -> None:
             device=device,
             logger=logger,
             save_dir=save_dir,
+            history_path=history_path,
+            eval_every=DEFAULT_EVAL_EVERY,
+            paradigm=PARADIGM,
         )
 
         trainer.train(epochs=epochs_per_run, run_id=run_id)
+        visualizer.plot_loss_curve(history_path, prefix=PARADIGM)
         logger.info(f"=== Completed Experiment: {run_id} ===\n")
+
+    try:
+        visualizer.plot_loss_distribution(DEFAULT_HISTORY_DIR, prefix=PARADIGM)
+    except ValueError as error:
+        logger.warning(f"Skipping loss distribution plot: {error}")
 
 
 if __name__ == "__main__":
