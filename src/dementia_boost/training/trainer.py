@@ -46,9 +46,11 @@ class BaselineTrainer:
         save_dir: Directory where checkpoint `.pt` files are written.
         save_model: Optional PyTorch module whose state dictionary is saved to
             disk upon completion (e.g. an assembled DementiaClassifier).
-        history_path: Optional JSON file rewritten atomically after every epoch
-            with the running `TrainingHistory`. None disables persistence.
+        history_path: Optional JSON file holding the running `TrainingHistory`,
+            rewritten atomically. None disables persistence.
         eval_every: Evaluate on `test_loader` every this many epochs.
+        history_save_every: Write the history to `history_path` every this many
+            epochs, and once more when training ends or fails.
         paradigm: Training paradigm label stored in the history.
         config: Extra hyperparameters stored in the history config.
     """
@@ -70,6 +72,7 @@ class BaselineTrainer:
         save_model: nn.Module | None = None,
         history_path: str | None = None,
         eval_every: int = 1,
+        history_save_every: int = 10,
         paradigm: str = "baseline",
         config: dict[str, Any] | None = None,
     ) -> None:
@@ -89,15 +92,30 @@ class BaselineTrainer:
             save_model: Optional PyTorch module to serialize on disk instead of
                 `model`. Defaults to None (saves `model`).
             history_path: Optional JSON path for the per-epoch history, written
-                atomically after every epoch. Defaults to None (no history file).
+                atomically. Defaults to None (no history file).
             eval_every: Number of epochs between evaluations on `test_loader`.
                 Epochs in between record `None` validation values. Defaults to 1.
+            history_save_every: Number of epochs between history writes. The
+                history stays in memory in between, and is always written once
+                more when training ends or fails, so a crash loses nothing
+                except on a hard kill (at most `history_save_every - 1` epochs).
+                Defaults to 10.
             paradigm: Training paradigm label ("baseline", "ctl", "qtl" or
                 "qiskit_qtl"). Defaults to "baseline".
             config: Extra hyperparameters (for example `n_qubits`, `n_layers`)
                 merged over the values the trainer derives itself. Defaults to
                 None.
+
+        Raises:
+            ValueError: If `eval_every` or `history_save_every` is below 1.
         """
+        for name, value in (
+            ("eval_every", eval_every),
+            ("history_save_every", history_save_every),
+        ):
+            if value < 1:
+                raise ValueError(f"{name} must be >= 1, got {value}.")
+
         self.model = model
         self.train_loader = train_loader
         self.test_loader = test_loader
@@ -110,6 +128,7 @@ class BaselineTrainer:
         self.save_model = save_model
         self.history_path = history_path
         self.eval_every = eval_every
+        self.history_save_every = history_save_every
         self.paradigm = paradigm
         self.config = config or {}
 
@@ -121,6 +140,10 @@ class BaselineTrainer:
         Runs forward and backward passes, updates optimizer and scheduler states,
         logs per-epoch loss and accuracy metrics, records a `TrainingHistory`,
         and triggers evaluation and checkpointing upon training completion.
+
+        The history is written to `history_path` every `history_save_every`
+        epochs and once more on exit, including when training raises, so every
+        completed epoch is on disk before the exception propagates.
 
         Args:
             epochs: Total number of complete passes over the training dataset.
@@ -139,60 +162,44 @@ class BaselineTrainer:
             config=self._build_history_config(epochs),
             epochs=[],
         )
+        saved_epochs = 0
 
-        for epoch in range(1, epochs + 1):
-            epoch_start = time.perf_counter()
-            self.model.train()
-            running_loss = 0.0
-            correct_preds = 0
-            total_samples = 0
+        try:
+            for epoch in range(1, epochs + 1):
+                epoch_start = time.perf_counter()
+                epoch_loss, epoch_acc = self._train_one_epoch()
 
-            for images, labels in self.train_loader:
-                images = images.to(self.device)
-                labels = labels.float().view(-1, 1).to(self.device)
+                epoch_lr = float(self.scheduler.get_last_lr()[0])
+                self.scheduler.step()
+                epoch_duration = time.perf_counter() - epoch_start
 
-                self.optimizer.zero_grad()
-
-                outputs = self.model(images)
-                loss = self.criterion(outputs, labels)
-
-                loss.backward()
-                self.optimizer.step()
-
-                running_loss += loss.item() * images.size(0)
-
-                predictions = (outputs >= self.LOGIT_CLASSIFICATION_THRESHOLD).float()
-                correct_preds += (predictions == labels).sum().item()
-                total_samples += labels.size(0)
-
-            epoch_lr = float(self.scheduler.get_last_lr()[0])
-            self.scheduler.step()
-
-            epoch_loss = running_loss / total_samples
-            epoch_acc = correct_preds / total_samples
-            epoch_duration = time.perf_counter() - epoch_start
-
-            self.logger.info(
-                f"Epoch [{epoch:03d}/{epochs:03d}] | Train Loss: {epoch_loss:.4f} "
-                f"| Train Acc: {epoch_acc:.4f}",
-            )
-
-            val_loss, val_acc = None, None
-            if epoch % self.eval_every == 0:
-                val_loss, val_acc = self._evaluate_loader(self.test_loader)
-
-            history.epochs.append(
-                EpochRecord(
-                    epoch=epoch,
-                    train_loss=epoch_loss,
-                    train_acc=epoch_acc,
-                    val_loss=val_loss,
-                    val_acc=val_acc,
-                    lr=epoch_lr,
-                    duration_s=epoch_duration,
+                self.logger.info(
+                    f"Epoch [{epoch:03d}/{epochs:03d}] | Train Loss: "
+                    f"{epoch_loss:.4f} | Train Acc: {epoch_acc:.4f}",
                 )
-            )
-            self._save_history(history)
+
+                val_loss, val_acc = None, None
+                if epoch % self.eval_every == 0:
+                    val_loss, val_acc = self._evaluate_loader(self.test_loader)
+
+                history.epochs.append(
+                    EpochRecord(
+                        epoch=epoch,
+                        train_loss=epoch_loss,
+                        train_acc=epoch_acc,
+                        val_loss=val_loss,
+                        val_acc=val_acc,
+                        lr=epoch_lr,
+                        duration_s=epoch_duration,
+                    )
+                )
+
+                if epoch % self.history_save_every == 0:
+                    self._save_history(history)
+                    saved_epochs = len(history.epochs)
+        finally:
+            if len(history.epochs) > saved_epochs:
+                self._save_history(history)
 
         self.logger.info(
             f"Training complete for run {run_id}. Starting final evaluation."
@@ -201,6 +208,37 @@ class BaselineTrainer:
         self._evaluate_and_save(run_id)
 
         return history
+
+    def _train_one_epoch(self) -> tuple[float, float]:
+        """Runs one optimization pass over the training loader.
+
+        Returns:
+            A `(loss, accuracy)` tuple averaged over all training samples.
+        """
+        self.model.train()
+        running_loss = 0.0
+        correct_preds = 0
+        total_samples = 0
+
+        for images, labels in self.train_loader:
+            images = images.to(self.device)
+            labels = labels.float().view(-1, 1).to(self.device)
+
+            self.optimizer.zero_grad()
+
+            outputs = self.model(images)
+            loss = self.criterion(outputs, labels)
+
+            loss.backward()
+            self.optimizer.step()
+
+            running_loss += loss.item() * images.size(0)
+
+            predictions = (outputs >= self.LOGIT_CLASSIFICATION_THRESHOLD).float()
+            correct_preds += (predictions == labels).sum().item()
+            total_samples += labels.size(0)
+
+        return running_loss / total_samples, correct_preds / total_samples
 
     def _build_history_config(self, epochs: int) -> dict[str, Any]:
         """Builds the reproducibility config stored in the training history.

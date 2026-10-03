@@ -3,7 +3,8 @@
 This module validates that BaselineTrainer supports both end-to-end full model
 training on raw images and fast transfer learning on cached feature embeddings
 with composite model checkpoint serialization for CTL and QTL heads, and that
-it records a per-epoch `TrainingHistory` atomically to disk.
+it records a per-epoch `TrainingHistory`, persists it atomically every few
+epochs and on exit, and rejects non-positive evaluation or save cadences.
 """
 
 import math
@@ -25,7 +26,7 @@ from dementia_boost.models.classical_cnn import (
 )
 from dementia_boost.models.quantum_cnn import QuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
-from dementia_boost.telemetry.metrics import MetricsAnalyzer
+from dementia_boost.telemetry.metrics import MetricsAnalyzer, TrainingHistory
 from dementia_boost.training.evaluator import ModelEvaluator
 from dementia_boost.training.trainer import BaselineTrainer
 
@@ -260,6 +261,7 @@ def _build_history_trainer(
     tmp_path: Path,
     criterion: nn.Module,
     eval_every: int,
+    history_save_every: int = 10,
 ) -> tuple[BaselineTrainer, Path]:
     """Builds a tiny linear-model trainer that records its history to disk."""
     features = torch.randn(NUM_MOCK_SAMPLES, 4)
@@ -281,6 +283,7 @@ def _build_history_trainer(
         save_dir=str(tmp_path / "checkpoints"),
         history_path=str(history_path),
         eval_every=eval_every,
+        history_save_every=history_save_every,
         paradigm="baseline",
     )
     return trainer, history_path
@@ -309,6 +312,56 @@ def test_train_returns_history_matching_schedule_and_disk(tmp_path: Path) -> Non
     ]
     assert history.config["lr_step_size"] == HISTORY_STEP_SIZE
     assert MetricsAnalyzer.load_history(str(history_path)) == history
+
+
+@pytest.mark.parametrize(
+    ("epochs", "expected_saved_lengths"),
+    [(5, [2, 4, 5]), (4, [2, 4])],
+)
+def test_history_saved_every_n_epochs_and_once_on_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    epochs: int,
+    expected_saved_lengths: list[int],
+) -> None:
+    """Validates that the history is written at each `history_save_every`
+    boundary and once more on exit only when epochs remain unsaved, so a run
+    ending on a boundary does not write twice."""
+    trainer, _ = _build_history_trainer(
+        tmp_path, nn.BCEWithLogitsLoss(), eval_every=100, history_save_every=2
+    )
+    saved_lengths: list[int] = []
+    original_save = trainer._save_history
+
+    def spy(history: TrainingHistory) -> None:
+        saved_lengths.append(len(history.epochs))
+        original_save(history)
+
+    monkeypatch.setattr(trainer, "_save_history", spy)
+
+    trainer.train(epochs=epochs, run_id="run")
+
+    assert saved_lengths == expected_saved_lengths
+
+
+@pytest.mark.parametrize(
+    ("eval_every", "history_save_every"),
+    [(0, 10), (-1, 10), (1, 0), (1, -5)],
+)
+def test_non_positive_cadence_is_rejected(
+    tmp_path: Path,
+    eval_every: int,
+    history_save_every: int,
+) -> None:
+    """Validates that a zero or negative cadence fails at construction instead
+    of raising a modulo-by-zero error mid-training."""
+    with pytest.raises(ValueError, match="must be >= 1"):
+        _build_history_trainer(
+            tmp_path,
+            nn.BCEWithLogitsLoss(),
+            eval_every=eval_every,
+            history_save_every=history_save_every,
+        )
 
 
 def test_history_survives_mid_run_crash(tmp_path: Path) -> None:
