@@ -4,16 +4,14 @@ This script identifies the optimal pre-trained classical CNN baseline from
 telemetry metrics, extracts and caches feature representations once, and
 trains a hybrid Dressed Quantum Network (DQN) classification head across
 multiple random seeds (0 to 100) using BCEWithLogitsLoss on NIfTI axial slices.
-Each run also persists its per-epoch training history and renders a loss-curve
-plot as soon as it finishes, followed by a multi-seed loss distribution plot at
-the end.
+Each run also persists its per-epoch training history as JSON; loss plots are
+rendered from those files by `scripts/viz/visualize_loss.py`.
 """
 
 import json
 import os
 import sys
 
-import matplotlib
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -28,7 +26,6 @@ from dementia_boost.models.builder import (
 )
 from dementia_boost.models.quantum_cnn import QuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
-from dementia_boost.telemetry.visualizer import MetricsVisualizer
 from dementia_boost.training.trainer import BaselineTrainer
 
 DEFAULT_BASELINE_METRICS_PATH: str = (
@@ -49,7 +46,6 @@ DEFAULT_TORCH_DEVICE: str = "cpu"
 DEFAULT_QUANTUM_DEVICE: str = "lightning.qubit"
 DEFAULT_GRADIENT_METHOD: str = "adjoint"
 DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/qtl"
-DEFAULT_LOSS_PLOTS_DIR: str = "./data/results/plots/nifti/loss"
 DEFAULT_EVAL_EVERY: int = 1
 PARADIGM: str = "qtl"
 
@@ -124,12 +120,10 @@ def select_best_baseline(metrics_json_path: str = DEFAULT_BASELINE_METRICS_PATH)
 
 def main() -> None:
     """Executes Quantum Transfer Learning sweep across seeds on cached embeddings."""
-    matplotlib.use("Agg")
     logger = setup_logger("qtl_multiseed_nifti")
     device = get_device()
 
     os.makedirs(DEFAULT_QTL_SAVE_DIR, exist_ok=True)
-    visualizer = MetricsVisualizer(output_dir=DEFAULT_LOSS_PLOTS_DIR)
 
     try:
         best_run_id = select_best_baseline(DEFAULT_BASELINE_METRICS_PATH)
@@ -257,13 +251,7 @@ def main() -> None:
         )
 
         trainer.train(epochs=DEFAULT_EPOCHS_PER_RUN, run_id=run_id)
-        visualizer.plot_loss_curve(history_path, prefix=PARADIGM)
         logger.info(f"=== Completed QTL Experiment: {run_id} ===\n")
-
-    try:
-        visualizer.plot_loss_distribution(DEFAULT_HISTORY_DIR, prefix=PARADIGM)
-    except ValueError as error:
-        logger.warning(f"Skipping loss distribution plot: {error}")
 
     logger.info("Quantum Transfer Learning multi-seed sweep complete.")
 

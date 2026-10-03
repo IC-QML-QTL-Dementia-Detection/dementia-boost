@@ -18,17 +18,16 @@ exact gradient fidelity (stochastic approximation instead of analytic
 parameter-shift). This trade-off is necessary to keep the full 101-seed,
 100-epoch sweep computationally tractable.
 
-Each run also persists its per-epoch training history and renders a loss-curve
-plot as soon as it finishes, followed by a multi-seed loss distribution plot at
-the end. Validation is evaluated every `DEFAULT_EVAL_EVERY` epochs because a
-Qiskit forward pass over the test set is expensive with the current setup.
+Each run also persists its per-epoch training history as JSON; loss plots are
+rendered from those files by `scripts/viz/visualize_loss.py`. Validation is
+evaluated every `DEFAULT_EVAL_EVERY` epochs because a Qiskit forward pass over
+the test set is expensive with the current setup.
 """
 
 import json
 import os
 import sys
 
-import matplotlib
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -45,7 +44,6 @@ from dementia_boost.models.builder import (
 )
 from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
-from dementia_boost.telemetry.visualizer import MetricsVisualizer
 from dementia_boost.training.trainer import BaselineTrainer
 
 DEFAULT_BASELINE_METRICS_PATH: str = (
@@ -65,7 +63,6 @@ DEFAULT_N_LAYERS: int = 4
 DEFAULT_TORCH_DEVICE: str = "cpu"
 DEFAULT_SPSA_BATCH_SIZE: int = 1
 DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/qiskit_qtl"
-DEFAULT_LOSS_PLOTS_DIR: str = "./data/results/plots/nifti/loss"
 DEFAULT_EVAL_EVERY: int = 5
 PARADIGM: str = "qiskit_qtl"
 
@@ -162,12 +159,10 @@ def build_spsa_gradient(
 
 def main() -> None:
     """Executes Qiskit QTL sweep across seeds on cached embeddings."""
-    matplotlib.use("Agg")
     logger = setup_logger("qiskit_qtl_multiseed_nifti")
     device = get_device()
 
     os.makedirs(DEFAULT_QTL_SAVE_DIR, exist_ok=True)
-    visualizer = MetricsVisualizer(output_dir=DEFAULT_LOSS_PLOTS_DIR)
 
     try:
         best_run_id = select_best_baseline(DEFAULT_BASELINE_METRICS_PATH)
@@ -304,13 +299,7 @@ def main() -> None:
         )
 
         trainer.train(epochs=DEFAULT_EPOCHS_PER_RUN, run_id=run_id)
-        visualizer.plot_loss_curve(history_path, prefix=PARADIGM)
         logger.info(f"=== Completed Qiskit QTL Experiment: {run_id} ===\n")
-
-    try:
-        visualizer.plot_loss_distribution(DEFAULT_HISTORY_DIR, prefix=PARADIGM)
-    except ValueError as error:
-        logger.warning(f"Skipping loss distribution plot: {error}")
 
     logger.info("Qiskit Quantum Transfer Learning multi-seed sweep complete.")
 
