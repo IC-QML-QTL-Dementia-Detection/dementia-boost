@@ -314,6 +314,35 @@ def test_train_returns_history_matching_schedule_and_disk(tmp_path: Path) -> Non
     assert MetricsAnalyzer.load_history(str(history_path)) == history
 
 
+def test_last_epoch_is_always_evaluated_without_an_extra_final_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validates that an epoch off the `eval_every` boundary still gets a
+    validation value when it is the last one, and that the final report reuses
+    it, so the test loader is evaluated exactly once per recorded point."""
+    trainer, _ = _build_history_trainer(tmp_path, nn.BCEWithLogitsLoss(), eval_every=2)
+    evaluated_loaders: list[DataLoader] = []
+    original_evaluate = trainer._evaluate_loader
+
+    def spy(loader: DataLoader) -> tuple[float, float]:
+        evaluated_loaders.append(loader)
+        return original_evaluate(loader)
+
+    monkeypatch.setattr(trainer, "_evaluate_loader", spy)
+
+    history = trainer.train(epochs=5, run_id="run")
+
+    assert [r.val_loss is not None for r in history.epochs] == [
+        False,
+        True,
+        False,
+        True,
+        True,
+    ]
+    assert len(evaluated_loaders) == 3
+
+
 @pytest.mark.parametrize(
     ("epochs", "expected_saved_lengths"),
     [(5, [2, 4, 5]), (4, [2, 4])],

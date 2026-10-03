@@ -48,7 +48,8 @@ class BaselineTrainer:
             disk upon completion (e.g. an assembled DementiaClassifier).
         history_path: Optional JSON file holding the running `TrainingHistory`,
             rewritten atomically. None disables persistence.
-        eval_every: Evaluate on `test_loader` every this many epochs.
+        eval_every: Evaluate on `test_loader` every this many epochs. The last
+            epoch is always evaluated, and that result is the final test report.
         history_save_every: Write the history to `history_path` every this many
             epochs, and once more when training ends or fails.
         paradigm: Training paradigm label stored in the history.
@@ -94,7 +95,8 @@ class BaselineTrainer:
             history_path: Optional JSON path for the per-epoch history, written
                 atomically. Defaults to None (no history file).
             eval_every: Number of epochs between evaluations on `test_loader`.
-                Epochs in between record `None` validation values. Defaults to 1.
+                Epochs in between record `None` validation values, except the
+                last epoch, which is always evaluated. Defaults to 1.
             history_save_every: Number of epochs between history writes. The
                 history stays in memory in between, and is always written once
                 more when training ends or fails, so a crash loses nothing
@@ -139,7 +141,10 @@ class BaselineTrainer:
 
         Runs forward and backward passes, updates optimizer and scheduler states,
         logs per-epoch loss and accuracy metrics, records a `TrainingHistory`,
-        and triggers evaluation and checkpointing upon training completion.
+        and saves the final checkpoint upon training completion. The test loader
+        is evaluated every `eval_every` epochs and always after the last epoch;
+        the last evaluation doubles as the final test report, so no extra pass
+        runs at the end.
 
         The history is written to `history_path` every `history_save_every`
         epochs and once more on exit, including when training raises, so every
@@ -163,6 +168,7 @@ class BaselineTrainer:
             epochs=[],
         )
         saved_epochs = 0
+        last_evaluation: tuple[float, float] | None = None
 
         try:
             for epoch in range(1, epochs + 1):
@@ -179,8 +185,9 @@ class BaselineTrainer:
                 )
 
                 val_loss, val_acc = None, None
-                if epoch % self.eval_every == 0:
-                    val_loss, val_acc = self._evaluate_loader(self.test_loader)
+                if epoch % self.eval_every == 0 or epoch == epochs:
+                    last_evaluation = self._evaluate_loader(self.test_loader)
+                    val_loss, val_acc = last_evaluation
 
                 history.epochs.append(
                     EpochRecord(
@@ -201,11 +208,11 @@ class BaselineTrainer:
             if len(history.epochs) > saved_epochs:
                 self._save_history(history)
 
-        self.logger.info(
-            f"Training complete for run {run_id}. Starting final evaluation."
-        )
+        self.logger.info(f"Training complete for run {run_id}. Saving final model.")
 
-        self._evaluate_and_save(run_id)
+        if last_evaluation is None:
+            last_evaluation = self._evaluate_loader(self.test_loader)
+        self._save_checkpoint(run_id, *last_evaluation)
 
         return history
 
@@ -311,17 +318,20 @@ class BaselineTrainer:
 
         return total_loss / total, correct / total
 
-    def _evaluate_and_save(self, run_id: str) -> None:
-        """Evaluates model performance on the test dataset and saves weights.
+    def _save_checkpoint(
+        self, run_id: str, final_loss: float, final_acc: float
+    ) -> None:
+        """Logs the final test performance and saves the model weights.
 
-        Computes final test loss and accuracy in evaluation mode without gradients,
-        logs test performance, and serializes the model state dictionary to disk.
+        Receives the test loss and accuracy of the last epoch instead of
+        evaluating again, since the weights have not changed since then.
+        Serializes the model state dictionary to disk.
 
         Args:
             run_id: Unique identifier for the run used in file naming.
+            final_loss: Test loss measured after the last epoch.
+            final_acc: Test accuracy measured after the last epoch.
         """
-        final_loss, final_acc = self._evaluate_loader(self.test_loader)
-
         self.logger.info(
             f"[*] Final Test Loss: {final_loss:.4f} | Final Test Acc: {final_acc:.4f}"
         )
