@@ -31,14 +31,14 @@ flowchart TD
     end
 
     subgraph Training ["Training & Inference Layer"]
-        TR["BaselineTrainer<br/>(Epoch Loops, Loss, Checkpointing)"]
+        TR["BaselineTrainer<br/>(Epoch Loops, Loss, Checkpointing, History Recording)"]
         EV["ModelEvaluator<br/>(Inference, Probabilities, Ground Truths)"]
     end
 
     subgraph Telemetry ["Telemetry & Reporting Layer"]
         LOG["Logger<br/>(Dual Console & Timestamped Logs)"]
-        MET["MetricsAnalyzer<br/>(Accuracy, Precision, Recall, F1, AUC, Confusion Matrix)"]
-        VIS["MetricsVisualizer<br/>(Seaborn Boxplots, ROC Curves, Heatmaps)"]
+        MET["MetricsAnalyzer<br/>(Accuracy, Precision, Recall, F1, AUC, Confusion Matrix, Training History DTOs)"]
+        VIS["MetricsVisualizer<br/>(Seaborn Boxplots, ROC Curves, Heatmaps, Loss Curves)"]
     end
 
     Core --> Data
@@ -241,10 +241,12 @@ flowchart LR
         ANALYZER["MetricsAnalyzer<br/>- Accuracy, Precision, Recall, F1, AUC<br/>- Confusion Matrix"]
         DTO_INDIV["EvaluationResult (DTO)"]
         DTO_AGGR["AggregateMetrics (DTO)<br/>(mean, std, min, max)"]
+        DTO_HIST["TrainingHistory (DTO)<br/>(one EpochRecord per epoch)"]
     end
 
     subgraph Storage ["Telemetry Storage"]
         JSON_STORE["JSON File<br/>(individual_runs + aggregated_stats)"]
+        JSON_HIST["History JSON<br/>(histories/nifti/{paradigm}/{run_id}.json)"]
         LOGS["Timestamped Logs<br/>(logs/YYYYMMDD_HHMMSS_*.log)"]
     end
 
@@ -253,6 +255,9 @@ flowchart LR
         ROC_AGG["MetricsVisualizer.plot_comparative_roc()"]
         ROC_ISO["MetricsVisualizer.plot_isolated_roc()"]
         CONF_MAT["MetricsVisualizer.plot_confusion_matrix()"]
+        LOSS_CURVE["MetricsVisualizer.plot_loss_curve()"]
+        LOSS_DIST["MetricsVisualizer.plot_loss_distribution()"]
+        LOSS_CMP["MetricsVisualizer.plot_loss_comparison()"]
     end
 
     TRAINER --> EVAL
@@ -264,7 +269,13 @@ flowchart LR
     JSON_STORE --> ROC_AGG
     JSON_STORE --> ROC_ISO
     JSON_STORE --> CONF_MAT
+    TRAINER --> DTO_HIST --> JSON_HIST
+    JSON_HIST --> LOSS_CURVE
+    JSON_HIST --> LOSS_DIST
+    JSON_HIST --> LOSS_CMP
 ```
+
+Training histories follow the same boundary as the evaluation metrics. During training, `BaselineTrainer` only records a `TrainingHistory` and writes it to JSON (every `history_save_every` epochs, default 10, and once more on exit, atomically through a temporary file), so the Training layer never imports plotting code. Loss curves are produced afterwards by `scripts/viz/visualize_loss.py`, which reads the history files and writes per-seed and distribution plots to `plots/nifti/loss/{paradigm}/` and the cross-paradigm comparison to `plots/nifti/loss/`.
 
 ---
 
@@ -297,11 +308,11 @@ dementia-boost/
 │       │       └── heads.py               # QuantumClassifierHead (DQN)
 │       ├── training/                      # Training and inference lifecycle runners
 │       │   ├── evaluator.py               # Weight loading and inference predictor
-│       │   └── trainer.py                 # Training loop with validation & checkpointing
+│       │   └── trainer.py                 # Training loop with validation, checkpointing & history recording
 │       └── telemetry/                     # Metrics calculation, serialization & plotting
 │           ├── logger.py                  # Standardized dual console/file logger
-│           ├── metrics.py                 # MetricsAnalyzer and DTO definitions
-│           └── visualizer.py              # Publication-ready Seaborn/Matplotlib plots
+│           ├── metrics.py                 # MetricsAnalyzer, metric DTOs and training history DTOs
+│           └── visualizer.py              # Publication-ready Seaborn/Matplotlib plots, incl. loss curves
 ├── scripts/                               # CLI entry-points for training and evaluation
 │   ├── etl_pipeline.py                    # 3D NIfTI to 2D slice ETL & patient-split orchestrator
 │   ├── metrics/                           # Batch evaluation and delta improvement report scripts
@@ -315,6 +326,7 @@ dementia-boost/
 │   │   └── train_tl_multiseed.py          # Classical Transfer Learning (CTL) training
 │   └── viz/                               # Telemetry plotting and visualization scripts
 │       ├── visualize_baselines.py         # Boxplots, ROC curves, confusion matrices for baseline
+│       ├── visualize_loss.py              # Loss curves from saved training histories (per paradigm and comparison)
 │       ├── visualize_qtl.py               # Boxplots, ROC curves, confusion matrices for QTL
 │       └── visualize_tl.py                # Boxplots, ROC curves, confusion matrices for CTL
 └── tests/                                 # Unit and integration test suites
