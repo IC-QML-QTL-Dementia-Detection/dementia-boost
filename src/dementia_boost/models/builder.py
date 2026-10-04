@@ -8,6 +8,7 @@ backbones, and assemble complete DementiaClassifier models from separate compone
 
 import torch
 import torch.nn as nn
+from qiskit.primitives import BaseEstimatorV2
 
 from dementia_boost.models.quantum_cnn import (
     QiskitQuantumClassifierHead,
@@ -150,6 +151,7 @@ def build_qiskit_quantum_tl_model(
     device: torch.device,
     n_qubits: int = QiskitQuantumClassifierHead.DEFAULT_N_QUBITS,
     n_layers: int = QiskitQuantumClassifierHead.DEFAULT_N_LAYERS,
+    estimator: BaseEstimatorV2 | None = None,
 ) -> nn.Module:
     """Builds a Qiskit-based Quantum Transfer Learning (QTL) hybrid model.
 
@@ -166,6 +168,8 @@ def build_qiskit_quantum_tl_model(
         device: The target hardware accelerator device (CPU, CUDA, MPS).
         n_qubits: Number of qubits in the variational quantum circuit.
         n_layers: Number of variational repetitions (depth) in the ansatz.
+        estimator: Optional Qiskit Primitives V2 estimator executing the
+            circuit. If None, resolves to a noiseless `StatevectorEstimator`.
 
     Returns:
         The prepared hybrid PyTorch module with frozen backbone and initialized
@@ -190,6 +194,7 @@ def build_qiskit_quantum_tl_model(
         in_features=QiskitQuantumClassifierHead.DEFAULT_IN_FEATURES,
         n_qubits=n_qubits,
         n_layers=n_layers,
+        estimator=estimator,
     )
 
     model.classifier_head.apply(QiskitQuantumClassifierHead.apply_glorot_init)

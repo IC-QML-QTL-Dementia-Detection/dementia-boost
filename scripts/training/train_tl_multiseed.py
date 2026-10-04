@@ -3,7 +3,9 @@
 This script parses classical baseline evaluation results, identifies the
 best-performing baseline model checkpoint, extracts and caches feature
 representations once, and trains newly initialized classical dense heads
-across multiple random seeds (0 to 100) using BCEWithLogitsLoss.
+across multiple random seeds (0 to 100) using BCEWithLogitsLoss. Each run also
+persists its per-epoch training history as JSON; loss plots are rendered from
+those files by `scripts/viz/visualize_loss.py`.
 """
 
 import json
@@ -38,6 +40,9 @@ DEFAULT_LEARNING_RATE: float = 1e-4
 DEFAULT_LR_STEP_SIZE: int = 10
 DEFAULT_LR_GAMMA: float = 0.75
 DEFAULT_FEATURE_DIM: int = 2304
+DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/ctl"
+DEFAULT_EVAL_EVERY: int = 1
+PARADIGM: str = "ctl"
 
 
 def get_device() -> torch.device:
@@ -195,6 +200,7 @@ def main() -> None:
             gamma=DEFAULT_LR_GAMMA,
         )
 
+        history_path = os.path.join(DEFAULT_HISTORY_DIR, f"{run_id}.json")
         trainer = BaselineTrainer(
             model=head,
             train_loader=train_loader,
@@ -206,6 +212,9 @@ def main() -> None:
             logger=logger,
             save_dir=DEFAULT_TL_SAVE_DIR,
             save_model=full_model,
+            history_path=history_path,
+            eval_every=DEFAULT_EVAL_EVERY,
+            paradigm=PARADIGM,
         )
 
         trainer.train(epochs=DEFAULT_EPOCHS_PER_RUN, run_id=run_id)

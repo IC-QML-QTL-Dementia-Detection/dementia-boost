@@ -2,11 +2,15 @@
 
 This module validates that BaselineTrainer supports both end-to-end full model
 training on raw images and fast transfer learning on cached feature embeddings
-with composite model checkpoint serialization for CTL and QTL heads.
+with composite model checkpoint serialization for CTL and QTL heads, and that
+it records a per-epoch `TrainingHistory`, persists it atomically every few
+epochs and on exit, and rejects non-positive evaluation or save cadences.
 """
 
+import math
 from pathlib import Path
 
+import pytest
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -22,6 +26,7 @@ from dementia_boost.models.classical_cnn import (
 )
 from dementia_boost.models.quantum_cnn import QuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
+from dementia_boost.telemetry.metrics import MetricsAnalyzer, TrainingHistory
 from dementia_boost.training.evaluator import ModelEvaluator
 from dementia_boost.training.trainer import BaselineTrainer
 
@@ -36,6 +41,8 @@ STEP_SIZE: int = 5
 GAMMA: float = 0.5
 TEST_QTL_QUBITS: int = 2
 TEST_QTL_LAYERS: int = 1
+HISTORY_STEP_SIZE: int = 2
+BATCHES_PER_EPOCH: int = NUM_MOCK_SAMPLES // BATCH_SIZE
 
 
 def test_baseline_trainer_with_cached_embeddings_and_save_model(
@@ -233,3 +240,168 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
     assert y_true.shape == (NUM_MOCK_SAMPLES,)
     assert y_prob.shape == (NUM_MOCK_SAMPLES,)
     assert (y_prob >= 0.0).all() and (y_prob <= 1.0).all()
+
+
+class _FailingCriterion(nn.BCEWithLogitsLoss):
+    """BCE loss that raises after a fixed number of calls to simulate a crash."""
+
+    def __init__(self, max_calls: int) -> None:
+        super().__init__()
+        self.max_calls = max_calls
+        self.calls = 0
+
+    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        self.calls += 1
+        if self.calls > self.max_calls:
+            raise RuntimeError("simulated crash")
+        return super().forward(input, target)
+
+
+def _build_history_trainer(
+    tmp_path: Path,
+    criterion: nn.Module,
+    eval_every: int,
+    history_save_every: int = 10,
+) -> tuple[BaselineTrainer, Path]:
+    """Builds a tiny linear-model trainer that records its history to disk."""
+    features = torch.randn(NUM_MOCK_SAMPLES, 4)
+    labels = torch.tensor([0.0, 1.0] * (NUM_MOCK_SAMPLES // 2))
+    loader = DataLoader(TensorDataset(features, labels), batch_size=BATCH_SIZE)
+    model = nn.Linear(4, 1)
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    history_path = tmp_path / "histories" / "run.json"
+
+    trainer = BaselineTrainer(
+        model=model,
+        train_loader=loader,
+        test_loader=loader,
+        criterion=criterion,
+        optimizer=optimizer,
+        scheduler=StepLR(optimizer, step_size=HISTORY_STEP_SIZE, gamma=GAMMA),
+        device=torch.device("cpu"),
+        logger=setup_logger("test_trainer_history"),
+        save_dir=str(tmp_path / "checkpoints"),
+        history_path=str(history_path),
+        eval_every=eval_every,
+        history_save_every=history_save_every,
+        paradigm="baseline",
+    )
+    return trainer, history_path
+
+
+def test_train_returns_history_matching_schedule_and_disk(tmp_path: Path) -> None:
+    """Validates epoch count, finite losses, the StepLR learning rate used in
+    each epoch, validation only on `eval_every` boundaries, and that the JSON
+    on disk equals the returned history."""
+    trainer, history_path = _build_history_trainer(
+        tmp_path, nn.BCEWithLogitsLoss(), eval_every=2
+    )
+
+    history = trainer.train(epochs=4, run_id="run")
+
+    assert [r.epoch for r in history.epochs] == [1, 2, 3, 4]
+    assert all(math.isfinite(r.train_loss) for r in history.epochs)
+    assert [r.lr for r in history.epochs] == pytest.approx(
+        [LEARNING_RATE, LEARNING_RATE, LEARNING_RATE * GAMMA, LEARNING_RATE * GAMMA]
+    )
+    assert [r.val_loss is not None for r in history.epochs] == [
+        False,
+        True,
+        False,
+        True,
+    ]
+    assert history.config["lr_step_size"] == HISTORY_STEP_SIZE
+    assert MetricsAnalyzer.load_history(str(history_path)) == history
+
+
+def test_last_epoch_is_always_evaluated_without_an_extra_final_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validates that an epoch off the `eval_every` boundary still gets a
+    validation value when it is the last one, and that the final report reuses
+    it, so the test loader is evaluated exactly once per recorded point."""
+    trainer, _ = _build_history_trainer(tmp_path, nn.BCEWithLogitsLoss(), eval_every=2)
+    evaluated_loaders: list[DataLoader] = []
+    original_evaluate = trainer._evaluate_loader
+
+    def spy(loader: DataLoader) -> tuple[float, float]:
+        evaluated_loaders.append(loader)
+        return original_evaluate(loader)
+
+    monkeypatch.setattr(trainer, "_evaluate_loader", spy)
+
+    history = trainer.train(epochs=5, run_id="run")
+
+    assert [r.val_loss is not None for r in history.epochs] == [
+        False,
+        True,
+        False,
+        True,
+        True,
+    ]
+    assert len(evaluated_loaders) == 3
+
+
+@pytest.mark.parametrize(
+    ("epochs", "expected_saved_lengths"),
+    [(5, [2, 4, 5]), (4, [2, 4])],
+)
+def test_history_saved_every_n_epochs_and_once_on_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    epochs: int,
+    expected_saved_lengths: list[int],
+) -> None:
+    """Validates that the history is written at each `history_save_every`
+    boundary and once more on exit only when epochs remain unsaved, so a run
+    ending on a boundary does not write twice."""
+    trainer, _ = _build_history_trainer(
+        tmp_path, nn.BCEWithLogitsLoss(), eval_every=100, history_save_every=2
+    )
+    saved_lengths: list[int] = []
+    original_save = trainer._save_history
+
+    def spy(history: TrainingHistory) -> None:
+        saved_lengths.append(len(history.epochs))
+        original_save(history)
+
+    monkeypatch.setattr(trainer, "_save_history", spy)
+
+    trainer.train(epochs=epochs, run_id="run")
+
+    assert saved_lengths == expected_saved_lengths
+
+
+@pytest.mark.parametrize(
+    ("eval_every", "history_save_every"),
+    [(0, 10), (-1, 10), (1, 0), (1, -5)],
+)
+def test_non_positive_cadence_is_rejected(
+    tmp_path: Path,
+    eval_every: int,
+    history_save_every: int,
+) -> None:
+    """Validates that a zero or negative cadence fails at construction instead
+    of raising a modulo-by-zero error mid-training."""
+    with pytest.raises(ValueError, match="must be >= 1"):
+        _build_history_trainer(
+            tmp_path,
+            nn.BCEWithLogitsLoss(),
+            eval_every=eval_every,
+            history_save_every=history_save_every,
+        )
+
+
+def test_history_survives_mid_run_crash(tmp_path: Path) -> None:
+    """Validates that a crash in epoch 3 leaves a parseable JSON holding the two
+    completed epochs and no leftover temporary file."""
+    criterion = _FailingCriterion(max_calls=2 * BATCHES_PER_EPOCH)
+    trainer, history_path = _build_history_trainer(tmp_path, criterion, eval_every=100)
+
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        trainer.train(epochs=4, run_id="run")
+
+    saved = MetricsAnalyzer.load_history(str(history_path))
+    assert [r.epoch for r in saved.epochs] == [1, 2]
+    assert not history_path.with_name("run.json.tmp").exists()

@@ -40,11 +40,11 @@ The codebase enforces strict modularity and MLOps practices, keeping neural netw
 
 - **`data/`**: Data loading and ETL pipelines with patient-level leakage prevention, dynamic PIL/NIfTI loaders, custom `MinMaxNormalize` transforms, and in-memory feature embedding caching for fast transfer learning (`data_loader.py`, `data_processor.py`, `jpg_indexer.py`, `dataset.py`, `embedding_cache.py`).
 
-- **`models/`**: Dependency-injected architectures pairing a `LeNetFeatureExtractor` backbone with interchangeable heads: `ClassicalClassifierHead` (CTL) or `QuantumClassifierHead` (DQN / QTL) built via `builder.py`.
+- **`models/`**: Dependency-injected architectures pairing a `LeNetFeatureExtractor` backbone with interchangeable heads: `ClassicalClassifierHead` (CTL), `QuantumClassifierHead` (DQN / QTL on PennyLane), or `QiskitQuantumClassifierHead` (the same DQN on Qiskit Primitives V2, with an injectable estimator and Aer as the default noiseless backend) built via `builder.py`.
 
-- **`training/`**: Isolated `BaselineTrainer` and `ModelEvaluator` separating training/optimization loops from model definitions and file I/O.
+- **`training/`**: Isolated `BaselineTrainer` and `ModelEvaluator` separating training/optimization loops from model definitions and file I/O. The trainer records a per-epoch `TrainingHistory` and saves it as JSON, but never plots.
 
-- **`telemetry/`**: Stateless DTO-driven metric computation (`MetricsAnalyzer`), JSON persistence, dual logging (`setup_logger`), and publication-ready visualizers (`MetricsVisualizer`).
+- **`telemetry/`**: Stateless DTO-driven metric computation (`MetricsAnalyzer`), JSON persistence of evaluation metrics and training histories, dual logging (`setup_logger`), and publication-ready visualizers (`MetricsVisualizer`), including loss curves rendered from the saved histories.
 
 For full technical specifications and detailed Mermaid architectural diagrams, see **[docs/architecture.md](docs/architecture.md)**.
 
@@ -105,7 +105,12 @@ python scripts/training/train_tl_multiseed.py
 
 # Train Quantum Transfer Learning (QTL) Dressed Quantum Network
 python scripts/training/train_qtl_multiseed.py
+
+# Train the same Dressed Quantum Network on Qiskit (Aer state-vector, SPSA gradients)
+python scripts/training/train_qiskit_qtl_multiseed.py
 ```
+
+Every training script also writes a per-epoch history (loss, accuracy, learning rate, duration) as one JSON file per seed under `data/results/histories/nifti/<paradigm>/`. The training scripts do not produce plots; see the next step.
 
 ### 4. Evaluation & Telemetry Visualization
 
@@ -114,6 +119,7 @@ python scripts/training/train_qtl_multiseed.py
 python scripts/metrics/evaluate_baseline.py
 python scripts/metrics/evaluate_tl.py
 python scripts/metrics/evaluate_qtl.py
+python scripts/metrics/evaluate_qiskit_qtl.py
 
 # Generate comparison and delta improvement report
 python scripts/metrics/generate_improvement_report.py
@@ -122,6 +128,12 @@ python scripts/metrics/generate_improvement_report.py
 python scripts/viz/visualize_baselines.py
 python scripts/viz/visualize_tl.py
 python scripts/viz/visualize_qtl.py
+python scripts/viz/visualize_qiskit_qtl.py
+
+# Plot loss curves from the saved training histories: per-seed and distribution
+# plots go to data/results/plots/nifti/loss/<paradigm>/, and the cross-paradigm
+# comparison to data/results/plots/nifti/loss/. Can run while sweeps are in progress.
+python scripts/viz/visualize_loss.py
 ```
 
 ---

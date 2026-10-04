@@ -8,15 +8,20 @@ slices. Independent and interchangeable with `train_qtl_multiseed.py`, sharing
 the same classical backbone and ansatz formulation while executing on Qiskit
 Primitives V2 instead of PennyLane.
 
-Gradient strategy: `EstimatorQNN`'s default parameter-shift gradient scales
-linearly with the number of differentiable parameters (72 circuit weights + 6
-angle-embedded inputs at the default 6-qubit, 4-layer depth), which makes a
-single training batch take on the order of tens of minutes. This script
-instead injects `SPSAEstimatorGradient`, which evaluates only 2 perturbed
-circuits per gradient step regardless of parameter count, at the cost of
-exact gradient fidelity (stochastic approximation instead of analytic
-parameter-shift). This trade-off is necessary to keep the full 101-seed,
-100-epoch sweep computationally tractable.
+Gradient strategy: exact parameter-shift scales linearly with the number of
+differentiable parameters (72 circuit weights + 6 angle-embedded inputs at the
+default 6-qubit, 4-layer depth), which makes a single training batch take on
+the order of tens of minutes. The quantum layer instead takes a loss-level SPSA
+gradient, which evaluates only 2 perturbed states per sample regardless of
+parameter count, at the cost of exact gradient fidelity (stochastic
+approximation instead of analytic parameter-shift). The perturbation signs are
+drawn from a generator seeded with the run seed. This trade-off is necessary
+to keep the full 101-seed, 100-epoch sweep computationally tractable.
+
+Each run also persists its per-epoch training history as JSON; loss plots are
+rendered from those files by `scripts/viz/visualize_loss.py`. Circuits run on
+Aer's noiseless state-vector estimator, so a forward pass over the test set is
+cheap and validation is evaluated every epoch (`DEFAULT_EVAL_EVERY`).
 """
 
 import json
@@ -26,8 +31,6 @@ import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from qiskit.primitives import BaseEstimatorV2, StatevectorEstimator
-from qiskit_machine_learning.gradients import SPSAEstimatorGradient
 from torch.optim.lr_scheduler import StepLR
 
 from dementia_boost.core.reproducibility import set_seed
@@ -37,7 +40,11 @@ from dementia_boost.models.builder import (
     assemble_dementia_classifier,
     load_baseline_backbone,
 )
-from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
+from dementia_boost.models.quantum_cnn import (
+    QiskitQuantumClassifierHead,
+    resolve_qiskit_estimator,
+)
+from dementia_boost.models.quantum_cnn.qiskit_layer import DEFAULT_SPSA_EPSILON
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.training.trainer import BaselineTrainer
 
@@ -56,7 +63,9 @@ DEFAULT_FEATURE_DIM: int = 2304
 DEFAULT_N_QUBITS: int = 6
 DEFAULT_N_LAYERS: int = 4
 DEFAULT_TORCH_DEVICE: str = "cpu"
-DEFAULT_SPSA_BATCH_SIZE: int = 1
+DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/qiskit_qtl"
+DEFAULT_EVAL_EVERY: int = 1
+PARADIGM: str = "qiskit_qtl"
 
 
 def get_device(device_name: str | None = None) -> torch.device:
@@ -125,28 +134,6 @@ def select_best_baseline(metrics_json_path: str = DEFAULT_BASELINE_METRICS_PATH)
     )
 
     return str(best_run["run_id"])
-
-
-def build_spsa_gradient(
-    estimator: BaseEstimatorV2,
-    seed: int,
-) -> SPSAEstimatorGradient:
-    """Constructs a seeded SPSA gradient estimator for a single training run.
-
-    Args:
-        estimator: The Qiskit Primitives V2 estimator backing the gradient
-            evaluations.
-        seed: Random seed controlling SPSA's perturbation direction sampling,
-            tied to the run's global reproducibility seed.
-
-    Returns:
-        A configured `SPSAEstimatorGradient` instance.
-    """
-    return SPSAEstimatorGradient(
-        estimator=estimator,
-        batch_size=DEFAULT_SPSA_BATCH_SIZE,
-        seed=seed,
-    )
 
 
 def main() -> None:
@@ -242,15 +229,14 @@ def main() -> None:
 
         set_seed(seed)
 
-        estimator = StatevectorEstimator()
-        gradient = build_spsa_gradient(estimator=estimator, seed=seed)
-
+        estimator = resolve_qiskit_estimator()
         head = QiskitQuantumClassifierHead(
             in_features=DEFAULT_FEATURE_DIM,
             n_qubits=DEFAULT_N_QUBITS,
             n_layers=DEFAULT_N_LAYERS,
+            spsa_epsilon=DEFAULT_SPSA_EPSILON,
+            seed=seed,
             estimator=estimator,
-            gradient=gradient,
         ).to(device)
         head.apply(QiskitQuantumClassifierHead.apply_glorot_init)
 
@@ -267,6 +253,7 @@ def main() -> None:
             gamma=DEFAULT_LR_GAMMA,
         )
 
+        history_path = os.path.join(DEFAULT_HISTORY_DIR, f"{run_id}.json")
         trainer = BaselineTrainer(
             model=head,
             train_loader=train_loader,
@@ -278,6 +265,16 @@ def main() -> None:
             logger=logger,
             save_dir=DEFAULT_QTL_SAVE_DIR,
             save_model=full_model,
+            history_path=history_path,
+            eval_every=DEFAULT_EVAL_EVERY,
+            paradigm=PARADIGM,
+            config={
+                "n_qubits": DEFAULT_N_QUBITS,
+                "n_layers": DEFAULT_N_LAYERS,
+                "gradient_method": "spsa_loss_level",
+                "spsa_epsilon": DEFAULT_SPSA_EPSILON,
+                "estimator": type(estimator).__name__,
+            },
         )
 
         trainer.train(epochs=DEFAULT_EPOCHS_PER_RUN, run_id=run_id)
