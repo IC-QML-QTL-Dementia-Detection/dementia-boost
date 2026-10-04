@@ -1,6 +1,6 @@
 """Dressed Quantum Network (DQN) classification head using Qiskit.
 
-Composes the classical pre-net, angle scaling, Qiskit `TorchConnector`, and
+Composes the classical pre-net, angle scaling, Qiskit quantum layer, and
 classical post-net into an interchangeable PyTorch `nn.Module`, mirroring the
 PennyLane `QuantumClassifierHead` contract while executing the variational
 circuit through Qiskit Primitives V2.
@@ -9,12 +9,10 @@ circuit through Qiskit Primitives V2.
 import math
 
 import torch.nn as nn
-from qiskit.primitives import BaseEstimatorV2
-from qiskit_machine_learning.gradients import BaseEstimatorGradient
 from torch import Tensor, tanh
 
 from .qiskit_circuit import DEFAULT_N_LAYERS, DEFAULT_N_QUBITS
-from .qiskit_layer import create_qiskit_quantum_layer
+from .qiskit_layer import DEFAULT_SPSA_EPSILON, create_qiskit_quantum_layer
 
 
 class QiskitQuantumClassifierHead(nn.Module):
@@ -27,7 +25,7 @@ class QiskitQuantumClassifierHead(nn.Module):
     2. Pre-Net: `Linear(2304 -> n_qubits)`
     3. Angle Scaling: `tanh(x) * (pi / 2)` mapping values into `[-pi/2, pi/2]`
     4. Variational Quantum Circuit: Evaluates expectation values `<PauliZ_i>`
-       through `EstimatorQNN` and `TorchConnector`.
+       through a `StatevectorEstimator`, with SPSA gradients.
     5. Post-Net: `Linear(n_qubits -> 1)` producing raw classification logits.
 
     Attributes:
@@ -38,7 +36,7 @@ class QiskitQuantumClassifierHead(nn.Module):
         ANGLE_SCALING_FACTOR: Multiplier scaling tanh outputs into `[-pi/2, pi/2]`.
         flatten: PyTorch Flatten layer.
         pre_net: Classical linear projection layer from `in_features` to `n_qubits`.
-        qnn: TorchConnector executing the Qiskit variational quantum circuit.
+        qnn: `QiskitQuantumLayer` executing the Qiskit variational quantum circuit.
         post_net: Classical linear layer mapping qubit expectation values to logits.
     """
 
@@ -54,8 +52,8 @@ class QiskitQuantumClassifierHead(nn.Module):
         n_qubits: int = DEFAULT_N_QUBITS,
         n_layers: int = DEFAULT_N_LAYERS,
         out_features: int = DEFAULT_OUT_FEATURES,
-        estimator: BaseEstimatorV2 | None = None,
-        gradient: BaseEstimatorGradient | None = None,
+        spsa_epsilon: float = DEFAULT_SPSA_EPSILON,
+        seed: int | None = None,
     ) -> None:
         """Initializes the hybrid Dressed Quantum Network classification head.
 
@@ -66,12 +64,11 @@ class QiskitQuantumClassifierHead(nn.Module):
                 Defaults to 6.
             n_layers: Number of repetitions (depth) of the ansatz. Defaults to 4.
             out_features: Number of output classification units. Defaults to 1.
-            estimator: Optional Qiskit Primitives V2 estimator instance. If
-                None, resolves to a noiseless `StatevectorEstimator`.
-            gradient: Optional gradient estimator strategy. If None, defaults
-                to exact parameter-shift, which becomes impractically slow for
-                training at the default 6-qubit, 4-layer depth. Training
-                scripts should inject a `SPSAEstimatorGradient` instead.
+            spsa_epsilon: Finite-difference step of the SPSA gradient estimate
+                taken through the quantum layer. Defaults to
+                `DEFAULT_SPSA_EPSILON`.
+            seed: Seed of the SPSA perturbation generator. If None, follows the
+                seed locked by `core.reproducibility.set_seed`.
         """
         super().__init__()
 
@@ -80,8 +77,8 @@ class QiskitQuantumClassifierHead(nn.Module):
         self.qnn = create_qiskit_quantum_layer(
             n_qubits=n_qubits,
             n_layers=n_layers,
-            estimator=estimator,
-            gradient=gradient,
+            spsa_epsilon=spsa_epsilon,
+            seed=seed,
         )
         self.post_net = nn.Linear(in_features=n_qubits, out_features=out_features)
 

@@ -8,15 +8,15 @@ slices. Independent and interchangeable with `train_qtl_multiseed.py`, sharing
 the same classical backbone and ansatz formulation while executing on Qiskit
 Primitives V2 instead of PennyLane.
 
-Gradient strategy: `EstimatorQNN`'s default parameter-shift gradient scales
-linearly with the number of differentiable parameters (72 circuit weights + 6
-angle-embedded inputs at the default 6-qubit, 4-layer depth), which makes a
-single training batch take on the order of tens of minutes. This script
-instead injects `SPSAEstimatorGradient`, which evaluates only 2 perturbed
-circuits per gradient step regardless of parameter count, at the cost of
-exact gradient fidelity (stochastic approximation instead of analytic
-parameter-shift). This trade-off is necessary to keep the full 101-seed,
-100-epoch sweep computationally tractable.
+Gradient strategy: exact parameter-shift scales linearly with the number of
+differentiable parameters (72 circuit weights + 6 angle-embedded inputs at the
+default 6-qubit, 4-layer depth), which makes a single training batch take on
+the order of tens of minutes. The quantum layer instead takes a loss-level SPSA
+gradient, which evaluates only 2 perturbed states per sample regardless of
+parameter count, at the cost of exact gradient fidelity (stochastic
+approximation instead of analytic parameter-shift). The perturbation signs are
+drawn from a generator seeded with the run seed. This trade-off is necessary
+to keep the full 101-seed, 100-epoch sweep computationally tractable.
 
 Each run also persists its per-epoch training history as JSON; loss plots are
 rendered from those files by `scripts/viz/visualize_loss.py`. Validation is
@@ -31,8 +31,6 @@ import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from qiskit.primitives import BaseEstimatorV2, StatevectorEstimator
-from qiskit_machine_learning.gradients import SPSAEstimatorGradient
 from torch.optim.lr_scheduler import StepLR
 
 from dementia_boost.core.reproducibility import set_seed
@@ -43,6 +41,7 @@ from dementia_boost.models.builder import (
     load_baseline_backbone,
 )
 from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
+from dementia_boost.models.quantum_cnn.qiskit_layer import DEFAULT_SPSA_EPSILON
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.training.trainer import BaselineTrainer
 
@@ -61,7 +60,6 @@ DEFAULT_FEATURE_DIM: int = 2304
 DEFAULT_N_QUBITS: int = 6
 DEFAULT_N_LAYERS: int = 4
 DEFAULT_TORCH_DEVICE: str = "cpu"
-DEFAULT_SPSA_BATCH_SIZE: int = 1
 DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/qiskit_qtl"
 DEFAULT_EVAL_EVERY: int = 5
 PARADIGM: str = "qiskit_qtl"
@@ -133,28 +131,6 @@ def select_best_baseline(metrics_json_path: str = DEFAULT_BASELINE_METRICS_PATH)
     )
 
     return str(best_run["run_id"])
-
-
-def build_spsa_gradient(
-    estimator: BaseEstimatorV2,
-    seed: int,
-) -> SPSAEstimatorGradient:
-    """Constructs a seeded SPSA gradient estimator for a single training run.
-
-    Args:
-        estimator: The Qiskit Primitives V2 estimator backing the gradient
-            evaluations.
-        seed: Random seed controlling SPSA's perturbation direction sampling,
-            tied to the run's global reproducibility seed.
-
-    Returns:
-        A configured `SPSAEstimatorGradient` instance.
-    """
-    return SPSAEstimatorGradient(
-        estimator=estimator,
-        batch_size=DEFAULT_SPSA_BATCH_SIZE,
-        seed=seed,
-    )
 
 
 def main() -> None:
@@ -250,15 +226,12 @@ def main() -> None:
 
         set_seed(seed)
 
-        estimator = StatevectorEstimator()
-        gradient = build_spsa_gradient(estimator=estimator, seed=seed)
-
         head = QiskitQuantumClassifierHead(
             in_features=DEFAULT_FEATURE_DIM,
             n_qubits=DEFAULT_N_QUBITS,
             n_layers=DEFAULT_N_LAYERS,
-            estimator=estimator,
-            gradient=gradient,
+            spsa_epsilon=DEFAULT_SPSA_EPSILON,
+            seed=seed,
         ).to(device)
         head.apply(QiskitQuantumClassifierHead.apply_glorot_init)
 
@@ -293,8 +266,9 @@ def main() -> None:
             config={
                 "n_qubits": DEFAULT_N_QUBITS,
                 "n_layers": DEFAULT_N_LAYERS,
-                "gradient_method": "spsa",
-                "spsa_batch_size": DEFAULT_SPSA_BATCH_SIZE,
+                "gradient_method": "spsa_loss_level",
+                "spsa_epsilon": DEFAULT_SPSA_EPSILON,
+                "estimator": "statevector",
             },
         )
 

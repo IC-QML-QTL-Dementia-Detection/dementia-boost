@@ -188,7 +188,6 @@ dependencies = [
     { name = "pennylane" },
     { name = "pillow" },
     { name = "qiskit" },
-    { name = "qiskit-machine-learning" },
     { name = "scikit-learn" },
     { name = "seaborn" },
     { name = "torch" },
@@ -211,7 +210,6 @@ requires-dist = [
     { name = "pennylane", specifier = ">=0.45.1" },
     { name = "pillow", specifier = ">=12.1.1" },
     { name = "qiskit", specifier = ">=2.5.2" },
-    { name = "qiskit-machine-learning", specifier = ">=0.9.1" },
     { name = "scikit-learn", specifier = ">=1.8.0" },
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "torch", specifier = ">=2.10.0" },
@@ -899,23 +897,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ed/92/404d085301365d79a06a1ae34b4292e35a510a22a32ec0b5a8e8ee1d87dd/qiskit-2.5.2-cp310-abi3-manylinux_2_28_s390x.whl", hash = "sha256:c2eab89804161dd927d25d521c6c43af1bcd17042e6b02124166d6d07a9c9cb1", size = 11160496, upload-time = "2026-08-13T19:09:02.586Z" },
     { url = "https://files.pythonhosted.org/packages/c4/32/1e411db90b68a6096275186e7fc57ea16d99355fc3b498182845dd5419ff/qiskit-2.5.2-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:28fcb983e565b8f027a13ef43cda7aaeb1f1a6caf9df07408708abcf7bc0b59d", size = 9753072, upload-time = "2026-08-13T19:08:09.439Z" },
     { url = "https://files.pythonhosted.org/packages/c2/b4/61872b4ba4319c685615123739b25a3c42abc0f057c4a4889f7b3cad8c7b/qiskit-2.5.2-cp310-abi3-win_amd64.whl", hash = "sha256:d436cd45db22ea0132be815930d7c90343774756da9620dee68714968966f65e", size = 9451684, upload-time = "2026-08-13T19:08:11.872Z" },
-]
-
-[[package]]
-name = "qiskit-machine-learning"
-version = "0.9.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "dill" },
-    { name = "numpy" },
-    { name = "qiskit" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "setuptools" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/86/4f/a3907509fdbaf2d6089238dbba2167757b0213f950e4f98df33ad8558c3f/qiskit_machine_learning-0.9.1.tar.gz", hash = "sha256:42d74f1a324457994fbb52d7de15f50e35cf04e0e77e1e21958f6b75a4cda360", size = 259270, upload-time = "2026-08-19T20:14:19.998Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/85/a9/fea244c0b368640066280d23e7f17549a843f2e0ea5f72b796901f69d2e2/qiskit_machine_learning-0.9.1-py3-none-any.whl", hash = "sha256:f2c92544d2c40b82825292819c58ae97c4a577c5778f8b2af59415b975e13c23", size = 282269, upload-time = "2026-08-19T20:14:18.693Z" },
 ]
 
 [[package]]

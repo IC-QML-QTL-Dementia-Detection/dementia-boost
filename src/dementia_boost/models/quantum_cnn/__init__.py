@@ -7,8 +7,8 @@ embedding and ansatz formulation:
 - PennyLane: `QuantumClassifierHead`, backed by `circuit.py` and executed
   through a `TorchLayer`.
 - Qiskit v2.x: `QiskitQuantumClassifierHead`, backed by `qiskit_circuit.py`
-  and executed through Qiskit Primitives V2 (`EstimatorQNN` +
-  `TorchConnector`).
+  and executed through Qiskit Primitives V2 (`StatevectorEstimator` inside a
+  custom autograd function with SPSA gradients).
 """
 
 from .circuit import (
