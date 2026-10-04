@@ -35,8 +35,12 @@ from qiskit.primitives import (
 )
 from qiskit.primitives.containers.estimator_pub import EstimatorPubLike
 from qiskit.quantum_info import SparsePauliOp, Statevector
+from qiskit_aer.primitives import EstimatorV2 as AerEstimator
 
-from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
+from dementia_boost.models.quantum_cnn import (
+    QiskitExpectationRunner,
+    QiskitQuantumClassifierHead,
+)
 from dementia_boost.models.quantum_cnn.qiskit_circuit import build_qiskit_ansatz
 from dementia_boost.models.quantum_cnn.qiskit_layer import (
     QiskitQuantumLayer,
@@ -44,6 +48,7 @@ from dementia_boost.models.quantum_cnn.qiskit_layer import (
 )
 
 _EXPECTATION_TOLERANCE: float = 1e-5
+_PARITY_TOLERANCE: float = 1e-10
 _FINITE_DIFFERENCE_STEP: float = 1e-3
 _MIN_SPSA_COSINE_SIMILARITY: float = 0.9
 
@@ -83,6 +88,7 @@ def _hadamard_layer(n_qubits: int, n_layers: int, seed: int) -> QiskitQuantumLay
         n_layers=n_layers,
         seed=seed,
         ansatz_builder=_hadamard_ansatz,
+        estimator=StatevectorEstimator(),
     )
 
 
@@ -316,6 +322,33 @@ class TestQiskitQuantumClassifierHeadEndToEnd:
         assert head.pre_net.weight.grad is not None
         assert head.post_net.weight.grad is not None
         assert head.qnn.weight.grad is not None
+
+
+class TestDefaultEstimatorParity:
+    """Validates the default Aer estimator against the reference estimator."""
+
+    def test_default_estimator_is_aer_and_matches_statevector_estimator(self) -> None:
+        """Asserts the default estimator is Aer's and that it returns the same
+        expectation values as `StatevectorEstimator` on identical parameters,
+        so a qiskit-aer upgrade cannot silently change the forward pass."""
+        n_qubits, n_layers, batch = 4, 2, 8
+        circuit, input_params, weight_vectors, observables = _hadamard_ansatz(
+            n_qubits=n_qubits, n_layers=n_layers
+        )
+        parameters = (*input_params, *(p for vec in weight_vectors for p in vec))
+
+        default_runner = QiskitExpectationRunner(circuit, observables, parameters)
+        reference_runner = QiskitExpectationRunner(
+            circuit, observables, parameters, estimator=StatevectorEstimator()
+        )
+
+        values = torch.rand(batch, len(parameters), dtype=torch.float64) * 2 * math.pi
+        assert isinstance(default_runner.estimator, AerEstimator)
+        assert torch.allclose(
+            default_runner.expectation_values(values),
+            reference_runner.expectation_values(values),
+            atol=_PARITY_TOLERANCE,
+        )
 
 
 class _CountingEstimator(StatevectorEstimator):

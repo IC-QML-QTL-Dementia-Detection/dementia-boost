@@ -12,12 +12,19 @@ from collections.abc import Sequence
 import numpy as np
 import torch
 from qiskit.circuit import QuantumCircuit
-from qiskit.primitives import BaseEstimatorV2, BindingsArray, StatevectorEstimator
+from qiskit.primitives import BaseEstimatorV2, BindingsArray
 from qiskit.primitives.containers.bindings_array import ParameterLike
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit.primitives.containers.observables_array import ObservablesArray
 from qiskit.quantum_info import SparsePauliOp
+from qiskit_aer.primitives import EstimatorV2 as AerEstimator
 from torch import Tensor
+
+# Controlled rotations that qiskit-aer 0.17.2 evaluates wrongly when their angle
+# is bound at run time (the gate behaves as the identity). The same circuit bound
+# beforehand, or with these gates decomposed, gives the exact result, so the
+# runner decomposes them once at construction.
+_UNSAFE_AER_GATES: tuple[str, ...] = ("cry", "crz", "cp")
 
 
 def resolve_qiskit_estimator(
@@ -25,14 +32,22 @@ def resolve_qiskit_estimator(
 ) -> BaseEstimatorV2:
     """Resolves the Qiskit Primitives V2 estimator that runs the circuits.
 
+    The default is Aer's `EstimatorV2` on its state-vector method with no noise
+    model attached, so it is the fast noiseless simulator, not a noisy backend.
+    Qiskit's `StatevectorEstimator` is the slower reference implementation and
+    should be injected explicitly where its role as a reference is wanted.
+
     Args:
         estimator: Optional pre-built estimator, returned unchanged. If None,
-            resolves to a noiseless `StatevectorEstimator`.
+            resolves to a noiseless Aer state-vector `EstimatorV2`.
 
     Returns:
         The estimator to execute circuits with.
     """
-    return estimator if estimator is not None else StatevectorEstimator()
+    if estimator is not None:
+        return estimator
+
+    return AerEstimator(options={"backend_options": {"method": "statevector"}})
 
 
 class QiskitExpectationRunner:
@@ -55,6 +70,9 @@ class QiskitExpectationRunner:
     ) -> None:
         """Binds the circuit, observables, parameter order, and estimator.
 
+        Controlled rotations that Aer mishandles with run-time bound angles are
+        decomposed first (see `_UNSAFE_AER_GATES`).
+
         Args:
             circuit: The parameterized circuit to evaluate.
             observables: Observables whose expectation values are returned,
@@ -65,7 +83,7 @@ class QiskitExpectationRunner:
                 `resolve_qiskit_estimator`.
         """
         self.estimator = resolve_qiskit_estimator(estimator)
-        self._circuit = circuit
+        self._circuit = circuit.decompose(gates_to_decompose=list(_UNSAFE_AER_GATES))
         self._observables = ObservablesArray([list(observables)])
         self._parameters = tuple(parameters)
 

@@ -19,9 +19,9 @@ drawn from a generator seeded with the run seed. This trade-off is necessary
 to keep the full 101-seed, 100-epoch sweep computationally tractable.
 
 Each run also persists its per-epoch training history as JSON; loss plots are
-rendered from those files by `scripts/viz/visualize_loss.py`. Validation is
-evaluated every `DEFAULT_EVAL_EVERY` epochs because a Qiskit forward pass over
-the test set is expensive with the current setup.
+rendered from those files by `scripts/viz/visualize_loss.py`. Circuits run on
+Aer's noiseless state-vector estimator, so a forward pass over the test set is
+cheap and validation is evaluated every epoch (`DEFAULT_EVAL_EVERY`).
 """
 
 import json
@@ -64,7 +64,7 @@ DEFAULT_N_QUBITS: int = 6
 DEFAULT_N_LAYERS: int = 4
 DEFAULT_TORCH_DEVICE: str = "cpu"
 DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/qiskit_qtl"
-DEFAULT_EVAL_EVERY: int = 5
+DEFAULT_EVAL_EVERY: int = 1
 PARADIGM: str = "qiskit_qtl"
 
 
