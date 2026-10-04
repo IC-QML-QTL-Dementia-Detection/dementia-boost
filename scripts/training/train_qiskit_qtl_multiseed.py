@@ -1,11 +1,27 @@
-"""Multiseed Classical Transfer Learning (CTL) training with embedding caching.
+"""Multiseed Qiskit Quantum Transfer Learning (QTL) training with embedding caching.
 
-This script parses classical baseline evaluation results, identifies the
-best-performing baseline model checkpoint, extracts and caches feature
-representations once, and trains newly initialized classical dense heads
-across multiple random seeds (0 to 100) using BCEWithLogitsLoss. Each run also
-persists its per-epoch training history as JSON; loss plots are rendered from
-those files by `scripts/viz/visualize_loss.py`.
+This script identifies the optimal pre-trained classical CNN baseline from
+telemetry metrics, extracts and caches feature representations once, and
+trains a hybrid Qiskit v2.x Dressed Quantum Network (DQN) classification head
+across multiple random seeds (0 to 100) using BCEWithLogitsLoss on NIfTI axial
+slices. Independent and interchangeable with `train_qtl_multiseed.py`, sharing
+the same classical backbone and ansatz formulation while executing on Qiskit
+Primitives V2 instead of PennyLane.
+
+Gradient strategy: exact parameter-shift scales linearly with the number of
+differentiable parameters (72 circuit weights + 6 angle-embedded inputs at the
+default 6-qubit, 4-layer depth), which makes a single training batch take on
+the order of tens of minutes. The quantum layer instead takes a loss-level SPSA
+gradient, which evaluates only 2 perturbed states per sample regardless of
+parameter count, at the cost of exact gradient fidelity (stochastic
+approximation instead of analytic parameter-shift). The perturbation signs are
+drawn from a generator seeded with the run seed. This trade-off is necessary
+to keep the full 101-seed, 100-epoch sweep computationally tractable.
+
+Each run also persists its per-epoch training history as JSON; loss plots are
+rendered from those files by `scripts/viz/visualize_loss.py`. Circuits run on
+Aer's noiseless state-vector estimator, so a forward pass over the test set is
+cheap and validation is evaluated every epoch (`DEFAULT_EVAL_EVERY`).
 """
 
 import json
@@ -24,7 +40,11 @@ from dementia_boost.models.builder import (
     assemble_dementia_classifier,
     load_baseline_backbone,
 )
-from dementia_boost.models.classical_cnn import ClassicalClassifierHead
+from dementia_boost.models.quantum_cnn import (
+    QiskitQuantumClassifierHead,
+    resolve_qiskit_estimator,
+)
+from dementia_boost.models.quantum_cnn.qiskit_layer import DEFAULT_SPSA_EPSILON
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.training.trainer import BaselineTrainer
 
@@ -32,7 +52,7 @@ DEFAULT_BASELINE_METRICS_PATH: str = (
     "./data/results/metrics/nifti/baseline_results.json"
 )
 DEFAULT_BASELINE_DIR: str = "./data/results/trained_models/nifti"
-DEFAULT_TL_SAVE_DIR: str = "./data/results/trained_tl_models/nifti"
+DEFAULT_QTL_SAVE_DIR: str = "./data/results/trained_qiskit_qtl_models/nifti"
 DEFAULT_EXPERIMENT_SEEDS: range = range(0, 101)
 DEFAULT_EPOCHS_PER_RUN: int = 100
 DEFAULT_BATCH_SIZE: int = 64
@@ -40,22 +60,40 @@ DEFAULT_LEARNING_RATE: float = 1e-4
 DEFAULT_LR_STEP_SIZE: int = 10
 DEFAULT_LR_GAMMA: float = 0.75
 DEFAULT_FEATURE_DIM: int = 2304
-DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/ctl"
+DEFAULT_N_QUBITS: int = 6
+DEFAULT_N_LAYERS: int = 4
+DEFAULT_TORCH_DEVICE: str = "cpu"
+DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/qiskit_qtl"
 DEFAULT_EVAL_EVERY: int = 1
-PARADIGM: str = "ctl"
+PARADIGM: str = "qiskit_qtl"
 
 
-def get_device() -> torch.device:
-    """Selects the best available hardware accelerator device.
+def get_device(device_name: str | None = None) -> torch.device:
+    """Resolves the target PyTorch execution device with optional manual override.
+
+    When an explicit device string is provided, returns that device. If no
+    override is given, defaults to `DEFAULT_TORCH_DEVICE` to avoid unnecessary GPU
+    transfer latency for low-qubit quantum transfer learning workflows, while
+    supporting 'auto' for automatic accelerator detection.
+
+    Args:
+        device_name: Optional device string ('cpu', 'cuda', 'mps', 'auto').
+            If None, uses `DEFAULT_TORCH_DEVICE`. If 'auto', detects available
+            hardware accelerators (CUDA, MPS) with fallback to CPU.
 
     Returns:
-        A torch.device corresponding to CUDA, MPS, or CPU.
+        A torch.device instance.
     """
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
+    target = device_name if device_name is not None else DEFAULT_TORCH_DEVICE
+
+    if target == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+
+    return torch.device(target)
 
 
 def select_best_baseline(metrics_json_path: str = DEFAULT_BASELINE_METRICS_PATH) -> str:
@@ -99,11 +137,11 @@ def select_best_baseline(metrics_json_path: str = DEFAULT_BASELINE_METRICS_PATH)
 
 
 def main() -> None:
-    """Executes Classical Transfer Learning on cached baseline embeddings."""
-    logger = setup_logger("classical_tl_multiseed_nifti")
+    """Executes Qiskit QTL sweep across seeds on cached embeddings."""
+    logger = setup_logger("qiskit_qtl_multiseed_nifti")
     device = get_device()
 
-    os.makedirs(DEFAULT_TL_SAVE_DIR, exist_ok=True)
+    os.makedirs(DEFAULT_QTL_SAVE_DIR, exist_ok=True)
 
     try:
         best_run_id = select_best_baseline(DEFAULT_BASELINE_METRICS_PATH)
@@ -122,9 +160,18 @@ def main() -> None:
         )
         sys.exit(1)
 
-    logger.info(f"Target Device: {device}")
+    logger.info(f"Target PyTorch Device: {device}")
     logger.info(
         f"Selected Optimal Baseline Backbone: '{best_run_id}' ({baseline_weights_path})"
+    )
+    logger.info(
+        f"Beginning Qiskit QTL sweep ({DEFAULT_N_QUBITS} qubits, {DEFAULT_N_LAYERS} "
+        f"layers) across {len(DEFAULT_EXPERIMENT_SEEDS)} seeds using SPSA gradients..."
+    )
+    logger.warning(
+        "SPSA gradients are a stochastic approximation, not the exact "
+        "parameter-shift gradient used for correctness testing. This trades "
+        "gradient fidelity for tractable runtime at this circuit depth."
     )
 
     feature_extractor = load_baseline_backbone(baseline_weights_path, device)
@@ -160,13 +207,13 @@ def main() -> None:
     )
 
     logger.info(
-        "Beginning fast in-memory CTL sweep across "
+        "Beginning fast in-memory Qiskit QTL sweep across "
         f"{len(DEFAULT_EXPERIMENT_SEEDS)} seeds..."
     )
 
     for seed in DEFAULT_EXPERIMENT_SEEDS:
-        run_id = f"tl_seed_{seed}"
-        checkpoint_path = os.path.join(DEFAULT_TL_SAVE_DIR, f"baseline_{run_id}.pt")
+        run_id = f"qiskit_qtl_seed_{seed}"
+        checkpoint_path = os.path.join(DEFAULT_QTL_SAVE_DIR, f"baseline_{run_id}.pt")
 
         if os.path.exists(checkpoint_path):
             logger.info(
@@ -176,16 +223,22 @@ def main() -> None:
             continue
 
         logger.info(
-            f"=== Starting CTL Experiment: {run_id} (Backbone: {best_run_id}) ==="
+            f"=== Starting Qiskit QTL Experiment: {run_id} "
+            f"(Backbone: {best_run_id}) ==="
         )
 
         set_seed(seed)
 
-        head = ClassicalClassifierHead(
+        estimator = resolve_qiskit_estimator()
+        head = QiskitQuantumClassifierHead(
             in_features=DEFAULT_FEATURE_DIM,
-            use_sigmoid=False,
+            n_qubits=DEFAULT_N_QUBITS,
+            n_layers=DEFAULT_N_LAYERS,
+            spsa_epsilon=DEFAULT_SPSA_EPSILON,
+            seed=seed,
+            estimator=estimator,
         ).to(device)
-        head.apply(ClassicalClassifierHead.apply_glorot_init)
+        head.apply(QiskitQuantumClassifierHead.apply_glorot_init)
 
         full_model = assemble_dementia_classifier(
             feature_extractor=feature_extractor,
@@ -210,17 +263,24 @@ def main() -> None:
             scheduler=scheduler,
             device=device,
             logger=logger,
-            save_dir=DEFAULT_TL_SAVE_DIR,
+            save_dir=DEFAULT_QTL_SAVE_DIR,
             save_model=full_model,
             history_path=history_path,
             eval_every=DEFAULT_EVAL_EVERY,
             paradigm=PARADIGM,
+            config={
+                "n_qubits": DEFAULT_N_QUBITS,
+                "n_layers": DEFAULT_N_LAYERS,
+                "gradient_method": "spsa_loss_level",
+                "spsa_epsilon": DEFAULT_SPSA_EPSILON,
+                "estimator": type(estimator).__name__,
+            },
         )
 
         trainer.train(epochs=DEFAULT_EPOCHS_PER_RUN, run_id=run_id)
-        logger.info(f"=== Completed CTL Experiment: {run_id} ===\n")
+        logger.info(f"=== Completed Qiskit QTL Experiment: {run_id} ===\n")
 
-    logger.info("Classical Transfer Learning multi-seed sweep complete.")
+    logger.info("Qiskit Quantum Transfer Learning multi-seed sweep complete.")
 
 
 if __name__ == "__main__":

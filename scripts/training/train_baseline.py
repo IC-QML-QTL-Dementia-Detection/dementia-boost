@@ -3,7 +3,9 @@
 This script trains the baseline LeNet-based Convolutional Neural Network across
 100 random seeds (1 to 100) using raw logits output and BCEWithLogitsLoss on
 preprocessed NIfTI axial slices. Model checkpoints are serialized to disk
-for subsequent evaluation and transfer learning benchmarking.
+for subsequent evaluation and transfer learning benchmarking. Each run also
+persists its per-epoch training history as JSON; loss plots are rendered from
+those files by `scripts/viz/visualize_loss.py`.
 """
 
 import os
@@ -22,6 +24,10 @@ from dementia_boost.models.classical_cnn import (
 )
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.training.trainer import BaselineTrainer
+
+DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/baseline"
+DEFAULT_EVAL_EVERY: int = 1
+PARADIGM: str = "baseline"
 
 
 def get_device() -> torch.device:
@@ -81,6 +87,7 @@ def main() -> None:
         optimizer = optim.Adam(model.parameters(), lr=1e-4)
         scheduler = StepLR(optimizer, step_size=10, gamma=0.75)
 
+        history_path = os.path.join(DEFAULT_HISTORY_DIR, f"{run_id}.json")
         trainer = BaselineTrainer(
             model=model,
             train_loader=train_loader,
@@ -91,6 +98,9 @@ def main() -> None:
             device=device,
             logger=logger,
             save_dir=save_dir,
+            history_path=history_path,
+            eval_every=DEFAULT_EVAL_EVERY,
+            paradigm=PARADIGM,
         )
 
         trainer.train(epochs=epochs_per_run, run_id=run_id)

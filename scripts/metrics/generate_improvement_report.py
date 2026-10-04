@@ -1,9 +1,10 @@
 """Comparative improvement report generator across paradigms on NIfTI data.
 
 This script aggregates evaluation results across the Classical Baseline, Classical
-Transfer Learning (CTL), and Quantum Transfer Learning (QTL) runs on NIfTI data.
-It identifies the top-performing run per paradigm using composite metric ranking,
-calculates relative percentage improvements, and exports a comparative JSON report.
+Transfer Learning (CTL), PennyLane Quantum Transfer Learning (QTL), and Qiskit
+Quantum Transfer Learning (Qiskit QTL) runs on NIfTI data. It identifies the
+top-performing run per paradigm using composite metric ranking, calculates
+relative percentage improvements, and exports a comparative JSON report.
 """
 
 import json
@@ -56,6 +57,7 @@ def main() -> None:
     baseline_path = "./data/results/metrics/nifti/baseline_results.json"
     ctl_path = "./data/results/metrics/nifti/tl_results.json"
     qtl_path = "./data/results/metrics/nifti/qtl_results.json"
+    qiskit_qtl_path = "./data/results/metrics/nifti/qiskit_qtl_results.json"
     output_path = "./data/results/metrics/nifti/comparative_report.json"
 
     if not os.path.exists(baseline_path):
@@ -77,6 +79,11 @@ def main() -> None:
         with open(qtl_path) as file:
             qtl_data = json.load(file)
 
+    qiskit_qtl_data = None
+    if os.path.exists(qiskit_qtl_path):
+        with open(qiskit_qtl_path) as file:
+            qiskit_qtl_data = json.load(file)
+
     best_base = get_best_run(base_data["individual_runs"])
     best_ctl = get_best_run(ctl_data["individual_runs"])
 
@@ -86,6 +93,12 @@ def main() -> None:
         best_qtl = get_best_run(qtl_data["individual_runs"])
         best_qtl_run_id = str(best_qtl["run_id"])
 
+    best_qiskit_qtl = None
+    best_qiskit_qtl_run_id = "pending"
+    if qiskit_qtl_data and qiskit_qtl_data.get("individual_runs"):
+        best_qiskit_qtl = get_best_run(qiskit_qtl_data["individual_runs"])
+        best_qiskit_qtl_run_id = str(best_qiskit_qtl["run_id"])
+
     metrics = ["accuracy", "precision", "recall", "f1_score", "auc"]
 
     report: dict[str, dict[str, str | dict[str, float]]] = {
@@ -93,6 +106,7 @@ def main() -> None:
             "best_baseline_run": str(best_base["run_id"]),
             "best_ctl_run": str(best_ctl["run_id"]),
             "best_qtl_run": best_qtl_run_id,
+            "best_qiskit_qtl_run": best_qiskit_qtl_run_id,
         },
         "comparisons": {},
     }
@@ -101,6 +115,7 @@ def main() -> None:
         base_val = float(best_base[metric])
         ctl_val = float(best_ctl[metric])
         qtl_val = float(best_qtl[metric]) if best_qtl else 0.0
+        qiskit_qtl_val = float(best_qiskit_qtl[metric]) if best_qiskit_qtl else 0.0
 
         report["comparisons"][metric] = {
             "baseline": base_val,
@@ -113,6 +128,22 @@ def main() -> None:
             "qtl_imp_ctl_pct": (
                 calculate_percentage_delta(ctl_val, qtl_val) if best_qtl else 0.0
             ),
+            "qiskit_qtl": qiskit_qtl_val,
+            "qiskit_qtl_imp_base_pct": (
+                calculate_percentage_delta(base_val, qiskit_qtl_val)
+                if best_qiskit_qtl
+                else 0.0
+            ),
+            "qiskit_qtl_imp_ctl_pct": (
+                calculate_percentage_delta(ctl_val, qiskit_qtl_val)
+                if best_qiskit_qtl
+                else 0.0
+            ),
+            "qiskit_qtl_imp_qtl_pct": (
+                calculate_percentage_delta(qtl_val, qiskit_qtl_val)
+                if best_qtl and best_qiskit_qtl
+                else 0.0
+            ),
         }
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -122,7 +153,8 @@ def main() -> None:
     logger.info(f"Report generated successfully at: {output_path}")
     logger.info(
         f"Optimal Baseline: {best_base['run_id']} | Optimal CTL: {best_ctl['run_id']} "
-        f"| Optimal QTL: {best_qtl_run_id}"
+        f"| Optimal QTL: {best_qtl_run_id} "
+        f"| Optimal Qiskit QTL: {best_qiskit_qtl_run_id}"
     )
 
 

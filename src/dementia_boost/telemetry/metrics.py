@@ -1,13 +1,14 @@
 """Classification metric computation, multi-run aggregation, and JSON serialization.
 
-This module provides data transfer objects (`EvaluationResult`, `AggregateMetrics`)
-and the `MetricsAnalyzer` class to calculate standard binary classification
-metrics (Accuracy, Precision, Recall, F1, AUC, Confusion Matrix) and serialize
-summaries to disk.
+This module provides data transfer objects (`EvaluationResult`, `AggregateMetrics`,
+`EpochRecord`, `TrainingHistory`) and the `MetricsAnalyzer` class to calculate
+standard binary classification metrics (Accuracy, Precision, Recall, F1, AUC,
+Confusion Matrix) and serialize summaries and training histories to disk.
 """
 
 import json
 from dataclasses import asdict, dataclass
+from typing import Any
 
 import numpy as np
 from sklearn.metrics import (
@@ -64,6 +65,51 @@ class AggregateMetrics:
     std: float
     min_val: float
     max_val: float
+
+
+@dataclass
+class EpochRecord:
+    """Data transfer object storing the measurements of a single training epoch.
+
+    Attributes:
+        epoch: One-based epoch index.
+        train_loss: Mean training loss over the epoch.
+        train_acc: Training accuracy over the epoch.
+        val_loss: Loss on the evaluation loader, or None if the epoch was
+            not evaluated.
+        val_acc: Accuracy on the evaluation loader, or None if the epoch was
+            not evaluated.
+        lr: Learning rate used during the epoch.
+        duration_s: Wall-clock duration of the epoch in seconds.
+    """
+
+    epoch: int
+    train_loss: float
+    train_acc: float
+    val_loss: float | None
+    val_acc: float | None
+    lr: float
+    duration_s: float
+
+
+@dataclass
+class TrainingHistory:
+    """Data transfer object storing the per-epoch history of one training run.
+
+    Attributes:
+        run_id: Unique identifier for the training run.
+        paradigm: Training paradigm, one of "baseline", "ctl", "qtl" or
+            "qiskit_qtl".
+        config: Hyperparameters needed to reproduce the run (for example
+            learning rate, batch size, epochs, and for quantum heads the
+            number of qubits, layers, and gradient method).
+        epochs: Ordered per-epoch records.
+    """
+
+    run_id: str
+    paradigm: str
+    config: dict[str, Any]
+    epochs: list[EpochRecord]
 
 
 class MetricsAnalyzer:
@@ -168,3 +214,34 @@ class MetricsAnalyzer:
 
         with open(filepath, "w") as f:
             json.dump(payload, f, indent=4)
+
+    @staticmethod
+    def save_history(history: TrainingHistory, filepath: str) -> None:
+        """Serializes a training history to a JSON file.
+
+        Args:
+            history: TrainingHistory to persist.
+            filepath: Destination file path on disk.
+        """
+        with open(filepath, "w") as f:
+            json.dump(asdict(history), f, indent=4)
+
+    @staticmethod
+    def load_history(filepath: str) -> TrainingHistory:
+        """Deserializes a training history from a JSON file.
+
+        Args:
+            filepath: Path to a JSON file written by `save_history`.
+
+        Returns:
+            The reconstructed TrainingHistory instance.
+        """
+        with open(filepath) as f:
+            payload = json.load(f)
+
+        return TrainingHistory(
+            run_id=payload["run_id"],
+            paradigm=payload["paradigm"],
+            config=payload["config"],
+            epochs=[EpochRecord(**record) for record in payload["epochs"]],
+        )
