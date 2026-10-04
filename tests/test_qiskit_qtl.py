@@ -23,9 +23,17 @@ Regression coverage
 """
 
 import math
+from collections.abc import Iterable
 
 import torch
 from qiskit.circuit import ParameterVector, QuantumCircuit
+from qiskit.primitives import (
+    PrimitiveJob,
+    PrimitiveResult,
+    PubResult,
+    StatevectorEstimator,
+)
+from qiskit.primitives.containers.estimator_pub import EstimatorPubLike
 from qiskit.quantum_info import SparsePauliOp, Statevector
 
 from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
@@ -308,6 +316,37 @@ class TestQiskitQuantumClassifierHeadEndToEnd:
         assert head.pre_net.weight.grad is not None
         assert head.post_net.weight.grad is not None
         assert head.qnn.weight.grad is not None
+
+
+class _CountingEstimator(StatevectorEstimator):
+    """Reference estimator that counts how many times it is run."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.run_calls = 0
+
+    def run(
+        self, pubs: Iterable[EstimatorPubLike], *, precision: float | None = None
+    ) -> PrimitiveJob[PrimitiveResult[PubResult]]:
+        self.run_calls += 1
+        return super().run(pubs, precision=precision)
+
+
+class TestQiskitQuantumClassifierHeadEstimatorInjection:
+    """Validates the head evaluates its circuit on the injected estimator."""
+
+    def test_injected_estimator_runs_one_pub_per_pass(self) -> None:
+        """Asserts a forward and backward pass use the injected estimator
+        exactly twice: one broadcast PUB for the forward pass and one for the
+        SPSA backward pass, regardless of batch size and qubit count."""
+        estimator = _CountingEstimator()
+        head = QiskitQuantumClassifierHead(
+            in_features=16, n_qubits=3, n_layers=1, estimator=estimator
+        )
+
+        head(torch.randn(4, 16)).sum().backward()
+
+        assert estimator.run_calls == 2
 
 
 class TestQiskitQuantumClassifierHeadGlorotInit:

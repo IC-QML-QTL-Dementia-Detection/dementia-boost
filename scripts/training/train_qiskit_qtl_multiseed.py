@@ -40,7 +40,10 @@ from dementia_boost.models.builder import (
     assemble_dementia_classifier,
     load_baseline_backbone,
 )
-from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
+from dementia_boost.models.quantum_cnn import (
+    QiskitQuantumClassifierHead,
+    resolve_qiskit_estimator,
+)
 from dementia_boost.models.quantum_cnn.qiskit_layer import DEFAULT_SPSA_EPSILON
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.training.trainer import BaselineTrainer
@@ -226,12 +229,14 @@ def main() -> None:
 
         set_seed(seed)
 
+        estimator = resolve_qiskit_estimator()
         head = QiskitQuantumClassifierHead(
             in_features=DEFAULT_FEATURE_DIM,
             n_qubits=DEFAULT_N_QUBITS,
             n_layers=DEFAULT_N_LAYERS,
             spsa_epsilon=DEFAULT_SPSA_EPSILON,
             seed=seed,
+            estimator=estimator,
         ).to(device)
         head.apply(QiskitQuantumClassifierHead.apply_glorot_init)
 
@@ -268,7 +273,7 @@ def main() -> None:
                 "n_layers": DEFAULT_N_LAYERS,
                 "gradient_method": "spsa_loss_level",
                 "spsa_epsilon": DEFAULT_SPSA_EPSILON,
-                "estimator": "statevector",
+                "estimator": type(estimator).__name__,
             },
         )
 

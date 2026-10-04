@@ -1,27 +1,26 @@
 """PyTorch bridge for Qiskit circuits built directly on Qiskit Primitives V2.
 
-Evaluates the Qiskit ansatz with a `StatevectorEstimator` and exposes it as a
-PyTorch `nn.Module` through a custom `torch.autograd.Function`. Each forward
-pass is a single broadcast PUB, so every sample is simulated once and all
-Pauli-Z expectation values are read from that one state. The backward pass is
-a loss-level SPSA estimate that also costs a single broadcast PUB.
+Evaluates the Qiskit ansatz on an injectable estimator (through
+`QiskitExpectationRunner`) and exposes it as a PyTorch `nn.Module` through a
+custom `torch.autograd.Function`. Each forward pass is a single broadcast PUB,
+so every sample is simulated once and all Pauli-Z expectation values are read
+from that one state. The backward pass is a loss-level SPSA estimate that also
+costs a single broadcast PUB.
 """
 
 from collections.abc import Callable
 from typing import cast
 
-import numpy as np
 import torch
 import torch.nn as nn
 from qiskit.circuit import ParameterVector, QuantumCircuit
-from qiskit.primitives import BindingsArray, StatevectorEstimator
-from qiskit.primitives.containers.estimator_pub import EstimatorPub
-from qiskit.primitives.containers.observables_array import ObservablesArray
+from qiskit.primitives import BaseEstimatorV2
 from qiskit.quantum_info import SparsePauliOp
 from torch import Tensor
 from torch.autograd.function import FunctionCtx
 
 from .qiskit_circuit import DEFAULT_N_LAYERS, DEFAULT_N_QUBITS, build_qiskit_ansatz
+from .qiskit_runner import QiskitExpectationRunner
 
 DEFAULT_SPSA_EPSILON: float = 0.01
 
@@ -76,7 +75,7 @@ class _EstimatorExpectation(torch.autograd.Function):
         ctx.layer = layer
         ctx.n_inputs = angles.shape[1]
 
-        return layer.expectation_values(params).to(angles.dtype)
+        return layer.runner.expectation_values(params).to(angles.dtype)
 
     @staticmethod
     def backward(
@@ -106,7 +105,7 @@ class _EstimatorExpectation(torch.autograd.Function):
         delta = layer.sample_directions(params)
         epsilon = layer.spsa_epsilon
         shifted = torch.cat([params + epsilon * delta, params - epsilon * delta])
-        plus, minus = layer.expectation_values(shifted).to(params.dtype).chunk(2)
+        plus, minus = layer.runner.expectation_values(shifted).to(params.dtype).chunk(2)
 
         directional = ((plus - minus) * grad_output).sum(dim=1) / (2 * epsilon)
         gradient = directional[:, None] * delta
@@ -119,13 +118,15 @@ class QiskitQuantumLayer(nn.Module):
 
     Holds the circuit weights, uniformly initialized over `[-pi, pi]`, in one
     flat `weight` parameter laid out as `[theta, gamma, beta]`. Expectation
-    values come from a noiseless `StatevectorEstimator` (precision 0.0), and
-    gradients from SPSA with perturbations drawn from a dedicated generator.
+    values come from a `QiskitExpectationRunner` on the injected estimator
+    (exact, precision 0.0), and gradients from SPSA with perturbations drawn
+    from a dedicated generator.
 
     Attributes:
         n_qubits: Number of qubits in the circuit.
         n_layers: Number of ansatz layer repetitions.
         spsa_epsilon: Finite-difference step of the SPSA gradient estimate.
+        runner: Runner evaluating the circuit's expectation values.
         weight: Flat trainable circuit weights of shape `(3 * n_layers * n_qubits,)`.
     """
 
@@ -136,6 +137,7 @@ class QiskitQuantumLayer(nn.Module):
         spsa_epsilon: float = DEFAULT_SPSA_EPSILON,
         seed: int | None = None,
         ansatz_builder: AnsatzBuilder = build_qiskit_ansatz,
+        estimator: BaseEstimatorV2 | None = None,
     ) -> None:
         """Builds the circuit, observables, estimator, and trainable weights.
 
@@ -150,21 +152,26 @@ class QiskitQuantumLayer(nn.Module):
             ansatz_builder: Callable with the signature and return value of
                 `build_qiskit_ansatz`. Defaults to the Bhowmik et al. (2025)
                 ansatz, and lets other circuits share this layer.
+            estimator: Optional Qiskit Primitives V2 estimator executing the
+                circuit. If None, resolves through `resolve_qiskit_estimator`.
         """
         super().__init__()
         self.n_qubits = n_qubits
         self.n_layers = n_layers
         self.spsa_epsilon = spsa_epsilon
 
-        self._circuit, input_params, weight_vectors, observables = ansatz_builder(
+        circuit, input_params, weight_vectors, observables = ansatz_builder(
             n_qubits=n_qubits,
             n_layers=n_layers,
         )
         weight_params = [param for vector in weight_vectors for param in vector]
 
-        self._flat_parameters = (*input_params, *weight_params)
-        self._observables = ObservablesArray([observables])
-        self._estimator = StatevectorEstimator()
+        self.runner = QiskitExpectationRunner(
+            circuit=circuit,
+            observables=observables,
+            parameters=(*input_params, *weight_params),
+            estimator=estimator,
+        )
 
         self._generator = torch.Generator()
         self._generator.manual_seed(seed if seed is not None else torch.initial_seed())
@@ -173,28 +180,6 @@ class QiskitQuantumLayer(nn.Module):
             torch.rand(len(weight_params), dtype=torch.float32) * 2 * torch.pi
             - torch.pi
         )
-
-    def expectation_values(self, params: Tensor) -> Tensor:
-        """Evaluates all Pauli-Z expectation values in one broadcast PUB.
-
-        Args:
-            params: Flat circuit parameters of shape `(N, n_qubits + n_weights)`,
-                inputs first and weights after, matching the layer's layout.
-
-        Returns:
-            Tensor of shape `(N, n_qubits)` with the exact `<Z_i>` values.
-        """
-        values = params.detach().cpu().numpy().astype(np.float64)[:, None, :]
-
-        pub = EstimatorPub(
-            self._circuit,
-            self._observables,
-            BindingsArray({self._flat_parameters: values}),
-            precision=0.0,
-        )
-        result = self._estimator.run([pub]).result()[0]
-
-        return torch.from_numpy(np.asarray(result.data["evs"])).to(params.device)
 
     def sample_directions(self, params: Tensor) -> Tensor:
         """Draws one Rademacher perturbation direction per sample.
@@ -228,6 +213,7 @@ def create_qiskit_quantum_layer(
     spsa_epsilon: float = DEFAULT_SPSA_EPSILON,
     seed: int | None = None,
     ansatz_builder: AnsatzBuilder = build_qiskit_ansatz,
+    estimator: BaseEstimatorV2 | None = None,
 ) -> QiskitQuantumLayer:
     """Instantiates the Qiskit variational layer for the Bhowmik et al. (2025) ansatz.
 
@@ -247,6 +233,8 @@ def create_qiskit_quantum_layer(
         ansatz_builder: Callable returning the circuit, input parameters,
             weight parameter vectors, and observables. Defaults to
             `build_qiskit_ansatz`.
+        estimator: Optional Qiskit Primitives V2 estimator executing the
+            circuit. If None, resolves to a noiseless `StatevectorEstimator`.
 
     Returns:
         A `QiskitQuantumLayer` with weights uniformly initialized over
@@ -258,4 +246,5 @@ def create_qiskit_quantum_layer(
         spsa_epsilon=spsa_epsilon,
         seed=seed,
         ansatz_builder=ansatz_builder,
+        estimator=estimator,
     )

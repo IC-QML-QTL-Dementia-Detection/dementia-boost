@@ -9,6 +9,7 @@ circuit through Qiskit Primitives V2.
 import math
 
 import torch.nn as nn
+from qiskit.primitives import BaseEstimatorV2
 from torch import Tensor, tanh
 
 from .qiskit_circuit import DEFAULT_N_LAYERS, DEFAULT_N_QUBITS
@@ -25,7 +26,7 @@ class QiskitQuantumClassifierHead(nn.Module):
     2. Pre-Net: `Linear(2304 -> n_qubits)`
     3. Angle Scaling: `tanh(x) * (pi / 2)` mapping values into `[-pi/2, pi/2]`
     4. Variational Quantum Circuit: Evaluates expectation values `<PauliZ_i>`
-       through a `StatevectorEstimator`, with SPSA gradients.
+       through an injectable Qiskit estimator, with SPSA gradients.
     5. Post-Net: `Linear(n_qubits -> 1)` producing raw classification logits.
 
     Attributes:
@@ -54,6 +55,7 @@ class QiskitQuantumClassifierHead(nn.Module):
         out_features: int = DEFAULT_OUT_FEATURES,
         spsa_epsilon: float = DEFAULT_SPSA_EPSILON,
         seed: int | None = None,
+        estimator: BaseEstimatorV2 | None = None,
     ) -> None:
         """Initializes the hybrid Dressed Quantum Network classification head.
 
@@ -69,6 +71,8 @@ class QiskitQuantumClassifierHead(nn.Module):
                 `DEFAULT_SPSA_EPSILON`.
             seed: Seed of the SPSA perturbation generator. If None, follows the
                 seed locked by `core.reproducibility.set_seed`.
+            estimator: Optional Qiskit Primitives V2 estimator executing the
+                circuit. If None, resolves to a noiseless `StatevectorEstimator`.
         """
         super().__init__()
 
@@ -79,6 +83,7 @@ class QiskitQuantumClassifierHead(nn.Module):
             n_layers=n_layers,
             spsa_epsilon=spsa_epsilon,
             seed=seed,
+            estimator=estimator,
         )
         self.post_net = nn.Linear(in_features=n_qubits, out_features=out_features)
 
