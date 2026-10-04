@@ -26,6 +26,7 @@ flowchart TD
         FE["LeNetFeatureExtractor<br/>(Convolutional Spatial Backbone)"]
         CH["ClassicalClassifierHead<br/>(Linear Dense Head)"]
         QH["QuantumClassifierHead<br/>(Dressed Quantum Network - DQN)"]
+        QKH["QiskitQuantumClassifierHead<br/>(DQN on Qiskit Primitives V2)"]
         DC["DementiaClassifier<br/>(Dependency-Injected Orchestrator)"]
         BUILDER["Model Builder<br/>(Weight Loading, Freezing & Swapping)"]
     end
@@ -190,6 +191,27 @@ For low-qubit variational circuits ($n_{\text{qubits}} = 6$, corresponding to a 
 - **`heads.py` & `builder.py`**: Accept explicit `quantum_device` parameters to configure the underlying QNode simulator.
 - **QTL Scripts (`train_qtl_multiseed.py`, `evaluate_qtl.py`)**: Expose configurable `DEFAULT_TORCH_DEVICE` and `DEFAULT_QUANTUM_DEVICE` variables with `get_device()` manual override support.
 
+### 3.3 Qiskit Execution Path
+
+`QiskitQuantumClassifierHead` is an independent, interchangeable counterpart of `QuantumClassifierHead`. It uses the same pre-net, angle scaling, ansatz, and post-net, but runs the circuit through Qiskit Primitives V2, hand-written against `BaseEstimatorV2` with no `qiskit-machine-learning` dependency.
+
+```mermaid
+flowchart LR
+    HEAD["QiskitQuantumClassifierHead<br/>(pre-net, angle scaling, post-net)"]
+    LAYER["QiskitQuantumLayer<br/>(flat weights, SPSA step and seeded generator)"]
+    FN["Autograd Function<br/>(forward: 1 PUB, backward: 1 PUB)"]
+    RUN["QiskitExpectationRunner<br/>(circuit, observables, parameter order)"]
+    EST["BaseEstimatorV2<br/>(default: Aer EstimatorV2, state-vector, noiseless)"]
+
+    HEAD --> LAYER --> FN --> RUN --> EST
+```
+
+- **`qiskit_circuit.py` (`build_qiskit_ansatz`)**: Builds the `QuantumCircuit`, the input and weight `ParameterVector`s, and the per-qubit Pauli-Z `SparsePauliOp` observables. Pauli strings are reversed relative to the qubit index because Qiskit orders them from the most significant qubit.
+- **`qiskit_runner.py`**: `QiskitExpectationRunner` owns only "circuit, observables, parameter batch in, expectation values out". Each call is one broadcast PUB with parameters shaped `(N, 1, P)` and observables shaped `(1, n_qubits)`, so every state is evolved once and all expectation values are read from it. `resolve_qiskit_estimator` is the Qiskit counterpart of `resolve_quantum_device`: it returns an injected estimator or, by default, Aer's `EstimatorV2` on the state-vector method with no noise model attached. `StatevectorEstimator` is the slower reference implementation and is injected explicitly where a reference is wanted, such as unit tests. Controlled rotations (`cry`, `crz`, `cp`) are decomposed once at construction, because qiskit-aer 0.17.2 evaluates them wrongly when their angle is bound at run time.
+- **`qiskit_layer.py`**: `QiskitQuantumLayer` holds the flat weight vector, laid out as `[theta, gamma, beta]`, and a custom `torch.autograd.Function`. The backward pass is a loss-level SPSA estimate: one Rademacher direction per sample is shared by all outputs by folding the upstream gradient into the finite difference, which costs one PUB of `2 * Batch` states. The directions come from a generator seeded with the run seed, so a seed reproduces its gradient noise. Exact parameter-shift is avoided because it needs 204 shifted circuits per sample at the default 6-qubit, 4-layer depth.
+- **`qiskit_heads.py` & `builder.py`**: Accept an optional `estimator` (and, on the head, `spsa_epsilon` and `seed`), so the backend is configuration rather than code.
+- **`train_qiskit_qtl_multiseed.py`**: Records the gradient method, SPSA step, and estimator class in each run's history `config`, and validates every epoch.
+
 ---
 
 ## 4. Transfer Learning Pipeline
@@ -305,7 +327,11 @@ dementia-boost/
 │       │   │   └── heads.py               # ClassicalClassifierHead
 │       │   └── quantum_cnn/               # Quantum neural network components
 │       │       ├── circuit.py             # PennyLane QNode and custom Ansatz definition
-│       │       └── heads.py               # QuantumClassifierHead (DQN)
+│       │       ├── heads.py               # QuantumClassifierHead (DQN)
+│       │       ├── qiskit_circuit.py      # Qiskit QuantumCircuit, parameters and observables
+│       │       ├── qiskit_heads.py        # QiskitQuantumClassifierHead (DQN on Qiskit)
+│       │       ├── qiskit_layer.py        # Autograd layer with loss-level SPSA gradients
+│       │       └── qiskit_runner.py       # Expectation runner and estimator resolver
 │       ├── training/                      # Training and inference lifecycle runners
 │       │   ├── evaluator.py               # Weight loading and inference predictor
 │       │   └── trainer.py                 # Training loop with validation, checkpointing & history recording
@@ -317,16 +343,19 @@ dementia-boost/
 │   ├── etl_pipeline.py                    # 3D NIfTI to 2D slice ETL & patient-split orchestrator
 │   ├── metrics/                           # Batch evaluation and delta improvement report scripts
 │   │   ├── evaluate_baseline.py           # Multiseed evaluation of classical baseline models
+│   │   ├── evaluate_qiskit_qtl.py         # Multiseed evaluation of Qiskit QTL models
 │   │   ├── evaluate_qtl.py                # Multiseed evaluation of QTL models
 │   │   ├── evaluate_tl.py                 # Multiseed evaluation of CTL models
 │   │   └── generate_improvement_report.py # Quantitative improvement delta report
 │   ├── training/                          # Multi-seed training scripts with checkpoint resumption
 │   │   ├── train_baseline.py              # Classical baseline CNN training
+│   │   ├── train_qiskit_qtl_multiseed.py  # Qiskit Quantum Transfer Learning training
 │   │   ├── train_qtl_multiseed.py         # Quantum Transfer Learning (QTL) training
 │   │   └── train_tl_multiseed.py          # Classical Transfer Learning (CTL) training
 │   └── viz/                               # Telemetry plotting and visualization scripts
 │       ├── visualize_baselines.py         # Boxplots, ROC curves, confusion matrices for baseline
 │       ├── visualize_loss.py              # Loss curves from saved training histories (per paradigm and comparison)
+│       ├── visualize_qiskit_qtl.py        # Boxplots, ROC curves, confusion matrices for Qiskit QTL
 │       ├── visualize_qtl.py               # Boxplots, ROC curves, confusion matrices for QTL
 │       └── visualize_tl.py                # Boxplots, ROC curves, confusion matrices for CTL
 └── tests/                                 # Unit and integration test suites
