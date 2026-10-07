@@ -176,7 +176,7 @@ def main() -> None:
 
     feature_extractor = load_baseline_backbone(baseline_weights_path, device)
 
-    raw_loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE, mode="nifti")
+    raw_loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE)
     raw_train_loader = raw_loader_manager.get_data_loader(is_train=True)
     raw_test_loader = raw_loader_manager.get_data_loader(is_train=False)
 

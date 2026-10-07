@@ -32,7 +32,7 @@ def main() -> None:
     )
 
     logger.info("Initializing NIfTI DataLoader factory...")
-    loader_manager = OasisDataLoader(batch_size=64, mode="nifti")
+    loader_manager = OasisDataLoader(batch_size=64)
 
     try:
         train_loader = loader_manager.get_data_loader(is_train=True)

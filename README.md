@@ -14,7 +14,7 @@ The research follows a multi-stage execution schedule (see `docs/qtl_research_go
 
 ### Activity 1: Baseline Integration and Reproduction _(Current / Concluding)_
 
-- **ETL & Data Pipeline**: Ingest and process the OASIS-II longitudinal MRI dataset across both raw NIfTI volumes and 2D image slices, enforcing strict patient-level splitting to prevent data leakage across visits.
+- **ETL & Data Pipeline**: Ingest and process the OASIS-II longitudinal MRI dataset from raw NIfTI volumes into 2D slices, enforcing strict patient-level splitting to prevent data leakage across visits.
 
 - **Classical Baseline & Transfer Learning (CTL)**: Implement the LeNet-based classical CNN architecture to establish the baseline performance and fine-tune classical dense heads under multi-seed initializations.
 
@@ -38,7 +38,7 @@ The codebase enforces strict modularity and MLOps practices, keeping neural netw
 
 - **`core/`**: Centralized determinism and seed locking across Python, NumPy, PyTorch, and cuDNN (`reproducibility.py`).
 
-- **`data/`**: Data loading and ETL pipelines with patient-level leakage prevention, dynamic PIL/NIfTI loaders, custom `MinMaxNormalize` transforms, and in-memory feature embedding caching for fast transfer learning (`data_loader.py`, `data_processor.py`, `jpg_indexer.py`, `dataset.py`, `embedding_cache.py`).
+- **`data/`**: Data loading and ETL pipelines with patient-level leakage prevention, NIfTI slice loaders, custom `MinMaxNormalize` transforms, and in-memory feature embedding caching for fast transfer learning (`data_loader.py`, `data_processor.py`, `dataset.py`, `embedding_cache.py`).
 
 - **`models/`**: Dependency-injected architectures pairing a `LeNetFeatureExtractor` backbone with interchangeable heads: `ClassicalClassifierHead` (CTL), `QuantumClassifierHead` (DQN / QTL on PennyLane), or `QiskitQuantumClassifierHead` (the same DQN on Qiskit Primitives V2, with an injectable estimator and Aer as the default noiseless backend) built via `builder.py`.
 

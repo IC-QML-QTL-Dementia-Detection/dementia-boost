@@ -53,7 +53,7 @@ def main() -> None:
     epochs_per_run = 100
     batch_size = 64
 
-    loader_manager = OasisDataLoader(batch_size=batch_size, mode="nifti")
+    loader_manager = OasisDataLoader(batch_size=batch_size)
     train_loader = loader_manager.get_data_loader(is_train=True)
     test_loader = loader_manager.get_data_loader(is_train=False)
     logger.info(

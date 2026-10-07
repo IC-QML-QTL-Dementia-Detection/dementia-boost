@@ -16,9 +16,8 @@ flowchart TD
 
     subgraph Data ["Data Engineering Layer"]
         ETL_NIFTI["OasisDataProcessor<br/>(3D NIfTI to 2D Slice Extraction & Patient Split)"]
-        ETL_JPG["JpgDataIndexer<br/>(Regex Patient ID Indexing & Split)"]
-        DS["OasisDataset / JpgOasisDataset<br/>(PyTorch Dataset Abstractions)"]
-        DL["OasisDataLoader<br/>(Unified DataLoader & MinMax Normalization)"]
+        DS["OasisDataset<br/>(PyTorch Dataset Abstraction)"]
+        DL["OasisDataLoader<br/>(DataLoader Factory & MinMax Normalization)"]
         CACHE["FeatureCacheManager / CachedEmbeddingDataset<br/>(In-Memory Feature Embeddings & I/O-Free Streaming)"]
     end
 
@@ -64,15 +63,12 @@ The data pipeline eliminates patient-level data leakage across longitudinal MRI 
 
 - **`data_processor.py` (`OasisDataProcessor`)**: Streams raw 3D NIfTI/HDR volumes, groups visits by unique `Subject ID`, isolates subjects into train/test cohorts, extracts the central 2D axial slice, and serializes processed tensors to disk (`.pt`).
 
-- **`jpg_indexer.py` (`JpgDataIndexer`)**: Uses regular expressions to extract patient IDs from 2D image filenames (`oas2?_\d+`), enforces patient-level train/test isolation, and generates immutable CSV index files (`train_jpg_index.csv`, `test_jpg_index.csv`).
-
 - **`dataset.py`**:
 
   - `OasisDataset`: Loads serialized `.pt` image-label pairs.
-  - `JpgOasisDataset`: Dynamically loads JPGs from disk via PIL, converting them to grayscale float tensors.
 
 - **`data_loader.py`**:
-  - `OasisDataLoader`: Unified factory creating PyTorch `DataLoader` instances for both `nifti` and `jpg` modalities.
+  - `OasisDataLoader`: Factory creating PyTorch `DataLoader` instances over the processed NIfTI slice tensors.
   - `MinMaxNormalize`: Custom transform performing per-sample dynamic range squashing into `[0.0, 1.0]`.
 
 - **`embedding_cache.py`**:
@@ -83,7 +79,6 @@ The data pipeline eliminates patient-level data leakage across longitudinal MRI 
 flowchart LR
     subgraph RawData ["Raw OASIS-II Data"]
         NIFTI_FILES["3D NIfTI / HDR Volumes"]
-        JPG_FILES["2D Grayscale JPG Images"]
     end
 
     subgraph SplitLogic ["Patient-Level Leakage Prevention"]
@@ -92,7 +87,6 @@ flowchart LR
 
     subgraph Pipelines ["Processing Pipelines"]
         NIFTI_PIPE["OasisDataProcessor<br/>- Middle Axial Slice Extraction<br/>- Serialized .pt (Tensor, Label)"]
-        JPG_PIPE["JpgDataIndexer<br/>- Regex ID Parsing<br/>- Immutable train/test CSV Index"]
     end
 
     subgraph Loaders ["DataLoader Factory"]
@@ -101,11 +95,8 @@ flowchart LR
     end
 
     NIFTI_FILES --> SUBJ_SPLIT
-    JPG_FILES --> SUBJ_SPLIT
     SUBJ_SPLIT --> NIFTI_PIPE
-    SUBJ_SPLIT --> JPG_PIPE
     NIFTI_PIPE --> TRANSFORMS
-    JPG_PIPE --> TRANSFORMS
     TRANSFORMS --> LOADER
 ```
 
@@ -317,12 +308,11 @@ dementia-boost/
 │   └── dementia_boost/
 │       ├── core/                          # Reproducibility & runtime utilities
 │       │   └── reproducibility.py         # Deterministic seed locker
-│       ├── data/                          # Data processing, indexing & loaders
-│       │   ├── data_loader.py             # Unified DataLoader & normalization transforms
+│       ├── data/                          # Data processing & loaders
+│       │   ├── data_loader.py             # DataLoader factory & normalization transforms
 │       │   ├── data_processor.py          # NIfTI 3D/2D ETL & patient-split orchestrator
-│       │   ├── dataset.py                 # OasisDataset & JpgOasisDataset classes
-│       │   ├── embedding_cache.py         # In-memory feature embedding caching & loaders
-│       │   └── jpg_indexer.py             # Regex patient ID parser & CSV indexer
+│       │   ├── dataset.py                 # OasisDataset class
+│       │   └── embedding_cache.py         # In-memory feature embedding caching & loaders
 │       ├── models/                        # Neural & Quantum network architectures
 │       │   ├── builder.py                 # Factory functions for CTL and QTL models
 │       │   ├── classical_cnn/             # Classical CNN backbone and dense heads

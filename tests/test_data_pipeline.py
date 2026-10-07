@@ -5,7 +5,7 @@ This module validates:
   axial slice extraction.
 - ``MinMaxNormalize`` dynamic range scaling including the zero-division guard.
 - ``OasisDataset`` tensor loading contracts.
-- ``OasisDataLoader`` (nifti mode) batch size, shuffle, and missing-path contracts.
+- ``OasisDataLoader`` batch size, shuffle, and missing-path contracts.
 
 Regression coverage
 -------------------
@@ -309,9 +309,7 @@ class TestOasisDataLoaderNiftiMode:
         train_dir.mkdir()
         self._populate_nifti_dir(train_dir, 8)
         monkeypatch.setattr(OasisDataLoader, "RESULTS_PATH", str(tmp_path))
-        loader = OasisDataLoader(batch_size=4, mode="nifti").get_data_loader(
-            is_train=True
-        )
+        loader = OasisDataLoader(batch_size=4).get_data_loader(is_train=True)
         imgs, _ = next(iter(loader))
         assert imgs.shape[0] == 4
 
@@ -323,9 +321,7 @@ class TestOasisDataLoaderNiftiMode:
         train_dir.mkdir()
         self._populate_nifti_dir(train_dir, 8)
         monkeypatch.setattr(OasisDataLoader, "RESULTS_PATH", str(tmp_path))
-        loader = OasisDataLoader(batch_size=4, mode="nifti").get_data_loader(
-            is_train=True
-        )
+        loader = OasisDataLoader(batch_size=4).get_data_loader(is_train=True)
         assert isinstance(loader.sampler, RandomSampler)
 
     def test_test_loader_uses_sequential_sampler(
@@ -336,9 +332,7 @@ class TestOasisDataLoaderNiftiMode:
         test_dir.mkdir()
         self._populate_nifti_dir(test_dir, 8)
         monkeypatch.setattr(OasisDataLoader, "RESULTS_PATH", str(tmp_path))
-        loader = OasisDataLoader(batch_size=4, mode="nifti").get_data_loader(
-            is_train=False
-        )
+        loader = OasisDataLoader(batch_size=4).get_data_loader(is_train=False)
         assert isinstance(loader.sampler, SequentialSampler)
 
     def test_missing_train_directory_raises_file_not_found(
@@ -347,7 +341,7 @@ class TestOasisDataLoaderNiftiMode:
         """FileNotFoundError must be raised when the nifti train directory is absent."""
         monkeypatch.setattr(OasisDataLoader, "RESULTS_PATH", str(tmp_path))
         with pytest.raises(FileNotFoundError):
-            OasisDataLoader(batch_size=4, mode="nifti").get_data_loader(is_train=True)
+            OasisDataLoader(batch_size=4).get_data_loader(is_train=True)
 
     def test_empty_train_directory_raises_file_not_found(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -356,4 +350,4 @@ class TestOasisDataLoaderNiftiMode:
         (tmp_path / "train").mkdir()
         monkeypatch.setattr(OasisDataLoader, "RESULTS_PATH", str(tmp_path))
         with pytest.raises(FileNotFoundError):
-            OasisDataLoader(batch_size=4, mode="nifti").get_data_loader(is_train=True)
+            OasisDataLoader(batch_size=4).get_data_loader(is_train=True)
