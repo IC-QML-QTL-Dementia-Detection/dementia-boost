@@ -1,8 +1,8 @@
 """Core module providing reproducibility, run identity, and runtime utilities.
 
 This module centralizes deterministic random seed management across Python,
-NumPy, PyTorch, and cuDNN backend engines, and the typed run specification with
-the hash IDs and label derived from it.
+NumPy, PyTorch, and cuDNN backend engines, the typed run specification with the
+hash IDs and label derived from it, and the on-disk layout of run artifacts.
 """
 
 from .identity import (
@@ -14,10 +14,13 @@ from .identity import (
     run_id,
     short_hash,
 )
+from .layout import ConfigCollisionError, ResultsLayout
 from .reproducibility import set_seed
 
 __all__ = [
+    "ConfigCollisionError",
     "Paradigm",
+    "ResultsLayout",
     "RunSpec",
     "backbone_id_of",
     "config_id",
