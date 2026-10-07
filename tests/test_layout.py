@@ -150,6 +150,23 @@ class TestHistoryFiles:
         assert layout.history_files() == []
 
 
+class TestConfigsWithMetrics:
+    """Validates listing of configurations that have a results file."""
+
+    def test_lists_configurations_with_results_for_a_cohort(
+        self, layout: ResultsLayout
+    ) -> None:
+        """Only configurations with the requested cohort's file are listed."""
+        for configuration, cohort in (("bbb", "val"), ("aaa", "val"), ("ccc", "test")):
+            path = Path(layout.metrics_path("baseline", configuration, cohort))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}")
+
+        assert layout.configs_with_metrics("baseline", "val") == ["aaa", "bbb"]
+        assert layout.configs_with_metrics("baseline", "test") == ["ccc"]
+        assert layout.configs_with_metrics("ctl", "val") == []
+
+
 class TestIsDone:
     """Validates the "skip if the checkpoint exists" check."""
 

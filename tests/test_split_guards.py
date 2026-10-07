@@ -18,6 +18,7 @@ from torch.utils.data import RandomSampler, SequentialSampler
 from dementia_boost.data.data_loader import OasisDataLoader
 from dementia_boost.data.dataset import OasisDataset
 from dementia_boost.data.split_guards import SplitIntegrityError, verify_split_layout
+from dementia_boost.data.split_manifest import read_split_id
 
 
 class TestVerifySplitLayout:
@@ -77,6 +78,15 @@ class TestVerifySplitLayout:
 
         with pytest.raises(SplitIntegrityError, match="test"):
             verify_split_layout(str(tmp_path))
+
+
+def test_read_split_id_returns_the_id_in_the_manifest(
+    tmp_path: Path, make_layout
+) -> None:
+    """Runs record the split they were trained on, read from the manifest."""
+    manifest = make_layout(tmp_path)
+
+    assert read_split_id(str(tmp_path)) == manifest["split_id"]
 
 
 class TestOasisDataLoaderCohorts:

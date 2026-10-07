@@ -116,6 +116,21 @@ def read_manifest(path: str) -> dict[str, Any]:
         return json.load(handle)
 
 
+def read_split_id(results_dir: str) -> str:
+    """Reads the ID of the split that is currently on disk.
+
+    Args:
+        results_dir: Directory holding the cohorts and the manifest.
+
+    Returns:
+        The `split_id` recorded in the manifest.
+
+    Raises:
+        FileNotFoundError: If the manifest does not exist.
+    """
+    return read_manifest(os.path.join(results_dir, MANIFEST_NAME))["split_id"]
+
+
 def write_manifest(path: str, manifest: Mapping[str, Any]) -> None:
     """Writes the manifest atomically, through a temporary file.
 

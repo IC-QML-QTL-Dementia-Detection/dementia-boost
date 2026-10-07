@@ -11,8 +11,16 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import build_spec
 
-from dementia_boost.telemetry.selection import select_best_baseline, select_best_run
+from dementia_boost.core.identity import config_id, run_id
+from dementia_boost.core.layout import ResultsLayout
+from dementia_boost.telemetry.metrics import MetricsAnalyzer, TrainingHistory
+from dementia_boost.telemetry.selection import (
+    select_backbone,
+    select_best_baseline,
+    select_best_run,
+)
 
 
 def _run(run_id: str, auc: float, f1: float = 0.5, loss: float = 0.7, **extra) -> dict:
@@ -105,3 +113,97 @@ class TestSelectBestBaseline:
         """A missing results file raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
             select_best_baseline(str(tmp_path / "absent.json"))
+
+
+class TestSelectBackbone:
+    """Validates resolving the selected baseline to its spec."""
+
+    def _evaluated_baseline(
+        self, layout: ResultsLayout, aucs: dict[int, float], **spec_overrides
+    ) -> str:
+        """Writes histories and a validation results file for baseline seeds.
+
+        Args:
+            layout: Layout to write into.
+            aucs: Validation AUC per seed.
+            **spec_overrides: Spec fields shared by the seeds (another
+                configuration).
+
+        Returns:
+            The configuration ID of the written baseline.
+        """
+        specs = [build_spec("baseline", seed=s, **spec_overrides) for s in aucs]
+        for spec in specs:
+            path = Path(layout.history_path(spec))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            MetricsAnalyzer.save_history(
+                TrainingHistory(spec=spec, epochs=[], extras={}), str(path)
+            )
+        configuration = config_id(specs[0])
+        results = Path(layout.metrics_path("baseline", configuration, "val"))
+        results.parent.mkdir(parents=True, exist_ok=True)
+        results.write_text(
+            json.dumps(
+                {
+                    "cohort": "val",
+                    "individual_runs": [
+                        _run(run_id(spec), auc=aucs[spec.seed]) for spec in specs
+                    ],
+                }
+            )
+        )
+        return configuration
+
+    def test_returns_the_spec_of_the_best_validation_run(self, tmp_path: Path) -> None:
+        """The spec carries everything needed to find the checkpoint and to set
+        the heads' `backbone_id`."""
+        layout = ResultsLayout(str(tmp_path))
+        self._evaluated_baseline(layout, {1: 0.6, 2: 0.9, 3: 0.7})
+
+        spec = select_backbone(layout)
+
+        assert spec == build_spec("baseline", seed=2)
+        assert layout.checkpoint_path(spec).endswith("seed_2.pt")
+
+    def test_an_explicit_configuration_is_used(self, tmp_path: Path) -> None:
+        """With several evaluated baselines, naming one selects within it."""
+        layout = ResultsLayout(str(tmp_path))
+        first = self._evaluated_baseline(layout, {1: 0.6, 2: 0.9})
+        self._evaluated_baseline(layout, {1: 0.99, 2: 0.5}, lr=5e-4)
+
+        assert select_backbone(layout, first).seed == 2
+
+    def test_several_baselines_without_a_choice_raise(self, tmp_path: Path) -> None:
+        """Picking between configurations silently would be a hidden decision."""
+        layout = ResultsLayout(str(tmp_path))
+        self._evaluated_baseline(layout, {1: 0.6})
+        self._evaluated_baseline(layout, {1: 0.7}, lr=5e-4)
+
+        with pytest.raises(ValueError, match="configuration"):
+            select_backbone(layout)
+
+    def test_no_evaluated_baseline_says_what_to_run(self, tmp_path: Path) -> None:
+        """Without validation results the error names the script to run."""
+        with pytest.raises(FileNotFoundError, match="evaluate_baseline"):
+            select_backbone(ResultsLayout(str(tmp_path)))
+
+    def test_a_selected_run_without_a_history_raises(self, tmp_path: Path) -> None:
+        """A results file naming a run that has no history is inconsistent."""
+        layout = ResultsLayout(str(tmp_path))
+        configuration = self._evaluated_baseline(layout, {1: 0.6, 2: 0.9})
+        Path(layout.history_path(build_spec("baseline", seed=2))).unlink()
+
+        with pytest.raises(ValueError, match="history"):
+            select_backbone(layout, configuration)
+
+    def test_test_results_cannot_drive_the_choice(self, tmp_path: Path) -> None:
+        """A validation file that is really marked as test is refused."""
+        layout = ResultsLayout(str(tmp_path))
+        configuration = self._evaluated_baseline(layout, {1: 0.6, 2: 0.9})
+        path = Path(layout.metrics_path("baseline", configuration, "val"))
+        payload = json.loads(path.read_text())
+        payload["cohort"] = "test"
+        path.write_text(json.dumps(payload))
+
+        with pytest.raises(ValueError, match="validation"):
+            select_backbone(layout, configuration)

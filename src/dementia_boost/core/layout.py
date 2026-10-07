@@ -145,6 +145,25 @@ class ResultsLayout:
             f"{cohort}_results.json",
         )
 
+    def configs_with_metrics(self, paradigm: Paradigm | str, cohort: str) -> list[str]:
+        """Lists the configurations that have a results file for a cohort.
+
+        Args:
+            paradigm: The paradigm.
+            cohort: "val" or "test".
+
+        Returns:
+            The sorted `config_id`s whose results file exists.
+        """
+        pattern = os.path.join(
+            glob.escape(self.root),
+            "metrics",
+            Paradigm(paradigm).value,
+            "*",
+            f"{cohort}_results.json",
+        )
+        return sorted(os.path.basename(os.path.dirname(p)) for p in glob.glob(pattern))
+
     def plots_dir(self, paradigm: Paradigm | str, configuration: str) -> str:
         """Returns the plot directory of one configuration.
 

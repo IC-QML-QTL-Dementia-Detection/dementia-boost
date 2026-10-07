@@ -11,6 +11,10 @@ import os
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from dementia_boost.core.identity import Paradigm, RunSpec
+from dementia_boost.core.layout import ResultsLayout
+from dementia_boost.telemetry.run_listing import load_runs
+
 RANKING_METRICS = ("auc", "f1_score", "log_loss")
 VALIDATION_COHORT = "val"
 
@@ -82,3 +86,53 @@ def select_best_baseline(val_results_path: str) -> str:
             "selection reads validation metrics only."
         )
     return select_best_run(payload.get("individual_runs", []))
+
+
+def select_backbone(layout: ResultsLayout, configuration: str | None = None) -> RunSpec:
+    """Selects the baseline run to build transfer learning heads on.
+
+    Reads the validation results of one baseline configuration, picks the best
+    run with `select_best_run`, and returns that run's spec (found through its
+    history). The spec gives the checkpoint path and the heads' `backbone_id`.
+
+    Args:
+        layout: The results layout to read from.
+        configuration: The `config_id` of the baseline configuration to select
+            within. Optional when exactly one baseline configuration has
+            validation results.
+
+    Returns:
+        The spec of the selected baseline run.
+
+    Raises:
+        FileNotFoundError: If no baseline has validation results yet.
+        ValueError: If several baseline configurations have validation results
+            and none was named, if the results are not from the validation
+            cohort, or if the selected run has no history.
+    """
+    if configuration is None:
+        configurations = layout.configs_with_metrics(
+            Paradigm.BASELINE, VALIDATION_COHORT
+        )
+        if not configurations:
+            raise FileNotFoundError(
+                f"No validation results for the baseline under {layout.root}. "
+                "Run scripts/metrics/evaluate_baseline.py first."
+            )
+        if len(configurations) > 1:
+            raise ValueError(
+                "Several baseline configurations have validation results "
+                f"({configurations}); name the configuration to select from."
+            )
+        configuration = configurations[0]
+
+    selected = select_best_baseline(
+        layout.metrics_path(Paradigm.BASELINE, configuration, VALIDATION_COHORT)
+    )
+    for history in load_runs(layout, Paradigm.BASELINE, configuration):
+        if history.run_id == selected:
+            return history.spec
+    raise ValueError(
+        f"The run {selected!r} selected on validation has no history under "
+        f"baseline configuration {configuration!r}."
+    )
