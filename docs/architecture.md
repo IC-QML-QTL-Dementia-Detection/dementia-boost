@@ -143,6 +143,7 @@ flowchart TD
         SCALE["Angle Scaling: tanh(x) * (pi / 2)"]
 
         subgraph VQC ["Variational Quantum Circuit (Ansatz)"]
+            HAD["Hadamard on all qubits: |0> to |+>"]
             ENC["Angle Embedding: RZ(inputs) on all qubits"]
             subgraph Repetitions ["Layers: 1 to n_layers (default: 4)"]
                 RZ1["RZ(weights[l, 0, i])"]
@@ -152,7 +153,7 @@ flowchart TD
                 RZ1 --> CNOT --> RZ2 --> CRY
             end
             MEAS["Expectation Values: <PauliZ> on all qubits"]
-            ENC --> Repetitions --> MEAS
+            HAD --> ENC --> Repetitions --> MEAS
         end
 
         POST["Post-Net: Linear(n_qubits -> 1)"]
@@ -174,7 +175,7 @@ flowchart TD
    $$\tilde{z} = \tanh(W_{\text{pre}} z_{\text{raw}} + b_{\text{pre}}) \cdot \frac{\pi}{2} \in \left[-\frac{\pi}{2}, \frac{\pi}{2}\right]^{n_{\text{qubits}}}$$
 
 3. **Quantum Encoding & Parameterized Evolution**:
-   $$|\psi(\tilde{z})\rangle = \bigotimes_{i=1}^{n_{\text{qubits}}} R_z(\tilde{z}_i) |0\rangle^{\otimes n_{\text{qubits}}}$$
+   $$|\psi(\tilde{z})\rangle = \bigotimes_{i=1}^{n_{\text{qubits}}} R_z(\tilde{z}_i)\, H\, |0\rangle = \bigotimes_{i=1}^{n_{\text{qubits}}} \tfrac{1}{\sqrt{2}}\left(e^{-i\tilde{z}_i/2}|0\rangle + e^{i\tilde{z}_i/2}|1\rangle\right)$$
    $$|\phi_\theta(\tilde{z})\rangle = \prod_{l=1}^{L} \left[ U_{\text{CRY}}(\theta_{l,2}) U_{R_z}(\theta_{l,1}) U_{\text{CNOT}} U_{R_z}(\theta_{l,0}) \right] |\psi(\tilde{z})\rangle$$
 
 4. **Quantum Measurement (POVM)**:
@@ -182,6 +183,9 @@ flowchart TD
 
 5. **Post-Net Classification Logit**:
    $$\hat{y}_{\text{logit}} = W_{\text{post}} \begin{bmatrix} \langle Z_1 \rangle \\ \vdots \\ \langle Z_n \rangle \end{bmatrix} + b_{\text{post}}$$
+
+> [!IMPORTANT]
+> **The Hadamard layer is not in the paper's figure.** Starting from $|0\rangle^{\otimes n}$, the gate sequence of Bhowmik et al. (2025) (RZ, CNOT, CRY) never leaves the set of states equal to $|0\rangle^{\otimes n}$ up to a global phase: RZ only adds a phase, CNOT fixes the state, and CRY never fires because its control stays in $|0\rangle$. Every $\langle Z_i\rangle$ would then be 1 for all inputs and weights, the pre-net and circuit weights would get zero gradient, and the head would only learn a bias. Preparing each qubit in $|+\rangle$ first turns the embedding angle into a relative phase, so the output depends on the inputs and the weights. Regression tests on both the PennyLane and the Qiskit circuits fail if any $\langle Z_i\rangle$ becomes constant or the gradients vanish.
 
 ### 3.2 Quantum Device Resolution & Backend Management
 

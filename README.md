@@ -18,7 +18,7 @@ The research follows a multi-stage execution schedule (see `docs/qtl_research_go
 
 - **Classical Baseline & Transfer Learning (CTL)**: Implement the LeNet-based classical CNN architecture to establish the baseline performance and fine-tune classical dense heads under multi-seed initializations.
 
-- **Hybrid Quantum Architecture (QTL)**: Implement the Dressed Quantum Network using **Angle Embedding** and the foundational variational ansatz with PennyLane state-vector simulators (`lightning.qubit`/`default.qubit`).
+- **Hybrid Quantum Architecture (QTL)**: Implement the Dressed Quantum Network using **Angle Embedding** and the foundational variational ansatz with PennyLane state-vector simulators (`lightning.qubit`/`default.qubit`). A Hadamard layer precedes the RZ embedding: the circuit as drawn in the paper keeps the state at $|0\ldots0\rangle$ and is a constant function (see `docs/architecture.md`, section 3.1).
 
 - **Multi-Seed Benchmark**: Establish reference metrics across multiple random seeds to measure statistical variance and evaluate the weak-baseline hypothesis.
 
@@ -54,6 +54,9 @@ For full technical specifications and detailed Mermaid architectural diagrams, s
 
 > [!NOTE]
 > Below are placeholders for empirical metrics obtained across multi-seed evaluations on the OASIS-II dataset. Recorded values will be filled in upon completion of full-dataset runs.
+
+> [!WARNING]
+> QTL runs produced before the Hadamard layer was added used a constant circuit, so they measure a bias-only classifier and must not be used. All quantum results are regenerated with the corrected circuit.
 
 ### Quantitative Comparison Across Paradigms
 
