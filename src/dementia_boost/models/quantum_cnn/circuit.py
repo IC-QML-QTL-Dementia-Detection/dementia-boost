@@ -1,9 +1,11 @@
 """PennyLane variational quantum circuit (VQC) ansatz and PyTorch layer bridge.
 
 This module constructs the custom variational ansatz described by Bhowmik et al.
-(2025), implementing angle embedding via RZ rotations, an entangling ring of CNOT
-gates, parameterized RZ and controlled-RY gates, and Pauli-Z expectation value
-measurements wrapped in a PyTorch `TorchLayer`.
+(2025), implementing a Hadamard layer followed by angle embedding via RZ
+rotations, an entangling ring of CNOT gates, parameterized RZ and controlled-RY
+gates, and Pauli-Z expectation value measurements wrapped in a PyTorch
+`TorchLayer`. The Hadamard layer is not in the paper's figure; without it the
+circuit is a constant function.
 """
 
 import pennylane as qml
@@ -103,7 +105,8 @@ def _build_custom_ansatz(
 ) -> list[ExpectationMP]:
     """Constructs the parameterized quantum circuit ansatz.
 
-    Implements initial state preparation using RZ angle embedding of the scaled
+    Implements initial state preparation by putting every qubit in `|+>` with
+    a Hadamard gate and then applying an RZ angle embedding of the scaled
     classical input features, followed by `n_layers` repetitions of:
     1. Parameterized RZ rotation on each qubit: `RZ(weights[layer, 0, i])`
     2. Entangling ring of CNOT gates between adjacent qubits: `CNOT(i, (i + 1) % n)`
@@ -113,6 +116,11 @@ def _build_custom_ansatz(
 
     Finally measures the expectation value of the Pauli-Z observable on every
     qubit.
+
+    The Hadamard layer is a deliberate departure from the circuit drawn by
+    Bhowmik et al. (2025). Without it the state stays at `|0...0>` (RZ only
+    adds a phase, CNOT fixes the state, and CRY never fires with its control
+    in `|0>`), so every expectation value is 1 for all inputs and weights.
 
     Args:
         inputs: Scaled classical feature tensor of shape `(Batch, n_qubits)`
@@ -124,6 +132,9 @@ def _build_custom_ansatz(
     Returns:
         A list of PennyLane Pauli-Z expectation measurements for all qubits.
     """
+    for i in range(n_qubits):
+        qml.Hadamard(wires=i)
+
     for i in range(n_qubits):
         qml.RZ(inputs[:, i], wires=i)  # type: ignore
 
