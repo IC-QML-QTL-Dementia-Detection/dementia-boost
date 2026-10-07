@@ -23,7 +23,6 @@ import numpy as np
 import pytest
 import torch
 from torch import Tensor
-from torch.utils.data import RandomSampler, SequentialSampler
 
 from dementia_boost.data.data_loader import MinMaxNormalize, OasisDataLoader
 from dementia_boost.data.data_processor import OasisDataProcessor
@@ -112,78 +111,6 @@ class TestOasisDataProcessorParseCsv:
         processor = OasisDataProcessor(csv_path=self._write_csv(content, tmp_path))
         result = processor._parse_csv()
         assert result == {"OAS2_0001": 0, "OAS2_0002": 1}
-
-
-class TestOasisDataProcessorSubjectSplit:
-    """Validates patient-level disjointness and manual override pinning
-    in _split_subjects."""
-
-    def _make_processor(self, tmp_path: Path) -> OasisDataProcessor:
-        """Returns an OasisDataProcessor pointing to a minimal placeholder CSV.
-
-        Args:
-            tmp_path: pytest-provided temporary directory.
-
-        Returns:
-            An OasisDataProcessor instance.
-        """
-        dummy = tmp_path / "dummy.csv"
-        dummy.write_text(_CSV_HEADER)
-        return OasisDataProcessor(csv_path=str(dummy))
-
-    def _build_metadata(self, n: int) -> dict[str, int]:
-        """Generates a synthetic subject metadata dict with n unique subjects.
-
-        Args:
-            n: Number of subjects to generate.
-
-        Returns:
-            A dict mapping subject IDs to alternating 0/1 labels.
-        """
-        return {f"OAS2_{i:04d}": i % 2 for i in range(1, n + 1)}
-
-    def test_train_and_test_are_disjoint(self, tmp_path: Path) -> None:
-        """Critical leakage check: train_subjects ∩ test_subjects must be empty."""
-        processor = self._make_processor(tmp_path)
-        metadata = self._build_metadata(20)
-        train, test = processor._split_subjects(metadata, 0.7, 42, [], [])
-        assert not (train & test)
-
-    def test_union_covers_all_subjects(self, tmp_path: Path) -> None:
-        """Every subject in metadata must appear in exactly one of the two splits."""
-        processor = self._make_processor(tmp_path)
-        metadata = self._build_metadata(20)
-        train, test = processor._split_subjects(metadata, 0.7, 42, [], [])
-        assert train | test == set(metadata.keys())
-
-    def test_manual_train_ids_pinned_to_train(self, tmp_path: Path) -> None:
-        """Subjects in manual_train must appear in train and not in test."""
-        processor = self._make_processor(tmp_path)
-        metadata = self._build_metadata(20)
-        forced = ["OAS2_0001", "OAS2_0002"]
-        train, test = processor._split_subjects(metadata, 0.7, 42, forced, [])
-        for subj in forced:
-            assert subj in train
-            assert subj not in test
-
-    def test_manual_test_ids_pinned_to_test(self, tmp_path: Path) -> None:
-        """Subjects in manual_test must appear in test and not in train."""
-        processor = self._make_processor(tmp_path)
-        metadata = self._build_metadata(20)
-        forced = ["OAS2_0003", "OAS2_0004"]
-        train, test = processor._split_subjects(metadata, 0.7, 42, [], forced)
-        for subj in forced:
-            assert subj in test
-            assert subj not in train
-
-    def test_split_is_deterministic_for_identical_seeds(self, tmp_path: Path) -> None:
-        """Two calls with the same seed must produce identical partitions."""
-        processor = self._make_processor(tmp_path)
-        metadata = self._build_metadata(30)
-        train_a, test_a = processor._split_subjects(metadata, 0.7, 42, [], [])
-        train_b, test_b = processor._split_subjects(metadata, 0.7, 42, [], [])
-        assert train_a == train_b
-        assert test_a == test_b
 
 
 class TestOasisDataProcessorSliceExtraction:
@@ -286,68 +213,36 @@ class TestOasisDataset:
         assert img.shape == (1, 32, 32)
 
 
-class TestOasisDataLoaderNiftiMode:
-    """Validates batch size, shuffle, and missing-path contracts for nifti mode."""
+class TestOasisDataLoaderBatching:
+    """Validates batch size and missing-path contracts of the loader.
 
-    def _populate_nifti_dir(self, directory: Path, n: int = 8) -> None:
-        """Writes n synthetic .pt slice files to mimic a processed NIfTI directory.
-
-        Args:
-            directory: Target directory (must already exist).
-            n: Number of .pt files to create.
-        """
-        for i in range(n):
-            torch.save(
-                (torch.randn(1, 128, 128), i % 2), str(directory / f"s_{i:04d}.pt")
-            )
+    Cohort selection, shuffling, and the manifest check are covered in
+    `test_split_guards.py`.
+    """
 
     def test_train_loader_respects_batch_size(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_layout
     ) -> None:
         """DataLoader must yield batches of exactly the configured batch size."""
-        train_dir = tmp_path / "train"
-        train_dir.mkdir()
-        self._populate_nifti_dir(train_dir, 8)
+        make_layout(tmp_path)
         monkeypatch.setattr(OasisDataLoader, "RESULTS_PATH", str(tmp_path))
-        loader = OasisDataLoader(batch_size=4).get_data_loader(is_train=True)
+        loader = OasisDataLoader(batch_size=4).get_data_loader("train")
         imgs, _ = next(iter(loader))
         assert imgs.shape[0] == 4
-
-    def test_train_loader_uses_random_sampler(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Training DataLoader must be created with shuffle=True (RandomSampler)."""
-        train_dir = tmp_path / "train"
-        train_dir.mkdir()
-        self._populate_nifti_dir(train_dir, 8)
-        monkeypatch.setattr(OasisDataLoader, "RESULTS_PATH", str(tmp_path))
-        loader = OasisDataLoader(batch_size=4).get_data_loader(is_train=True)
-        assert isinstance(loader.sampler, RandomSampler)
-
-    def test_test_loader_uses_sequential_sampler(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Test DataLoader must be created with shuffle=False (SequentialSampler)."""
-        test_dir = tmp_path / "test"
-        test_dir.mkdir()
-        self._populate_nifti_dir(test_dir, 8)
-        monkeypatch.setattr(OasisDataLoader, "RESULTS_PATH", str(tmp_path))
-        loader = OasisDataLoader(batch_size=4).get_data_loader(is_train=False)
-        assert isinstance(loader.sampler, SequentialSampler)
 
     def test_missing_train_directory_raises_file_not_found(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """FileNotFoundError must be raised when the nifti train directory is absent."""
+        """FileNotFoundError must be raised when the train directory is absent."""
         monkeypatch.setattr(OasisDataLoader, "RESULTS_PATH", str(tmp_path))
         with pytest.raises(FileNotFoundError):
-            OasisDataLoader(batch_size=4).get_data_loader(is_train=True)
+            OasisDataLoader(batch_size=4).get_data_loader("train")
 
     def test_empty_train_directory_raises_file_not_found(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """FileNotFoundError must be raised when the nifti train directory is empty."""
+        """FileNotFoundError must be raised when the train directory is empty."""
         (tmp_path / "train").mkdir()
         monkeypatch.setattr(OasisDataLoader, "RESULTS_PATH", str(tmp_path))
         with pytest.raises(FileNotFoundError):
-            OasisDataLoader(batch_size=4).get_data_loader(is_train=True)
+            OasisDataLoader(batch_size=4).get_data_loader("train")

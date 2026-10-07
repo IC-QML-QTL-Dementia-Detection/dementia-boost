@@ -54,8 +54,8 @@ def main() -> None:
     batch_size = 64
 
     loader_manager = OasisDataLoader(batch_size=batch_size)
-    train_loader = loader_manager.get_data_loader(is_train=True)
-    test_loader = loader_manager.get_data_loader(is_train=False)
+    train_loader = loader_manager.get_data_loader("train")
+    test_loader = loader_manager.get_data_loader("test")
     logger.info(
         f"Data loaded: {len(train_loader)} training batches, "
         f"{len(test_loader)} test batches."

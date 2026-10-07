@@ -13,6 +13,8 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from dementia_boost.data.dataset import OasisDataset
+from dementia_boost.data.split import COHORT_NAMES
+from dementia_boost.data.split_guards import verify_split_layout
 
 
 class OasisDataLoader:
@@ -36,34 +38,43 @@ class OasisDataLoader:
         """
         self._batch_size = batch_size
 
-    def get_data_loader(self, is_train: bool = True) -> DataLoader:
-        """Creates and returns a PyTorch DataLoader for the specified subset.
+    def get_data_loader(self, cohort: str = "train") -> DataLoader:
+        """Creates and returns a PyTorch DataLoader for the specified cohort.
 
-        Loads pre-processed `.pt` tensor files from `RESULTS_PATH/train/` or
-        `RESULTS_PATH/test/`.
+        Loads pre-processed `.pt` tensor files from `RESULTS_PATH/<cohort>/`.
+        Before returning, it verifies the whole layout against
+        `split_manifest.json`, so a stale or leaky directory is never loaded.
 
         Args:
-            is_train: If True, loads the training set; otherwise, loads the test
-                set. Defaults to True.
+            cohort: One of "train", "val", or "test". Only the training cohort
+                is shuffled. Defaults to "train".
 
         Returns:
             A PyTorch DataLoader configured with the dataset, batch size,
             shuffling, and memory pinning.
 
         Raises:
-            FileNotFoundError: If the processed `.pt` files do not exist at the
-                expected location.
+            ValueError: If `cohort` is not one of the three cohort names.
+            FileNotFoundError: If the cohort directory is missing or empty, or
+                the split manifest does not exist.
+            SplitIntegrityError: If the cohort files do not match the manifest
+                or two cohorts share a subject.
         """
+        if cohort not in COHORT_NAMES:
+            raise ValueError(
+                f"Unknown cohort {cohort!r}; expected one of {COHORT_NAMES}"
+            )
+        is_train = cohort == "train"
         use_pin_memory = torch.cuda.is_available() or torch.backends.mps.is_available()
 
-        dir_name = "train" if is_train else "test"
-        dir_path = os.path.join(self.RESULTS_PATH, dir_name)
+        dir_path = os.path.join(self.RESULTS_PATH, cohort)
 
         if not os.path.exists(dir_path) or not os.listdir(dir_path):
             raise FileNotFoundError(
                 f"Processed NIfTI data not found at {dir_path}. "
                 "Run OasisDataProcessor().process_and_save() first."
             )
+        verify_split_layout(self.RESULTS_PATH)
 
         dataset = OasisDataset(
             directory_path=dir_path,

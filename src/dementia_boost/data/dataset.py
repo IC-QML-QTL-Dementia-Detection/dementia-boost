@@ -20,7 +20,8 @@ class OasisDataset(Dataset):
 
     Attributes:
         directory_path: Path to the directory containing `.pt` files.
-        file_list: List of matching `.pt` filepaths in `directory_path`.
+        file_list: Sorted list of matching `.pt` filepaths in `directory_path`,
+            so sample order does not depend on the filesystem.
         transform: Optional callable transform applied to the loaded tensor.
     """
 
@@ -36,7 +37,7 @@ class OasisDataset(Dataset):
             transform: Optional callable transform to apply to the data.
         """
         self.directory_path = directory_path
-        self.file_list = glob.glob(os.path.join(directory_path, "*.pt"))
+        self.file_list = sorted(glob.glob(os.path.join(directory_path, "*.pt")))
         self.transform = transform
 
     def __len__(self) -> int:

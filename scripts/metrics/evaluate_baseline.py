@@ -61,7 +61,7 @@ def main() -> None:
 
     batch_size = 64
     loader_manager = OasisDataLoader(batch_size=batch_size)
-    test_loader = loader_manager.get_data_loader(is_train=False)
+    test_loader = loader_manager.get_data_loader("test")
     evaluator = ModelEvaluator(model=base_model, device=device)
 
     all_results = []

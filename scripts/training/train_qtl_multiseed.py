@@ -155,8 +155,8 @@ def main() -> None:
     feature_extractor = load_baseline_backbone(baseline_weights_path, device)
 
     raw_loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE)
-    raw_train_loader = raw_loader_manager.get_data_loader(is_train=True)
-    raw_test_loader = raw_loader_manager.get_data_loader(is_train=False)
+    raw_train_loader = raw_loader_manager.get_data_loader("train")
+    raw_test_loader = raw_loader_manager.get_data_loader("test")
 
     logger.info("Extracting and caching training embeddings from baseline backbone...")
     train_features, train_labels = FeatureCacheManager.extract_features(
