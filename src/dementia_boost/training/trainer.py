@@ -2,7 +2,11 @@
 
 This module provides `BaselineTrainer` to manage the complete training lifecycle
 for dementia classification models, decoupling epoch loops, loss computation,
-metric logging, test evaluation, and artifact saving from entry scripts.
+metric logging, validation evaluation, and artifact saving from entry scripts.
+
+The trainer only ever sees the train and validation loaders. The test cohort is
+evaluated afterwards, from the saved checkpoints, so it can never influence
+training or model selection.
 
 The trainer records a structured per-epoch `TrainingHistory` but never plots it;
 visualization stays in the telemetry layer.
@@ -30,14 +34,14 @@ class BaselineTrainer:
     """Manages the training, logging, and evaluation lifecycle of dementia models.
 
     Decouples the optimization loop, learning rate scheduling, real-time telemetry
-    logging, and test set checkpointing from model definition and entry scripts.
+    logging, and checkpointing from model definition and entry scripts.
 
     Attributes:
         DEFAULT_SAVE_DIR: Default directory where model weights are written.
         LOGIT_CLASSIFICATION_THRESHOLD: Logit threshold for binary decision (0.0).
         model: The PyTorch neural network or hybrid module to be trained.
         train_loader: PyTorch DataLoader providing training mini-batches.
-        test_loader: PyTorch DataLoader providing test/validation mini-batches.
+        val_loader: PyTorch DataLoader providing validation mini-batches.
         criterion: Loss function module computing objective loss.
         optimizer: Optimization algorithm updating model parameters.
         scheduler: Learning rate decay scheduler.
@@ -48,8 +52,9 @@ class BaselineTrainer:
             disk upon completion (e.g. an assembled DementiaClassifier).
         history_path: Optional JSON file holding the running `TrainingHistory`,
             rewritten atomically. None disables persistence.
-        eval_every: Evaluate on `test_loader` every this many epochs. The last
-            epoch is always evaluated, and that result is the final test report.
+        eval_every: Evaluate on `val_loader` every this many epochs. The last
+            epoch is always evaluated, and that result is the final validation
+            report.
         history_save_every: Write the history to `history_path` every this many
             epochs, and once more when training ends or fails.
         paradigm: Training paradigm label stored in the history.
@@ -63,7 +68,7 @@ class BaselineTrainer:
         self,
         model: nn.Module,
         train_loader: DataLoader,
-        test_loader: DataLoader,
+        val_loader: DataLoader,
         criterion: nn.Module,
         optimizer: Optimizer,
         scheduler: LRScheduler,
@@ -82,7 +87,8 @@ class BaselineTrainer:
         Args:
             model: The neural network model to be trained.
             train_loader: DataLoader for the training dataset.
-            test_loader: DataLoader for the final testing dataset.
+            val_loader: DataLoader for the validation cohort, evaluated during
+                training.
             criterion: The loss function module (e.g., BCEWithLogitsLoss).
             optimizer: The weight optimization algorithm (e.g., Adam).
             scheduler: The learning rate decay scheduler.
@@ -94,7 +100,7 @@ class BaselineTrainer:
                 `model`. Defaults to None (saves `model`).
             history_path: Optional JSON path for the per-epoch history, written
                 atomically. Defaults to None (no history file).
-            eval_every: Number of epochs between evaluations on `test_loader`.
+            eval_every: Number of epochs between evaluations on `val_loader`.
                 Epochs in between record `None` validation values, except the
                 last epoch, which is always evaluated. Defaults to 1.
             history_save_every: Number of epochs between history writes. The
@@ -120,7 +126,7 @@ class BaselineTrainer:
 
         self.model = model
         self.train_loader = train_loader
-        self.test_loader = test_loader
+        self.val_loader = val_loader
         self.criterion = criterion
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -141,10 +147,10 @@ class BaselineTrainer:
 
         Runs forward and backward passes, updates optimizer and scheduler states,
         logs per-epoch loss and accuracy metrics, records a `TrainingHistory`,
-        and saves the final checkpoint upon training completion. The test loader
-        is evaluated every `eval_every` epochs and always after the last epoch;
-        the last evaluation doubles as the final test report, so no extra pass
-        runs at the end.
+        and saves the final checkpoint upon training completion. The validation
+        loader is evaluated every `eval_every` epochs and always after the last
+        epoch; the last evaluation doubles as the final validation report, so
+        no extra pass runs at the end. The checkpoint is always the last epoch.
 
         The history is written to `history_path` every `history_save_every`
         epochs and once more on exit, including when training raises, so every
@@ -186,7 +192,7 @@ class BaselineTrainer:
 
                 val_loss, val_acc = None, None
                 if epoch % self.eval_every == 0 or epoch == epochs:
-                    last_evaluation = self._evaluate_loader(self.test_loader)
+                    last_evaluation = self._evaluate_loader(self.val_loader)
                     val_loss, val_acc = last_evaluation
 
                 history.epochs.append(
@@ -211,7 +217,7 @@ class BaselineTrainer:
         self.logger.info(f"Training complete for run {run_id}. Saving final model.")
 
         if last_evaluation is None:
-            last_evaluation = self._evaluate_loader(self.test_loader)
+            last_evaluation = self._evaluate_loader(self.val_loader)
         self._save_checkpoint(run_id, *last_evaluation)
 
         return history
@@ -321,19 +327,19 @@ class BaselineTrainer:
     def _save_checkpoint(
         self, run_id: str, final_loss: float, final_acc: float
     ) -> None:
-        """Logs the final test performance and saves the model weights.
+        """Logs the final validation performance and saves the model weights.
 
-        Receives the test loss and accuracy of the last epoch instead of
+        Receives the validation loss and accuracy of the last epoch instead of
         evaluating again, since the weights have not changed since then.
         Serializes the model state dictionary to disk.
 
         Args:
             run_id: Unique identifier for the run used in file naming.
-            final_loss: Test loss measured after the last epoch.
-            final_acc: Test accuracy measured after the last epoch.
+            final_loss: Validation loss measured after the last epoch.
+            final_acc: Validation accuracy measured after the last epoch.
         """
         self.logger.info(
-            f"[*] Final Test Loss: {final_loss:.4f} | Final Test Acc: {final_acc:.4f}"
+            f"[*] Final Val Loss: {final_loss:.4f} | Final Val Acc: {final_acc:.4f}"
         )
 
         target_model = self.save_model if self.save_model is not None else self.model
