@@ -2,160 +2,62 @@
 
 This script aggregates evaluation results across the Classical Baseline, Classical
 Transfer Learning (CTL), PennyLane Quantum Transfer Learning (QTL), and Qiskit
-Quantum Transfer Learning (Qiskit QTL) runs on NIfTI data. It identifies the
-top-performing run per paradigm using composite metric ranking, calculates
-relative percentage improvements, and exports a comparative JSON report.
+Quantum Transfer Learning (Qiskit QTL) runs on NIfTI data. It reports the mean
+and standard deviation of every metric across seeds on the test cohort, shows
+the test metrics of the run selected on the validation cohort, calculates the
+relative percentage change between the means, and exports a comparative JSON
+report. No run is chosen on test metrics.
 """
 
 import json
 import os
 
 from dementia_boost.telemetry.logger import setup_logger
+from dementia_boost.telemetry.report import build_comparative_report
+from dementia_boost.training.checkpoint_evaluation import cohort_results_path
 
-
-def calculate_percentage_delta(base: float, new: float) -> float:
-    """Computes the relative percentage improvement between two scalar metrics.
-
-    Args:
-        base: Baseline metric score.
-        new: Updated or transfer learning metric score.
-
-    Returns:
-        The percentage change from base to new. Returns 0.0 if base is zero.
-    """
-    if base == 0.0:
-        return 0.0
-    return ((new - base) / base) * 100.0
-
-
-def get_best_run(runs: list[dict[str, float | str]]) -> dict[str, float | str]:
-    """Isolates the best-performing model run using composite multi-metric ranking.
-
-    Ranks runs primarily by Accuracy, followed by F1-score and AUC-ROC to prevent
-    selecting runs overfitted to a single metric.
-
-    Args:
-        runs: List of individual run dictionaries from evaluation JSON.
-
-    Returns:
-        The dictionary of the top-ranked model run.
-    """
-    return max(
-        runs,
-        key=lambda item: (
-            float(item.get("accuracy", 0.0)),
-            float(item.get("f1_score", 0.0)),
-            float(item.get("auc", 0.0)),
-        ),
-    )
+RESULTS_DIR = "./data/results/metrics/nifti"
+OUTPUT_PATH = f"{RESULTS_DIR}/comparative_report.json"
+RESULT_STEMS = {
+    "baseline": "baseline",
+    "ctl": "tl",
+    "qtl": "qtl",
+    "qiskit_qtl": "qiskit_qtl",
+}
+REQUIRED_PARADIGMS = ("baseline", "ctl")
 
 
 def main() -> None:
     """Generates the quantitative comparative improvement report for NIfTI."""
     logger = setup_logger("improvement_report_nifti")
 
-    baseline_path = "./data/results/metrics/nifti/baseline_results.json"
-    ctl_path = "./data/results/metrics/nifti/tl_results.json"
-    qtl_path = "./data/results/metrics/nifti/qtl_results.json"
-    qiskit_qtl_path = "./data/results/metrics/nifti/qiskit_qtl_results.json"
-    output_path = "./data/results/metrics/nifti/comparative_report.json"
-
-    if not os.path.exists(baseline_path):
-        logger.error(f"Missing baseline telemetry at: {baseline_path}")
-        return
-
-    with open(baseline_path) as file:
-        base_data = json.load(file)
-
-    if not os.path.exists(ctl_path):
-        logger.error(f"Missing Classical Transfer Learning telemetry at: {ctl_path}")
-        return
-
-    with open(ctl_path) as file:
-        ctl_data = json.load(file)
-
-    qtl_data = None
-    if os.path.exists(qtl_path):
-        with open(qtl_path) as file:
-            qtl_data = json.load(file)
-
-    qiskit_qtl_data = None
-    if os.path.exists(qiskit_qtl_path):
-        with open(qiskit_qtl_path) as file:
-            qiskit_qtl_data = json.load(file)
-
-    best_base = get_best_run(base_data["individual_runs"])
-    best_ctl = get_best_run(ctl_data["individual_runs"])
-
-    best_qtl = None
-    best_qtl_run_id = "pending"
-    if qtl_data and qtl_data.get("individual_runs"):
-        best_qtl = get_best_run(qtl_data["individual_runs"])
-        best_qtl_run_id = str(best_qtl["run_id"])
-
-    best_qiskit_qtl = None
-    best_qiskit_qtl_run_id = "pending"
-    if qiskit_qtl_data and qiskit_qtl_data.get("individual_runs"):
-        best_qiskit_qtl = get_best_run(qiskit_qtl_data["individual_runs"])
-        best_qiskit_qtl_run_id = str(best_qiskit_qtl["run_id"])
-
-    metrics = ["accuracy", "precision", "recall", "f1_score", "auc"]
-
-    report: dict[str, dict[str, str | dict[str, float]]] = {
-        "metadata": {
-            "best_baseline_run": str(best_base["run_id"]),
-            "best_ctl_run": str(best_ctl["run_id"]),
-            "best_qtl_run": best_qtl_run_id,
-            "best_qiskit_qtl_run": best_qiskit_qtl_run_id,
-        },
-        "comparisons": {},
-    }
-
-    for metric in metrics:
-        base_val = float(best_base[metric])
-        ctl_val = float(best_ctl[metric])
-        qtl_val = float(best_qtl[metric]) if best_qtl else 0.0
-        qiskit_qtl_val = float(best_qiskit_qtl[metric]) if best_qiskit_qtl else 0.0
-
-        report["comparisons"][metric] = {
-            "baseline": base_val,
-            "ctl": ctl_val,
-            "ctl_imp_base_pct": calculate_percentage_delta(base_val, ctl_val),
-            "qtl": qtl_val,
-            "qtl_imp_base_pct": (
-                calculate_percentage_delta(base_val, qtl_val) if best_qtl else 0.0
-            ),
-            "qtl_imp_ctl_pct": (
-                calculate_percentage_delta(ctl_val, qtl_val) if best_qtl else 0.0
-            ),
-            "qiskit_qtl": qiskit_qtl_val,
-            "qiskit_qtl_imp_base_pct": (
-                calculate_percentage_delta(base_val, qiskit_qtl_val)
-                if best_qiskit_qtl
-                else 0.0
-            ),
-            "qiskit_qtl_imp_ctl_pct": (
-                calculate_percentage_delta(ctl_val, qiskit_qtl_val)
-                if best_qiskit_qtl
-                else 0.0
-            ),
-            "qiskit_qtl_imp_qtl_pct": (
-                calculate_percentage_delta(qtl_val, qiskit_qtl_val)
-                if best_qtl and best_qiskit_qtl
-                else 0.0
-            ),
+    test_results: dict[str, dict] = {}
+    val_results: dict[str, dict] = {}
+    for paradigm, stem in RESULT_STEMS.items():
+        paths = {
+            "test": cohort_results_path(RESULTS_DIR, stem, "test"),
+            "val": cohort_results_path(RESULTS_DIR, stem, "val"),
         }
+        missing = [path for path in paths.values() if not os.path.exists(path)]
+        if missing:
+            if paradigm in REQUIRED_PARADIGMS:
+                logger.error(f"Missing telemetry for {paradigm}: {missing}")
+                return
+            logger.info(f"Skipping {paradigm}: missing {missing}")
+            continue
+        with open(paths["test"]) as file:
+            test_results[paradigm] = json.load(file)
+        with open(paths["val"]) as file:
+            val_results[paradigm] = json.load(file)
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "w") as file:
+    report = build_comparative_report(test_results, val_results)
+
+    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+    with open(OUTPUT_PATH, "w") as file:
         json.dump(report, file, indent=4)
 
-    logger.info(f"Report generated successfully at: {output_path}")
-    logger.info(
-        f"Optimal Baseline: {best_base['run_id']} | Optimal CTL: {best_ctl['run_id']} "
-        f"| Optimal QTL: {best_qtl_run_id} "
-        f"| Optimal Qiskit QTL: {best_qiskit_qtl_run_id}"
-    )
+    logger.info(f"Report generated successfully at: {OUTPUT_PATH}")
+    logger.info(f"Runs selected on validation: {report['metadata']['selected_runs']}")
 
 
 if __name__ == "__main__":

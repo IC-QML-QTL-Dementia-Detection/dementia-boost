@@ -19,6 +19,7 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
+from sklearn.metrics import log_loss as sklearn_log_loss
 
 
 @dataclass
@@ -32,6 +33,8 @@ class EvaluationResult:
         recall: Recall score TP / (TP + FN).
         f1_score: Harmonic mean of precision and recall.
         auc: Area under the Receiver Operating Characteristic (ROC) curve.
+        log_loss: Binary cross-entropy of the predicted probabilities, with
+            probabilities clipped away from 0 and 1 so it stays finite.
         confusion_matrix: 2x2 confusion matrix as a nested integer list.
         y_true: Ground-truth binary classification labels.
         y_prob: Predicted model probability values.
@@ -43,6 +46,7 @@ class EvaluationResult:
     recall: float
     f1_score: float
     auc: float
+    log_loss: float
     confusion_matrix: list[list[int]]
     y_true: list[int]
     y_prob: list[float]
@@ -151,6 +155,7 @@ class MetricsAnalyzer:
             recall=float(recall_score(y_true, y_pred, zero_division=0)),  # type: ignore
             f1_score=float(f1_score(y_true, y_pred, zero_division=0)),  # type: ignore
             auc=float(roc_auc_score(y_true, y_prob)),
+            log_loss=float(sklearn_log_loss(y_true, y_prob, labels=[0, 1])),
             confusion_matrix=confusion_matrix(y_true, y_pred).tolist(),
             y_true=y_true.astype(int).tolist(),
             y_prob=y_prob.astype(float).tolist(),
@@ -195,10 +200,13 @@ class MetricsAnalyzer:
         individual_results: list[EvaluationResult],
         aggregated: dict[str, AggregateMetrics],
         filepath: str,
+        cohort: str,
     ) -> None:
         """Serializes evaluation metrics and aggregate statistics to a JSON file.
 
         The exported JSON structure contains:
+        - `cohort`: the cohort the metrics were measured on ("val" or "test"),
+          so a consumer can refuse metrics from the wrong cohort.
         - `aggregated_statistics`: mapping metric names to summary statistics.
         - `individual_runs`: list of per-run evaluation metric dictionaries.
 
@@ -206,8 +214,10 @@ class MetricsAnalyzer:
             individual_results: List of per-run EvaluationResult objects.
             aggregated: Dictionary mapping metric names to AggregateMetrics objects.
             filepath: Destination file path on disk.
+            cohort: Name of the cohort the results were computed on.
         """
         payload = {
+            "cohort": cohort,
             "aggregated_statistics": {k: asdict(v) for k, v in aggregated.items()},
             "individual_runs": [asdict(res) for res in individual_results],
         }

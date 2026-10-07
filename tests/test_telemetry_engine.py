@@ -70,6 +70,15 @@ class TestMetricsAnalyzerCalculateMetricsValues:
         assert result.f1_score == pytest.approx(2 / 3)
         assert result.auc == pytest.approx(0.75)
         assert result.confusion_matrix == [[2, 0], [1, 1]]
+        expected_log_loss = -np.mean(np.log([0.9, 0.6, 0.35, 0.8]))
+        assert result.log_loss == pytest.approx(expected_log_loss)
+
+    def test_log_loss_stays_finite_for_saturated_probabilities(self) -> None:
+        """A wrong prediction at exactly 0 or 1 must not give an infinite loss."""
+        result = MetricsAnalyzer.calculate_metrics(
+            "saturated", np.array([1, 0]), np.array([0.0, 1.0])
+        )
+        assert np.isfinite(result.log_loss)
 
 
 class TestMetricsAnalyzerZeroDivisionSafety:
@@ -153,6 +162,7 @@ class TestMetricsAnalyzerAggregation:
             recall=value,
             f1_score=value,
             auc=value,
+            log_loss=value,
             confusion_matrix=[[1, 0], [0, 1]],
             y_true=[0, 1],
             y_prob=[0.1, 0.9],
@@ -193,12 +203,17 @@ class TestMetricsAnalyzerSaveToJson:
         aggregated = MetricsAnalyzer.aggregate_results([result])
         filepath = tmp_path / "metrics.json"
 
-        MetricsAnalyzer.save_to_json([result], aggregated, str(filepath))
+        MetricsAnalyzer.save_to_json([result], aggregated, str(filepath), cohort="val")
 
         with open(filepath) as f:
             payload = json.load(f)
 
-        assert set(payload.keys()) == {"aggregated_statistics", "individual_runs"}
+        assert set(payload.keys()) == {
+            "cohort",
+            "aggregated_statistics",
+            "individual_runs",
+        }
+        assert payload["cohort"] == "val"
         assert payload["individual_runs"][0]["run_id"] == "run_json"
 
         for key in _KNOWN_METRIC_KEYS:
@@ -282,7 +297,7 @@ class TestMetricsVisualizerPlotGeneration:
         ]
         aggregated = MetricsAnalyzer.aggregate_results(results)
         filepath = tmp_path / "mock_metrics.json"
-        MetricsAnalyzer.save_to_json(results, aggregated, str(filepath))
+        MetricsAnalyzer.save_to_json(results, aggregated, str(filepath), cohort="test")
         return str(filepath)
 
     def test_all_plot_methods_write_nonzero_png_files(

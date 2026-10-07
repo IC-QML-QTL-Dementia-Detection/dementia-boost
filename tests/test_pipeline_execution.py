@@ -95,7 +95,7 @@ class TestBaselineTrainerEndToEnd:
 
         model = _build_end_to_end_model().to(device)
         train_loader = _build_mock_image_loader()
-        test_loader = _build_mock_image_loader()
+        val_loader = _build_mock_image_loader()
 
         criterion = nn.BCEWithLogitsLoss()
         optimizer = optim.Adam(model.parameters(), lr=1e-2)
@@ -111,7 +111,7 @@ class TestBaselineTrainerEndToEnd:
         trainer = BaselineTrainer(
             model=model,
             train_loader=train_loader,
-            test_loader=test_loader,
+            val_loader=val_loader,
             criterion=criterion,
             optimizer=optimizer,
             scheduler=scheduler,
@@ -151,7 +151,7 @@ class TestBaselineTrainerLrScheduler:
 
         model = _build_end_to_end_model().to(device)
         train_loader = _build_mock_image_loader()
-        test_loader = _build_mock_image_loader()
+        val_loader = _build_mock_image_loader()
 
         initial_lr = 1e-2
         step_size = 2
@@ -164,7 +164,7 @@ class TestBaselineTrainerLrScheduler:
         trainer = BaselineTrainer(
             model=model,
             train_loader=train_loader,
-            test_loader=test_loader,
+            val_loader=val_loader,
             criterion=criterion,
             optimizer=optimizer,
             scheduler=scheduler,

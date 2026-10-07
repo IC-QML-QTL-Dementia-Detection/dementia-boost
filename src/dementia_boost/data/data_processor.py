@@ -7,13 +7,28 @@ data leakage across longitudinal visits, and serialize tensors to `.pt` files.
 
 import glob
 import os
+import shutil
 
 import nibabel as nib
 import numpy as np
 import pandas as pd
 import torch
 from nibabel.spatialimages import SpatialImage
-from numpy import random
+
+from dementia_boost.data.split import COHORT_NAMES, SubjectSplit, split_subjects
+from dementia_boost.data.split_guards import verify_split_layout
+from dementia_boost.data.split_manifest import (
+    MANIFEST_NAME,
+    build_manifest,
+    write_manifest,
+)
+from dementia_boost.data.subject_ids import (
+    build_subject_labels,
+    subject_of_visit,
+    validate_overrides,
+)
+
+STAGING_NAME = ".staging"
 
 
 class OasisDataProcessor:
@@ -21,8 +36,14 @@ class OasisDataProcessor:
 
     This processor streams files from disk to prevent out-of-memory (OOM)
     errors when processing large MRI collections. It guarantees strict
-    patient-level train/test isolation so that multiple longitudinal visits for
-    the same subject never cross between cohorts.
+    patient-level isolation so that multiple longitudinal visits for the same
+    subject never cross between cohorts.
+
+    Each run builds the whole split in a staging directory and publishes it
+    only when every file was written, so an interrupted run leaves the previous
+    split untouched. Publishing replaces the `.pt` files of `train/`, `val/`,
+    and `test/` and then writes `split_manifest.json`; other files in those
+    directories are never touched.
 
     Attributes:
         RAW_PATH: Base directory where raw NIfTI/HDR scans reside. Defaults
@@ -31,7 +52,10 @@ class OasisDataProcessor:
             saved. Defaults to "./data/results".
         csv_path: Path to the metadata CSV file containing OASIS clinical data.
         train_dir: Destination directory for training set `.pt` files.
+        val_dir: Destination directory for validation set `.pt` files.
         test_dir: Destination directory for test set `.pt` files.
+        manifest_path: Destination of `split_manifest.json`.
+        excluded: Subjects left out of the last run, with the reason.
     """
 
     RAW_PATH = "./data/raw"
@@ -45,193 +69,273 @@ class OasisDataProcessor:
                 containing subject IDs and their corresponding diagnostic groups.
         """
         self.csv_path = csv_path
+        self.excluded: dict[str, str] = {}
 
         self.train_dir = os.path.join(self.PROCESSED_PATH, "train")
+        self.val_dir = os.path.join(self.PROCESSED_PATH, "val")
         self.test_dir = os.path.join(self.PROCESSED_PATH, "test")
+        self.manifest_path = os.path.join(self.PROCESSED_PATH, MANIFEST_NAME)
         os.makedirs(self.RAW_PATH, exist_ok=True)
         os.makedirs(self.PROCESSED_PATH, exist_ok=True)
-        os.makedirs(self.train_dir, exist_ok=True)
-        os.makedirs(self.test_dir, exist_ok=True)
+        for directory in (self.train_dir, self.val_dir, self.test_dir):
+            os.makedirs(directory, exist_ok=True)
 
     def process_and_save(
         self,
-        split_ratio: float = 0.7,
+        test_ratio: float = 0.3,
+        val_ratio: float = 0.2,
         seed: int = 42,
         manual_train_ids: list[str] | None = None,
         manual_test_ids: list[str] | None = None,
     ) -> None:
         """Executes the complete ETL and patient-split pipeline.
 
-        Parses the metadata CSV, splits unique Subject IDs into train/test
-        cohorts respecting manual overrides, streams raw NIfTI files from disk,
-        extracts the central 2D axial slice, and serializes processed tensors
-        along with labels as `.pt` files.
+        Parses the metadata CSV, scans the raw folder, excludes subjects that
+        cannot be used (with a reason), splits the remaining Subject IDs into
+        train, val, and test cohorts with `split_subjects`, extracts the central
+        2D axial slice of every volume into a staging directory, publishes the
+        staged files, writes the split manifest, and verifies the written
+        layout against it.
 
         Args:
-            split_ratio: Target proportion of subjects to allocate to the
-                training cohort. Defaults to 0.7 (70%).
+            test_ratio: Share of all subjects placed in the test cohort.
+                Defaults to 0.3 (30%).
+            val_ratio: Share of the non-test subjects placed in the validation
+                cohort. Defaults to 0.2 (20%).
             seed: Random seed for deterministic subject cohort partitioning.
                 Defaults to 42.
             manual_train_ids: Optional list of Subject IDs forced into the
                 training set. Defaults to None.
             manual_test_ids: Optional list of Subject IDs forced into the
                 testing set. Defaults to None.
+
+        Raises:
+            ValueError: If an override is malformed, unknown (or excluded), or
+                in both lists, or if a cohort would lack one of the classes.
         """
-        manual_train_ids = manual_train_ids or []
-        manual_test_ids = manual_test_ids or []
+        labels = self._parse_csv()
+        files_by_subject, seen_subjects, skipped_files = self._scan_raw()
+        eligible = self._select_eligible(labels, files_by_subject, seen_subjects)
 
-        subject_metadata = self._parse_csv()
+        manual_train_ids, manual_test_ids = validate_overrides(
+            manual_train_ids or [], manual_test_ids or [], eligible
+        )
 
-        train_subjects, test_subjects = self._split_subjects(
-            subject_metadata,
-            split_ratio,
+        split = split_subjects(
+            eligible,
+            test_ratio,
+            val_ratio,
             seed,
             manual_train_ids,
             manual_test_ids,
         )
 
         print(
-            f"Splitting complete: {len(train_subjects)} Train subjects, ",
-            f"{len(test_subjects)} Test subjects.",
+            f"Splitting complete: {len(split.train)} Train, {len(split.val)} Val, "
+            f"{len(split.test)} Test subjects, {len(self.excluded)} excluded."
         )
 
-        print("Processing Training Data...")
-        self._process_subset(train_subjects, subject_metadata, self.train_dir)
-
-        print("Processing Test Data...")
-        self._process_subset(test_subjects, subject_metadata, self.test_dir)
+        staging_root = os.path.join(self.PROCESSED_PATH, STAGING_NAME)
+        shutil.rmtree(staging_root, ignore_errors=True)
+        try:
+            self._stage_split(split, eligible, files_by_subject, staging_root)
+            self._publish(staging_root)
+            write_manifest(
+                self.manifest_path,
+                build_manifest(
+                    split=split,
+                    labels=eligible,
+                    file_counts={s: len(f) for s, f in files_by_subject.items()},
+                    excluded=self.excluded,
+                    skipped_files=skipped_files,
+                    seed=seed,
+                    test_ratio=test_ratio,
+                    val_ratio=val_ratio,
+                    manual_train_ids=manual_train_ids,
+                    manual_test_ids=manual_test_ids,
+                ),
+            )
+            verify_split_layout(self.PROCESSED_PATH)
+        finally:
+            shutil.rmtree(staging_root, ignore_errors=True)
 
     def _parse_csv(self) -> dict[str, int]:
         """Reads metadata CSV and maps subjects to binary dementia labels.
 
-        Excludes subjects marked with the 'Converted' status to preserve clean
-        binary classes ('Nondemented' -> 0, 'Demented' -> 1).
+        Subject IDs and group names are canonicalised. Subjects marked
+        'Converted' are excluded to preserve clean binary classes
+        ('Nondemented' -> 0, 'Demented' -> 1) and are kept, with a reason, in
+        `self.excluded`.
 
         Returns:
-            A dictionary mapping each Subject ID to its binary integer label.
+            A dictionary mapping each canonical Subject ID to its binary label.
+
+        Raises:
+            ValueError: If an ID or group is malformed, or a subject has
+                conflicting groups.
         """
-        df = pd.read_csv(self.csv_path)
+        labels, self.excluded = build_subject_labels(pd.read_csv(self.csv_path))
+        return labels
 
-        label_mapping: dict[str, int] = {"Nondemented": 0, "Demented": 1}
-
-        df_filtered = df[df["Group"] != "Converted"]
-
-        return {
-            str(subj): label_mapping[str(group)]
-            for subj, group in zip(
-                df_filtered["Subject ID"],
-                df_filtered["Group"],
-                strict=False,
-            )
-            if str(group) in label_mapping
-        }
-
-    def _split_subjects(
+    def _scan_raw(
         self,
-        metadata: dict[str, int],
-        ratio: float,
-        seed: int,
-        manual_train: list[str],
-        manual_test: list[str],
-    ) -> tuple[set[str], set[str]]:
-        """Splits the dataset strictly by Subject ID to prevent patient leakage.
+    ) -> tuple[dict[str, list[str]], set[str], list[dict[str, str]]]:
+        """Lists the usable raw volumes per subject without loading voxel data.
 
-        Ensures that all longitudinal exams for a given patient remain within
-        the same cohort. Respects manual ID overrides and randomly allocates
-        the remaining subjects according to the split ratio.
+        A volume is usable when its header loads and describes a 3D image (size
+        1 dimensions are ignored). Anything else is reported in the skipped
+        list with a reason.
+
+        Returns:
+            A tuple of: usable `.hdr` paths per canonical subject (sorted), the
+            subjects that have at least one `.hdr` file whether usable or not,
+            and the skipped files as `{"file": relative path, "reason": text}`.
+        """
+        pattern = os.path.join(self.RAW_PATH, "*_MR*", "RAW", "*.hdr")
+        files_by_subject: dict[str, list[str]] = {}
+        seen_subjects: set[str] = set()
+        skipped: list[dict[str, str]] = []
+
+        for file_path in sorted(glob.glob(pattern)):
+            relative = os.path.relpath(file_path, self.RAW_PATH).replace(os.sep, "/")
+            try:
+                subject = subject_of_visit(file_path.split(os.sep)[-3])
+            except ValueError:
+                skipped.append(
+                    {"file": relative, "reason": "Folder name is not a visit ID"}
+                )
+                continue
+            seen_subjects.add(subject)
+
+            try:
+                header = nib.load(file_path)
+            except Exception as error:
+                skipped.append({"file": relative, "reason": f"Unreadable: {error}"})
+                continue
+            if not isinstance(header, SpatialImage):
+                skipped.append({"file": relative, "reason": "Not a spatial image"})
+                continue
+            shape = tuple(dim for dim in header.shape if dim != 1)
+            if len(shape) != 3:
+                skipped.append(
+                    {"file": relative, "reason": f"Volume is not 3D, shape {shape}"}
+                )
+                continue
+            files_by_subject.setdefault(subject, []).append(file_path)
+
+        return files_by_subject, seen_subjects, skipped
+
+    def _select_eligible(
+        self,
+        labels: dict[str, int],
+        files_by_subject: dict[str, list[str]],
+        seen_subjects: set[str],
+    ) -> dict[str, int]:
+        """Keeps the labelled subjects that have usable volumes.
+
+        Every other subject is added to `self.excluded` with a reason, so
+        nothing is dropped silently.
 
         Args:
-            metadata: Mapping of Subject IDs to binary labels.
-            ratio: Target proportion of subjects for the training set.
-            seed: Random seed used to shuffle remaining subjects deterministically.
-            manual_train: List of Subject IDs manually assigned to training.
-            manual_test: List of Subject IDs manually assigned to testing.
+            labels: Canonical subject ID to binary label, from the CSV.
+            files_by_subject: Usable volumes per subject, from the raw scan.
+            seen_subjects: Subjects with any `.hdr` file in the raw folder.
 
         Returns:
-            A tuple of two sets containing the Subject IDs for the training
-            and testing cohorts, respectively.
+            The labelled subjects with at least one usable volume.
         """
-        all_subjects = set(metadata.keys())
+        for subject in sorted(labels):
+            if subject in files_by_subject:
+                continue
+            self.excluded[subject] = (
+                "No readable 3D volume in the raw folder"
+                if subject in seen_subjects
+                else "No raw data in the raw folder"
+            )
+        for subject in sorted(seen_subjects):
+            if subject not in labels and subject not in self.excluded:
+                self.excluded[subject] = "No row in the metadata CSV"
+        return {s: label for s, label in labels.items() if s in files_by_subject}
 
-        train_set = set(manual_train)
-        test_set = set(manual_test)
-
-        remaining = list(all_subjects - train_set - test_set)
-        random.seed(seed)
-        random.shuffle(remaining)
-
-        target_train_size = int(len(all_subjects) * ratio)
-        needed_for_train = max(0, target_train_size - len(train_set))
-
-        train_set.update(remaining[:needed_for_train])
-        test_set.update(remaining[needed_for_train:])
-
-        return train_set, test_set
-
-    def _process_subset(
+    def _stage_split(
         self,
-        subjects: set[str],
-        metadata: dict[str, int],
-        output_dir: str,
+        split: SubjectSplit,
+        labels: dict[str, int],
+        files_by_subject: dict[str, list[str]],
+        staging_root: str,
     ) -> None:
-        """Streams, extracts axial slices, and saves tensors for a subject cohort.
-
-        For each subject in the cohort, searches the raw data directory for all
-        associated visits and HDR/NIfTI volume files. Loads each volume using
-        Nibabel, extracts the central 2D axial slice, adds a channel dimension
-        to produce shape [1, H, W], and saves the (tensor, label) tuple as a
-        `.pt` file.
+        """Writes every cohort's tensors into the staging directory.
 
         Args:
-            subjects: Set of Subject IDs assigned to this cohort.
-            metadata: Mapping of Subject IDs to binary integer labels.
-            output_dir: Destination directory path for the saved `.pt` files.
+            split: The three cohorts.
+            labels: Canonical subject ID to binary label.
+            files_by_subject: Usable volumes per subject.
+            staging_root: Directory that receives one sub-directory per cohort.
+
+        Raises:
+            Exception: Any error from reading or saving a volume. A volume that
+                passed the header scan but cannot be read stops the ETL, so a
+                subject is never published with missing exams.
         """
-        processed_count = 0
+        for name, subjects in (
+            ("train", split.train),
+            ("val", split.val),
+            ("test", split.test),
+        ):
+            output_dir = os.path.join(staging_root, name)
+            os.makedirs(output_dir)
+            print(f"Processing {name} data...")
+            for subject in subjects:
+                for file_path in files_by_subject[subject]:
+                    self._save_slice(file_path, labels[subject], output_dir)
 
-        for subject_id in subjects:
-            label = metadata[subject_id]
+    def _save_slice(self, file_path: str, label: int, output_dir: str) -> None:
+        """Extracts the central axial slice of one volume and saves it.
 
-            search_pattern = os.path.join(
-                self.RAW_PATH,
-                f"{subject_id}_MR*",
-                "RAW",
-                "*.hdr",
-            )
-            exam_files = glob.glob(search_pattern)
+        Loads the volume with Nibabel, takes the middle slice along the first
+        axis, adds a channel dimension to produce shape [1, H, W], and saves
+        the (tensor, label) tuple as `<visit folder>_<exam name>.pt`.
 
-            for file_path in exam_files:
-                try:
-                    img_obj = nib.load(file_path)
-                    if not isinstance(img_obj, SpatialImage):
-                        continue
+        Args:
+            file_path: Path of the `.hdr` file.
+            label: Binary label of the subject.
+            output_dir: Destination directory of the `.pt` file.
+        """
+        image = nib.load(file_path)
+        if not isinstance(image, SpatialImage):
+            raise TypeError(f"Not a spatial image: {file_path}")
+        volume = np.squeeze(image.get_fdata())
+        slice_2d = volume[volume.shape[0] // 2, :, :]
+        tensor_volume = torch.from_numpy(slice_2d).float().unsqueeze(0)
 
-                    volume_data = np.squeeze(img_obj.get_fdata())
+        parts = file_path.split(os.sep)
+        visit_folder = parts[-3]
+        exam_name = parts[-1].replace(".nifti.hdr", "")
+        torch.save(
+            (tensor_volume, label),
+            os.path.join(output_dir, f"{visit_folder}_{exam_name}.pt"),
+        )
 
-                    if volume_data.ndim != 3:
-                        print(
-                            f"Skipping {file_path}: unexpected dimensions",
-                            f"{volume_data.shape}",
-                        )
-                        continue
+    def _publish(self, staging_root: str) -> None:
+        """Replaces the `.pt` files of the cohort directories with the staged ones.
 
-                    middle_idx = volume_data.shape[0] // 2
-                    slice_2d = volume_data[middle_idx, :, :]
+        Only `.pt` files are removed; the directories and any other file in
+        them stay.
 
-                    tensor_2d = torch.from_numpy(slice_2d).float()
-
-                    tensor_volume = tensor_2d.unsqueeze(0)
-
-                    parts = file_path.split(os.sep)
-                    visit_folder = parts[-3]
-                    exam_name = parts[-1].replace(".nifti.hdr", "")
-
-                    save_name = f"{visit_folder}_{exam_name}.pt"
-                    save_path = os.path.join(output_dir, save_name)
-
-                    torch.save((tensor_volume, label), save_path)
-                    processed_count += 1
-                except Exception as e:
-                    print(f"Failed to process {file_path}: {e}")
-
-            print(f" -> Saved {processed_count} files to {output_dir}")
+        Args:
+            staging_root: Directory holding the staged `train`, `val`, `test`.
+        """
+        final_dirs = {
+            "train": self.train_dir,
+            "val": self.val_dir,
+            "test": self.test_dir,
+        }
+        for name in COHORT_NAMES:
+            for stale in glob.glob(os.path.join(final_dirs[name], "*.pt")):
+                os.remove(stale)
+            staged_dir = os.path.join(staging_root, name)
+            for staged in sorted(os.listdir(staged_dir)):
+                os.replace(
+                    os.path.join(staged_dir, staged),
+                    os.path.join(final_dirs[name], staged),
+                )

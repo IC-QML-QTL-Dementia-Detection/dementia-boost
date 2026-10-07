@@ -2,8 +2,9 @@
 
 This script trains the baseline LeNet-based Convolutional Neural Network across
 100 random seeds (1 to 100) using raw logits output and BCEWithLogitsLoss on
-preprocessed NIfTI axial slices. Model checkpoints are serialized to disk
-for subsequent evaluation and transfer learning benchmarking. Each run also
+preprocessed NIfTI axial slices. Training is monitored on the validation cohort
+only; the test cohort is never loaded here. Model checkpoints are serialized to
+disk for subsequent evaluation and transfer learning benchmarking. Each run also
 persists its per-epoch training history as JSON; loss plots are rendered from
 those files by `scripts/viz/visualize_loss.py`.
 """
@@ -53,12 +54,12 @@ def main() -> None:
     epochs_per_run = 100
     batch_size = 64
 
-    loader_manager = OasisDataLoader(batch_size=batch_size, mode="nifti")
-    train_loader = loader_manager.get_data_loader(is_train=True)
-    test_loader = loader_manager.get_data_loader(is_train=False)
+    loader_manager = OasisDataLoader(batch_size=batch_size)
+    train_loader = loader_manager.get_data_loader("train")
+    val_loader = loader_manager.get_data_loader("val")
     logger.info(
         f"Data loaded: {len(train_loader)} training batches, "
-        f"{len(test_loader)} test batches."
+        f"{len(val_loader)} validation batches."
     )
 
     save_dir = "./data/results/trained_models/nifti"
@@ -91,7 +92,7 @@ def main() -> None:
         trainer = BaselineTrainer(
             model=model,
             train_loader=train_loader,
-            test_loader=test_loader,
+            val_loader=val_loader,
             criterion=criterion,
             optimizer=optimizer,
             scheduler=scheduler,

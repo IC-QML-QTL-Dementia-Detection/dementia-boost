@@ -72,7 +72,7 @@ def test_baseline_trainer_with_cached_embeddings_and_save_model(
         data_loader=raw_loader,
         device=device,
     )
-    test_features, test_labels = FeatureCacheManager.extract_features(
+    val_features, val_labels = FeatureCacheManager.extract_features(
         feature_extractor=extractor,
         data_loader=raw_loader,
         device=device,
@@ -84,9 +84,9 @@ def test_baseline_trainer_with_cached_embeddings_and_save_model(
         batch_size=BATCH_SIZE,
         shuffle=True,
     )
-    test_cached_loader = FeatureCacheManager.create_cached_loader(
-        features=test_features,
-        labels=test_labels,
+    val_cached_loader = FeatureCacheManager.create_cached_loader(
+        features=val_features,
+        labels=val_labels,
         batch_size=BATCH_SIZE,
         shuffle=False,
     )
@@ -109,7 +109,7 @@ def test_baseline_trainer_with_cached_embeddings_and_save_model(
     trainer = BaselineTrainer(
         model=head,
         train_loader=train_cached_loader,
-        test_loader=test_cached_loader,
+        val_loader=val_cached_loader,
         criterion=criterion,
         optimizer=optimizer,
         scheduler=scheduler,
@@ -168,7 +168,7 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
         data_loader=raw_loader,
         device=device,
     )
-    test_features, test_labels = FeatureCacheManager.extract_features(
+    val_features, val_labels = FeatureCacheManager.extract_features(
         feature_extractor=extractor,
         data_loader=raw_loader,
         device=device,
@@ -180,9 +180,9 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
         batch_size=BATCH_SIZE,
         shuffle=True,
     )
-    test_cached_loader = FeatureCacheManager.create_cached_loader(
-        features=test_features,
-        labels=test_labels,
+    val_cached_loader = FeatureCacheManager.create_cached_loader(
+        features=val_features,
+        labels=val_labels,
         batch_size=BATCH_SIZE,
         shuffle=False,
     )
@@ -206,7 +206,7 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
     trainer = BaselineTrainer(
         model=qtl_head,
         train_loader=train_cached_loader,
-        test_loader=test_cached_loader,
+        val_loader=val_cached_loader,
         criterion=criterion,
         optimizer=optimizer,
         scheduler=scheduler,
@@ -274,7 +274,7 @@ def _build_history_trainer(
     trainer = BaselineTrainer(
         model=model,
         train_loader=loader,
-        test_loader=loader,
+        val_loader=loader,
         criterion=criterion,
         optimizer=optimizer,
         scheduler=StepLR(optimizer, step_size=HISTORY_STEP_SIZE, gamma=GAMMA),
@@ -320,7 +320,7 @@ def test_last_epoch_is_always_evaluated_without_an_extra_final_pass(
 ) -> None:
     """Validates that an epoch off the `eval_every` boundary still gets a
     validation value when it is the last one, and that the final report reuses
-    it, so the test loader is evaluated exactly once per recorded point."""
+    it, so the validation loader is evaluated exactly once per recorded point."""
     trainer, _ = _build_history_trainer(tmp_path, nn.BCEWithLogitsLoss(), eval_every=2)
     evaluated_loaders: list[DataLoader] = []
     original_evaluate = trainer._evaluate_loader
@@ -390,6 +390,31 @@ def test_non_positive_cadence_is_rejected(
             nn.BCEWithLogitsLoss(),
             eval_every=eval_every,
             history_save_every=history_save_every,
+        )
+
+
+def test_trainer_has_no_test_loader_argument(tmp_path: Path) -> None:
+    """Validates that the trainer cannot be given the test cohort: it accepts a
+    validation loader only, so training and per-epoch evaluation never see test
+    data."""
+    loader = DataLoader(
+        TensorDataset(torch.randn(8, 4), torch.tensor([0, 1] * 4)), batch_size=4
+    )
+    model = nn.Linear(4, 1)
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+    with pytest.raises(TypeError, match="test_loader"):
+        BaselineTrainer(
+            model=model,
+            train_loader=loader,
+            val_loader=loader,
+            test_loader=loader,  # type: ignore[call-arg]
+            criterion=nn.BCEWithLogitsLoss(),
+            optimizer=optimizer,
+            scheduler=StepLR(optimizer, step_size=1),
+            device=torch.device("cpu"),
+            logger=setup_logger("test_trainer_no_test"),
+            save_dir=str(tmp_path),
         )
 
 

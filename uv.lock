@@ -178,7 +178,7 @@ wheels = [
 
 [[package]]
 name = "dementia-boost"
-version = "1.7.1"
+version = "1.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "matplotlib" },
@@ -186,7 +186,6 @@ dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "pennylane" },
-    { name = "pillow" },
     { name = "qiskit" },
     { name = "qiskit-aer" },
     { name = "scikit-learn" },
@@ -209,7 +208,6 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.3" },
     { name = "pandas", specifier = ">=3.0.1" },
     { name = "pennylane", specifier = ">=0.45.1" },
-    { name = "pillow", specifier = ">=12.1.1" },
     { name = "qiskit", specifier = ">=2.5.2" },
     { name = "qiskit-aer", specifier = ">=0.17.2" },
     { name = "scikit-learn", specifier = ">=1.8.0" },

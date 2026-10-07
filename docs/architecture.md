@@ -15,10 +15,9 @@ flowchart TD
     end
 
     subgraph Data ["Data Engineering Layer"]
-        ETL_NIFTI["OasisDataProcessor<br/>(3D NIfTI to 2D Slice Extraction & Patient Split)"]
-        ETL_JPG["JpgDataIndexer<br/>(Regex Patient ID Indexing & Split)"]
-        DS["OasisDataset / JpgOasisDataset<br/>(PyTorch Dataset Abstractions)"]
-        DL["OasisDataLoader<br/>(Unified DataLoader & MinMax Normalization)"]
+        ETL_NIFTI["OasisDataProcessor<br/>(3D NIfTI to 2D Slice Extraction, Deterministic Patient Split & Split Manifest)"]
+        DS["OasisDataset<br/>(PyTorch Dataset Abstraction)"]
+        DL["OasisDataLoader<br/>(Cohort DataLoader Factory, Manifest Check & MinMax Normalization)"]
         CACHE["FeatureCacheManager / CachedEmbeddingDataset<br/>(In-Memory Feature Embeddings & I/O-Free Streaming)"]
     end
 
@@ -32,13 +31,15 @@ flowchart TD
     end
 
     subgraph Training ["Training & Inference Layer"]
-        TR["BaselineTrainer<br/>(Epoch Loops, Loss, Checkpointing, History Recording)"]
+        TR["BaselineTrainer<br/>(Epoch Loops, Loss, Validation, Checkpointing, History Recording)"]
         EV["ModelEvaluator<br/>(Inference, Probabilities, Ground Truths)"]
+        CEV["checkpoint_evaluation<br/>(Each Checkpoint on Validation and Test Cohorts)"]
     end
 
     subgraph Telemetry ["Telemetry & Reporting Layer"]
         LOG["Logger<br/>(Dual Console & Timestamped Logs)"]
-        MET["MetricsAnalyzer<br/>(Accuracy, Precision, Recall, F1, AUC, Confusion Matrix, Training History DTOs)"]
+        MET["MetricsAnalyzer<br/>(Accuracy, Precision, Recall, F1, AUC, Log Loss, Confusion Matrix, Training History DTOs)"]
+        SEL["Selection & Report<br/>(Model Selection on Validation, Comparative Report)"]
         VIS["MetricsVisualizer<br/>(Seaborn Boxplots, ROC Curves, Heatmaps, Loss Curves)"]
     end
 
@@ -60,19 +61,32 @@ flowchart TD
 
 ### 2.2 Data Engineering Layer (`src/dementia_boost/data/`)
 
-The data pipeline eliminates patient-level data leakage across longitudinal MRI sessions:
+The data pipeline eliminates patient-level data leakage across longitudinal MRI sessions. Subjects (patients) are split into three cohorts, and every visit of a subject stays in that subject's cohort:
 
-- **`data_processor.py` (`OasisDataProcessor`)**: Streams raw 3D NIfTI/HDR volumes, groups visits by unique `Subject ID`, isolates subjects into train/test cohorts, extracts the central 2D axial slice, and serializes processed tensors to disk (`.pt`).
+- **`train`** fits the models.
+- **`val`** is evaluated every epoch for the loss curves, and is the only cohort used to choose between models (for example the backbone for transfer learning).
+- **`test`** is never seen during training or selection. It is evaluated afterwards, once per saved checkpoint, and only reported.
 
-- **`jpg_indexer.py` (`JpgDataIndexer`)**: Uses regular expressions to extract patient IDs from 2D image filenames (`oas2?_\d+`), enforces patient-level train/test isolation, and generates immutable CSV index files (`train_jpg_index.csv`, `test_jpg_index.csv`).
+The components that enforce this:
+
+- **`subject_ids.py`**: One canonical subject ID form (`OAS2_NNNN`, uppercase, trimmed), kept apart from the visit ID (`OAS2_NNNN_MRk`, one exam of a subject). It maps diagnostic groups to labels case-insensitively, raises on a subject with conflicting groups, and validates the manual train and test overrides (unknown IDs, visit IDs, and IDs in both lists are rejected).
+
+- **`split.py` (`split_subjects`)**: A pure function from labelled subjects, ratios, a seed, and the overrides to three sorted cohorts. It sorts the IDs before drawing and uses its own `random.Random(seed)`, so the same input gives the same split in every process and on every machine, and it never reads or reseeds global RNG state. Order of operations: overrides are fixed first, then the test cohort is drawn (default 30%), then the validation cohort from the remaining subjects that were not forced into train (default 20%). Both draws are stratified by class, so every cohort keeps the class balance of the whole set. It raises if a cohort would lack one of the classes.
+
+- **`data_processor.py` (`OasisDataProcessor`)**: Scans the raw volumes (header only, checking that each is 3D), excludes the subjects that cannot be used, splits the rest with `split_subjects`, extracts the central 2D axial slice of every volume, and serializes the tensors (`.pt`). Subjects left out are recorded with a reason: no raw data, no row in the metadata CSV, no readable 3D volume, or the `Converted` group. The whole split is first written to a staging directory; only when every file was written does the processor replace the `.pt` files of `train/`, `val/`, and `test/` (other files in those directories are never touched) and write the manifest. An interrupted run therefore leaves the previous split intact. Running the ETL again is safe, and the same arguments reproduce the same files byte for byte.
+
+- **`split_manifest.py`**: Writes and reads `split_manifest.json` (atomically, without timestamps). It records per subject its cohort, label, and file count; the excluded subjects with reasons; the skipped raw files; the seed, ratios, and manual overrides; and per cohort the subject count, file count, and class balance. `split_id` is a short hash of the subject-to-cohort assignment only, so it changes when and only when a subject changes cohort.
+
+- **`split_guards.py` (`verify_split_layout`)**: Compares the cohort directories with the manifest and raises one `SplitIntegrityError` naming the offending subjects if a subject is in two cohorts, a file sits in a cohort the manifest does not assign to its subject, a subject has more or fewer files than recorded, or a cohort holds a single class. The processor runs it after writing, and the data loader runs it before returning any loader.
+
+- **`cohort_audit.py`**: Read-only helpers that list the subjects of each cohort directory from the file names and report subjects shared between cohorts. `scripts/audit_cohorts.py` prints that report and exits with status 1 on a leak.
 
 - **`dataset.py`**:
 
-  - `OasisDataset`: Loads serialized `.pt` image-label pairs.
-  - `JpgOasisDataset`: Dynamically loads JPGs from disk via PIL, converting them to grayscale float tensors.
+  - `OasisDataset`: Loads serialized `.pt` image-label pairs, listing the files in sorted order so sample order does not depend on the filesystem.
 
 - **`data_loader.py`**:
-  - `OasisDataLoader`: Unified factory creating PyTorch `DataLoader` instances for both `nifti` and `jpg` modalities.
+  - `OasisDataLoader`: Factory creating PyTorch `DataLoader` instances over the processed NIfTI slice tensors for one cohort (`get_data_loader("train" | "val" | "test")`). Only the training loader shuffles. It verifies the layout against the manifest before returning a loader.
   - `MinMaxNormalize`: Custom transform performing per-sample dynamic range squashing into `[0.0, 1.0]`.
 
 - **`embedding_cache.py`**:
@@ -83,29 +97,31 @@ The data pipeline eliminates patient-level data leakage across longitudinal MRI 
 flowchart LR
     subgraph RawData ["Raw OASIS-II Data"]
         NIFTI_FILES["3D NIfTI / HDR Volumes"]
-        JPG_FILES["2D Grayscale JPG Images"]
     end
 
     subgraph SplitLogic ["Patient-Level Leakage Prevention"]
-        SUBJ_SPLIT["Group Scans by Subject ID<br/>(Manual Overrides + 70/30 Split)"]
+        EXCLUDE["Exclude Unusable Subjects<br/>(Reason Recorded)"]
+        SUBJ_SPLIT["split_subjects<br/>(Sorted IDs, Local RNG, Overrides, Stratified train / val / test)"]
     end
 
     subgraph Pipelines ["Processing Pipelines"]
-        NIFTI_PIPE["OasisDataProcessor<br/>- Middle Axial Slice Extraction<br/>- Serialized .pt (Tensor, Label)"]
-        JPG_PIPE["JpgDataIndexer<br/>- Regex ID Parsing<br/>- Immutable train/test CSV Index"]
+        NIFTI_PIPE["OasisDataProcessor<br/>- Middle Axial Slice Extraction<br/>- Staging Directory, then Publish<br/>- Serialized .pt (Tensor, Label)"]
+        MANIFEST["split_manifest.json<br/>(Assignment, Exclusions, split_id)"]
     end
 
     subgraph Loaders ["DataLoader Factory"]
+        GUARD["verify_split_layout<br/>(Files vs Manifest)"]
         TRANSFORMS["Transform Pipeline<br/>- Resize (128, 128)<br/>- MinMaxNormalize<br/>- Normalize Mean/Std"]
         LOADER["OasisDataLoader<br/>(Batching, Shuffling, Device Pinning)"]
     end
 
-    NIFTI_FILES --> SUBJ_SPLIT
-    JPG_FILES --> SUBJ_SPLIT
+    NIFTI_FILES --> EXCLUDE
+    EXCLUDE --> SUBJ_SPLIT
     SUBJ_SPLIT --> NIFTI_PIPE
-    SUBJ_SPLIT --> JPG_PIPE
-    NIFTI_PIPE --> TRANSFORMS
-    JPG_PIPE --> TRANSFORMS
+    NIFTI_PIPE --> MANIFEST
+    NIFTI_PIPE --> GUARD
+    MANIFEST --> GUARD
+    GUARD --> TRANSFORMS
     TRANSFORMS --> LOADER
 ```
 
@@ -220,27 +236,35 @@ flowchart LR
 
 ## 4. Transfer Learning Pipeline
 
-The project supports three training modes orchestrated through `builder.py`:
+The project supports three training modes orchestrated through `builder.py`. Every paradigm trains on the `train` cohort and is monitored on the `val` cohort. The `test` cohort appears only in the evaluation step, and nothing is chosen with it:
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant D as OASIS-II Dataset
+    participant D as OASIS-II Dataset (train / val / test)
     participant Base as Classical Baseline CNN
+    participant Eval as checkpoint_evaluation
+    participant Sel as Selection (validation only)
     participant Cache as FeatureCacheManager
     participant CTL as Classical Transfer Learning (CTL)
     participant QTL as Quantum Transfer Learning (QTL)
 
     Note over Base: Step 1: Train End-to-End Baseline
-    D->>Base: Train LeNet Feature Extractor + Classical Dense Head
-    Base-->>Base: Evaluate variance & save weights (baseline_seed_*.pt)
+    D->>Base: Train LeNet Feature Extractor + Classical Dense Head on train, monitor on val
+    Base-->>Base: Save last-epoch weights (baseline_seed_*.pt)
 
-    Note over Cache: Step 2: Extract & Cache Invariant Embeddings
-    Base->>Cache: Load optimal backbone weights & Freeze parameters
-    D->>Cache: Extract train & test spatial embeddings (2304-dim)
+    Note over Eval,Sel: Step 2: Evaluate Every Checkpoint, Select on Validation
+    Base->>Eval: Evaluate each baseline checkpoint on val and on test
+    Eval-->>Sel: Validation metrics (baseline_val_results.json)
+    Eval-->>Eval: Test metrics (baseline_results.json), reported only
+    Sel-->>Base: Backbone with the best validation AUC-ROC (then F1, then lowest log loss)
+
+    Note over Cache: Step 3: Extract & Cache Invariant Embeddings
+    Base->>Cache: Load selected backbone weights & Freeze parameters
+    D->>Cache: Extract train & val spatial embeddings (2304-dim)
     Cache-->>Cache: Store contiguous in-memory tensors (Zero I/O)
 
-    Note over CTL,QTL: Step 3: Fast In-Memory Transfer Learning
+    Note over CTL,QTL: Step 4: Fast In-Memory Transfer Learning
     Cache->>CTL: Stream in-memory feature batches (Seeds 0..100)
     CTL->>CTL: Initialize Dense Head (Glorot Uniform) & Train directly on embeddings
     CTL-->>Base: Assemble full DementiaClassifier and save checkpoint
@@ -248,6 +272,8 @@ sequenceDiagram
     Cache->>QTL: Stream in-memory feature batches (Seeds 0..100)
     QTL->>QTL: Optimize Dressed Quantum Network (Pre-Net + VQC + Post-Net)
     QTL-->>Base: Assemble full DementiaClassifier and save checkpoint
+
+    Note over Eval: Step 5: Evaluate CTL and QTL checkpoints on val and test, then report
 ```
 
 ---
@@ -259,21 +285,27 @@ Training and evaluation lifecycles are decoupled from serialization and plotting
 ```mermaid
 flowchart LR
     subgraph Execution ["Model Execution"]
-        TRAINER["BaselineTrainer<br/>(Loss, Optimization, StepLR)"]
+        TRAINER["BaselineTrainer<br/>(Loss, Optimization, StepLR, Validation)"]
         EVAL["ModelEvaluator<br/>(Batch Inference, Raw Probs, Labels)"]
     end
 
     subgraph MetricsDTO ["Stateless Metrics Engine"]
-        ANALYZER["MetricsAnalyzer<br/>- Accuracy, Precision, Recall, F1, AUC<br/>- Confusion Matrix"]
+        ANALYZER["MetricsAnalyzer<br/>- Accuracy, Precision, Recall, F1, AUC, Log Loss<br/>- Confusion Matrix"]
         DTO_INDIV["EvaluationResult (DTO)"]
         DTO_AGGR["AggregateMetrics (DTO)<br/>(mean, std, min, max)"]
         DTO_HIST["TrainingHistory (DTO)<br/>(one EpochRecord per epoch)"]
     end
 
     subgraph Storage ["Telemetry Storage"]
-        JSON_STORE["JSON File<br/>(individual_runs + aggregated_stats)"]
+        JSON_STORE["Test results JSON<br/>(cohort, individual_runs + aggregated_statistics)"]
+        JSON_VAL["Validation results JSON<br/>(same schema, cohort = val)"]
         JSON_HIST["History JSON<br/>(histories/nifti/{paradigm}/{run_id}.json)"]
         LOGS["Timestamped Logs<br/>(logs/YYYYMMDD_HHMMSS_*.log)"]
+    end
+
+    subgraph Selection ["Selection & Report"]
+        SELECT["select_best_baseline<br/>(reads validation JSON only)"]
+        REPORT["build_comparative_report<br/>(mean / std on test + run selected on validation)"]
     end
 
     subgraph Visualization ["Telemetry Visualizer"]
@@ -290,6 +322,10 @@ flowchart LR
     EVAL --> ANALYZER
     ANALYZER --> DTO_INDIV --> JSON_STORE
     ANALYZER --> DTO_AGGR --> JSON_STORE
+    ANALYZER --> JSON_VAL
+    JSON_VAL --> SELECT
+    JSON_VAL --> REPORT
+    JSON_STORE --> REPORT
     TRAINER --> LOGS
     JSON_STORE --> BOXPLOT
     JSON_STORE --> ROC_AGG
@@ -301,7 +337,9 @@ flowchart LR
     JSON_HIST --> LOSS_CMP
 ```
 
-Training histories follow the same boundary as the evaluation metrics. During training, `BaselineTrainer` only records a `TrainingHistory` and writes it to JSON (every `history_save_every` epochs, default 10, and once more on exit, atomically through a temporary file), so the Training layer never imports plotting code. Loss curves are produced afterwards by `scripts/viz/visualize_loss.py`, which reads the history files and writes per-seed and distribution plots to `plots/nifti/loss/{paradigm}/` and the cross-paradigm comparison to `plots/nifti/loss/`.
+Evaluation and selection follow one protocol. `checkpoint_evaluation` evaluates every saved checkpoint once on the `val` cohort and once on the `test` cohort, and writes two files per paradigm: `<stem>_val_results.json` and `<stem>_results.json` (test). Each file carries a `cohort` marker. Model selection (`select_best_baseline`) accepts only a file marked `val` and ranks by validation AUC-ROC, then F1, then lowest log loss, then run ID; it raises on anything else, so test metrics can never decide a choice. The comparative report (`scripts/metrics/generate_improvement_report.py`, built by `build_comparative_report`) leads with the mean and standard deviation across seeds on test, shows the test metrics of the run selected on validation next to them, and reports percentage changes between the means. No run is chosen on test metrics.
+
+Training histories follow the same boundary as the evaluation metrics. During training, `BaselineTrainer` only sees the train and validation loaders; its per-epoch `val_loss` and `val_acc` are validation values. It only records a `TrainingHistory` and writes it to JSON (every `history_save_every` epochs, default 10, and once more on exit, atomically through a temporary file), so the Training layer never imports plotting code. Loss curves are produced afterwards by `scripts/viz/visualize_loss.py`, which reads the history files and writes per-seed and distribution plots to `plots/nifti/loss/{paradigm}/` and the cross-paradigm comparison to `plots/nifti/loss/`.
 
 ---
 
@@ -317,12 +355,16 @@ dementia-boost/
 │   └── dementia_boost/
 │       ├── core/                          # Reproducibility & runtime utilities
 │       │   └── reproducibility.py         # Deterministic seed locker
-│       ├── data/                          # Data processing, indexing & loaders
-│       │   ├── data_loader.py             # Unified DataLoader & normalization transforms
-│       │   ├── data_processor.py          # NIfTI 3D/2D ETL & patient-split orchestrator
-│       │   ├── dataset.py                 # OasisDataset & JpgOasisDataset classes
+│       ├── data/                          # Data processing & loaders
+│       │   ├── cohort_audit.py            # Read-only listing of subjects per cohort and shared subjects
+│       │   ├── data_loader.py             # Cohort DataLoader factory, manifest check & normalization transforms
+│       │   ├── data_processor.py          # NIfTI 3D/2D ETL: exclusions, staging, publishing, manifest
+│       │   ├── dataset.py                 # OasisDataset class (sorted file listing)
 │       │   ├── embedding_cache.py         # In-memory feature embedding caching & loaders
-│       │   └── jpg_indexer.py             # Regex patient ID parser & CSV indexer
+│       │   ├── split.py                   # Deterministic stratified train / val / test subject split
+│       │   ├── split_guards.py            # Cohort files vs manifest integrity check
+│       │   ├── split_manifest.py          # split_manifest.json writer/reader and split_id
+│       │   └── subject_ids.py             # Canonical subject IDs, label mapping, override validation
 │       ├── models/                        # Neural & Quantum network architectures
 │       │   ├── builder.py                 # Factory functions for CTL and QTL models
 │       │   ├── classical_cnn/             # Classical CNN backbone and dense heads
@@ -337,20 +379,24 @@ dementia-boost/
 │       │       ├── qiskit_layer.py        # Autograd layer with loss-level SPSA gradients
 │       │       └── qiskit_runner.py       # Expectation runner and estimator resolver
 │       ├── training/                      # Training and inference lifecycle runners
+│       │   ├── checkpoint_evaluation.py   # Each checkpoint on the val and test cohorts, per-cohort result files
 │       │   ├── evaluator.py               # Weight loading and inference predictor
 │       │   └── trainer.py                 # Training loop with validation, checkpointing & history recording
 │       └── telemetry/                     # Metrics calculation, serialization & plotting
 │           ├── logger.py                  # Standardized dual console/file logger
 │           ├── metrics.py                 # MetricsAnalyzer, metric DTOs and training history DTOs
+│           ├── report.py                  # Comparative report across paradigms
+│           ├── selection.py               # Model selection on validation metrics only
 │           └── visualizer.py              # Publication-ready Seaborn/Matplotlib plots, incl. loss curves
 ├── scripts/                               # CLI entry-points for training and evaluation
+│   ├── audit_cohorts.py                   # Read-only check that no subject is in two cohorts
 │   ├── etl_pipeline.py                    # 3D NIfTI to 2D slice ETL & patient-split orchestrator
-│   ├── metrics/                           # Batch evaluation and delta improvement report scripts
+│   ├── metrics/                           # Batch evaluation (val and test) and comparative report scripts
 │   │   ├── evaluate_baseline.py           # Multiseed evaluation of classical baseline models
 │   │   ├── evaluate_qiskit_qtl.py         # Multiseed evaluation of Qiskit QTL models
 │   │   ├── evaluate_qtl.py                # Multiseed evaluation of QTL models
 │   │   ├── evaluate_tl.py                 # Multiseed evaluation of CTL models
-│   │   └── generate_improvement_report.py # Quantitative improvement delta report
+│   │   └── generate_improvement_report.py # Comparative report (test means, run selected on validation)
 │   ├── training/                          # Multi-seed training scripts with checkpoint resumption
 │   │   ├── train_baseline.py              # Classical baseline CNN training
 │   │   ├── train_qiskit_qtl_multiseed.py  # Qiskit Quantum Transfer Learning training

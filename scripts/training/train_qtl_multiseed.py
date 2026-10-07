@@ -1,14 +1,14 @@
 """Multiseed Quantum Transfer Learning (QTL) training with embedding caching.
 
-This script identifies the optimal pre-trained classical CNN baseline from
-telemetry metrics, extracts and caches feature representations once, and
-trains a hybrid Dressed Quantum Network (DQN) classification head across
-multiple random seeds (0 to 100) using BCEWithLogitsLoss on NIfTI axial slices.
+This script selects the pre-trained classical CNN baseline with the best
+validation metrics, extracts and caches the train and validation feature
+representations once, and trains a hybrid Dressed Quantum Network (DQN)
+classification head across multiple random seeds (0 to 100) using
+BCEWithLogitsLoss on NIfTI axial slices. The test cohort is never loaded here.
 Each run also persists its per-epoch training history as JSON; loss plots are
 rendered from those files by `scripts/viz/visualize_loss.py`.
 """
 
-import json
 import os
 import sys
 
@@ -26,10 +26,12 @@ from dementia_boost.models.builder import (
 )
 from dementia_boost.models.quantum_cnn import QuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
+from dementia_boost.telemetry.selection import select_best_baseline
+from dementia_boost.training.checkpoint_evaluation import cohort_results_path
 from dementia_boost.training.trainer import BaselineTrainer
 
-DEFAULT_BASELINE_METRICS_PATH: str = (
-    "./data/results/metrics/nifti/baseline_results.json"
+DEFAULT_BASELINE_VAL_METRICS_PATH: str = cohort_results_path(
+    "./data/results/metrics/nifti", "baseline", "val"
 )
 DEFAULT_BASELINE_DIR: str = "./data/results/trained_models/nifti"
 DEFAULT_QTL_SAVE_DIR: str = "./data/results/trained_qtl_models/nifti"
@@ -78,46 +80,6 @@ def get_device(device_name: str | None = None) -> torch.device:
     return torch.device(target)
 
 
-def select_best_baseline(metrics_json_path: str = DEFAULT_BASELINE_METRICS_PATH) -> str:
-    """Identifies the optimal baseline model run from telemetry results JSON.
-
-    Selects the run maximizing Accuracy, with F1-score and AUC as tie-breakers.
-
-    Args:
-        metrics_json_path: Filepath to the serialized baseline results JSON.
-            Defaults to DEFAULT_BASELINE_METRICS_PATH.
-
-    Returns:
-        The run_id string of the top-performing baseline model.
-
-    Raises:
-        FileNotFoundError: If the metrics JSON file does not exist.
-        ValueError: If no individual runs are present in the JSON payload.
-    """
-    if not os.path.exists(metrics_json_path):
-        raise FileNotFoundError(
-            f"Baseline results JSON not found at: {metrics_json_path}"
-        )
-
-    with open(metrics_json_path) as file:
-        data = json.load(file)
-
-    individual_runs: list[dict[str, float | str]] = data.get("individual_runs", [])
-    if not individual_runs:
-        raise ValueError("No individual runs found in baseline telemetry JSON.")
-
-    best_run = max(
-        individual_runs,
-        key=lambda item: (
-            float(item.get("accuracy", 0.0)),
-            float(item.get("f1_score", 0.0)),
-            float(item.get("auc", 0.0)),
-        ),
-    )
-
-    return str(best_run["run_id"])
-
-
 def main() -> None:
     """Executes Quantum Transfer Learning sweep across seeds on cached embeddings."""
     logger = setup_logger("qtl_multiseed_nifti")
@@ -126,7 +88,7 @@ def main() -> None:
     os.makedirs(DEFAULT_QTL_SAVE_DIR, exist_ok=True)
 
     try:
-        best_run_id = select_best_baseline(DEFAULT_BASELINE_METRICS_PATH)
+        best_run_id = select_best_baseline(DEFAULT_BASELINE_VAL_METRICS_PATH)
     except Exception as error:
         logger.error(f"Failed to select optimal baseline model: {error}")
         sys.exit(1)
@@ -154,9 +116,9 @@ def main() -> None:
 
     feature_extractor = load_baseline_backbone(baseline_weights_path, device)
 
-    raw_loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE, mode="nifti")
-    raw_train_loader = raw_loader_manager.get_data_loader(is_train=True)
-    raw_test_loader = raw_loader_manager.get_data_loader(is_train=False)
+    raw_loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE)
+    raw_train_loader = raw_loader_manager.get_data_loader("train")
+    raw_val_loader = raw_loader_manager.get_data_loader("val")
 
     logger.info("Extracting and caching training embeddings from baseline backbone...")
     train_features, train_labels = FeatureCacheManager.extract_features(
@@ -164,10 +126,12 @@ def main() -> None:
         data_loader=raw_train_loader,
         device=device,
     )
-    logger.info("Extracting and caching test embeddings from baseline backbone...")
-    test_features, test_labels = FeatureCacheManager.extract_features(
+    logger.info(
+        "Extracting and caching validation embeddings from baseline backbone..."
+    )
+    val_features, val_labels = FeatureCacheManager.extract_features(
         feature_extractor=feature_extractor,
-        data_loader=raw_test_loader,
+        data_loader=raw_val_loader,
         device=device,
     )
 
@@ -177,9 +141,9 @@ def main() -> None:
         batch_size=DEFAULT_BATCH_SIZE,
         shuffle=True,
     )
-    test_loader = FeatureCacheManager.create_cached_loader(
-        features=test_features,
-        labels=test_labels,
+    val_loader = FeatureCacheManager.create_cached_loader(
+        features=val_features,
+        labels=val_labels,
         batch_size=DEFAULT_BATCH_SIZE,
         shuffle=False,
     )
@@ -232,7 +196,7 @@ def main() -> None:
         trainer = BaselineTrainer(
             model=head,
             train_loader=train_loader,
-            test_loader=test_loader,
+            val_loader=val_loader,
             criterion=criterion,
             optimizer=optimizer,
             scheduler=scheduler,
