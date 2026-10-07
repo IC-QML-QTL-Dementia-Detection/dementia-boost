@@ -7,12 +7,72 @@ from typing import Any
 import pytest
 import torch
 
+from dementia_boost.core.identity import Paradigm, RunSpec
 from dementia_boost.data.split import SubjectSplit
 from dementia_boost.data.split_manifest import (
     MANIFEST_NAME,
     build_manifest,
     write_manifest,
 )
+
+_SPEC_DEFAULTS: dict[str, Any] = {
+    "lr": 1e-3,
+    "lr_step_size": 5,
+    "lr_gamma": 0.5,
+    "epochs": 2,
+    "batch_size": 4,
+    "split_id": "5192b1b7c0d3",
+    "seed": 1,
+}
+_HEAD_DEFAULTS: dict[Paradigm, dict[str, Any]] = {
+    Paradigm.BASELINE: {},
+    Paradigm.CTL: {"backbone_id": "c8375944e970"},
+    Paradigm.QTL: {
+        "ansatz": "paper",
+        "n_qubits": 2,
+        "n_layers": 1,
+        "gradient": "adjoint",
+        "backbone_id": "c8375944e970",
+    },
+    Paradigm.QISKIT_QTL: {
+        "ansatz": "paper",
+        "n_qubits": 2,
+        "n_layers": 1,
+        "gradient": "spsa",
+        "spsa_epsilon": 0.1,
+        "backbone_id": "c8375944e970",
+    },
+}
+
+
+def build_spec(
+    paradigm: Paradigm | str = Paradigm.BASELINE, **overrides: Any
+) -> RunSpec:
+    """Builds a valid `RunSpec` with small test defaults.
+
+    Args:
+        paradigm: The paradigm; its head fields get valid defaults.
+        **overrides: Fields to replace.
+
+    Returns:
+        The validated spec.
+    """
+    paradigm = Paradigm(paradigm)
+    return RunSpec(
+        **{
+            "paradigm": paradigm,
+            **_SPEC_DEFAULTS,
+            **_HEAD_DEFAULTS[paradigm],
+            **overrides,
+        }
+    )
+
+
+@pytest.fixture
+def make_spec() -> Callable[..., RunSpec]:
+    """Returns `build_spec`, for tests that need valid run specs."""
+    return build_spec
+
 
 DEFAULT_COHORTS = {
     "train": [1, 2, 3, 4],

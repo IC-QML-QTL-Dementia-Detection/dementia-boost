@@ -8,10 +8,14 @@ The trainer only ever sees the train and validation loaders. The test cohort is
 evaluated afterwards, from the saved checkpoints, so it can never influence
 training or model selection.
 
-The trainer records a structured per-epoch `TrainingHistory` but never plots it;
+The trainer takes its identity from a `RunSpec` and derives every artifact path
+from a `ResultsLayout`; it refuses a spec that does not describe what runs, so
+the hash IDs never name a configuration that did not run. It records a
+structured per-epoch `TrainingHistory` carrying the spec, but never plots it;
 visualization stays in the telemetry layer.
 """
 
+import math
 import os
 import time
 from logging import Logger
@@ -23,6 +27,8 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler, StepLR
 from torch.utils.data import DataLoader
 
+from dementia_boost.core.identity import RunSpec, label
+from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.telemetry.metrics import (
     EpochRecord,
     MetricsAnalyzer,
@@ -37,7 +43,6 @@ class BaselineTrainer:
     logging, and checkpointing from model definition and entry scripts.
 
     Attributes:
-        DEFAULT_SAVE_DIR: Default directory where model weights are written.
         LOGIT_CLASSIFICATION_THRESHOLD: Logit threshold for binary decision (0.0).
         model: The PyTorch neural network or hybrid module to be trained.
         train_loader: PyTorch DataLoader providing training mini-batches.
@@ -47,21 +52,18 @@ class BaselineTrainer:
         scheduler: Learning rate decay scheduler.
         device: Hardware accelerator device (CPU, CUDA, MPS) running the workload.
         logger: Telemetry logger streaming messages to console and disk.
-        save_dir: Directory where checkpoint `.pt` files are written.
+        spec: The run specification: identity, hyperparameters, and epochs.
+        layout: Where the run's checkpoint, history, and config are written.
         save_model: Optional PyTorch module whose state dictionary is saved to
             disk upon completion (e.g. an assembled DementiaClassifier).
-        history_path: Optional JSON file holding the running `TrainingHistory`,
-            rewritten atomically. None disables persistence.
         eval_every: Evaluate on `val_loader` every this many epochs. The last
             epoch is always evaluated, and that result is the final validation
             report.
-        history_save_every: Write the history to `history_path` every this many
-            epochs, and once more when training ends or fails.
-        paradigm: Training paradigm label stored in the history.
-        config: Extra hyperparameters stored in the history config.
+        history_save_every: Write the history every this many epochs, and once
+            more when training ends or fails.
+        extras: Non-identity details stored in the history (not hashed).
     """
 
-    DEFAULT_SAVE_DIR: str = "./data/results/trained_models"
     LOGIT_CLASSIFICATION_THRESHOLD: float = 0.0
 
     def __init__(
@@ -74,13 +76,12 @@ class BaselineTrainer:
         scheduler: LRScheduler,
         device: torch.device,
         logger: Logger,
-        save_dir: str = DEFAULT_SAVE_DIR,
+        spec: RunSpec,
+        layout: ResultsLayout,
         save_model: nn.Module | None = None,
-        history_path: str | None = None,
         eval_every: int = 1,
         history_save_every: int = 10,
-        paradigm: str = "baseline",
-        config: dict[str, Any] | None = None,
+        extras: dict[str, Any] | None = None,
     ) -> None:
         """Initializes the BaselineTrainer with all required dependencies.
 
@@ -94,12 +95,12 @@ class BaselineTrainer:
             scheduler: The learning rate decay scheduler.
             device: The hardware accelerator device (CPU, CUDA, MPS).
             logger: The telemetry logger for console and file output.
-            save_dir: Directory where final model weights will be saved.
-                Defaults to "./data/results/trained_models".
+            spec: The run specification. Its learning rate, batch size, and
+                `StepLR` settings must match the optimizer, loader, and
+                scheduler given here.
+            layout: The results layout that decides every artifact path.
             save_model: Optional PyTorch module to serialize on disk instead of
                 `model`. Defaults to None (saves `model`).
-            history_path: Optional JSON path for the per-epoch history, written
-                atomically. Defaults to None (no history file).
             eval_every: Number of epochs between evaluations on `val_loader`.
                 Epochs in between record `None` validation values, except the
                 last epoch, which is always evaluated. Defaults to 1.
@@ -108,14 +109,14 @@ class BaselineTrainer:
                 more when training ends or fails, so a crash loses nothing
                 except on a hard kill (at most `history_save_every - 1` epochs).
                 Defaults to 10.
-            paradigm: Training paradigm label ("baseline", "ctl", "qtl" or
-                "qiskit_qtl"). Defaults to "baseline".
-            config: Extra hyperparameters (for example `n_qubits`, `n_layers`)
-                merged over the values the trainer derives itself. Defaults to
+            extras: Details that do not define the run, such as the quantum
+                device. Stored in the history next to `eval_every` and
+                `history_save_every`, and not part of the hash. Defaults to
                 None.
 
         Raises:
-            ValueError: If `eval_every` or `history_save_every` is below 1.
+            ValueError: If `eval_every` or `history_save_every` is below 1, or
+                the spec disagrees with the optimizer, loader, or scheduler.
         """
         for name, value in (
             ("eval_every", eval_every),
@@ -132,47 +133,49 @@ class BaselineTrainer:
         self.scheduler = scheduler
         self.device = device
         self.logger = logger
-        self.save_dir = save_dir
+        self.spec = spec
+        self.layout = layout
         self.save_model = save_model
-        self.history_path = history_path
         self.eval_every = eval_every
         self.history_save_every = history_save_every
-        self.paradigm = paradigm
-        self.config = config or {}
+        self.extras = {
+            "eval_every": eval_every,
+            "history_save_every": history_save_every,
+            **(extras or {}),
+        }
 
-        os.makedirs(self.save_dir, exist_ok=True)
+        self._check_spec_matches_setup()
 
-    def train(self, epochs: int, run_id: str) -> TrainingHistory:
-        """Executes the training loop across the requested number of epochs.
+    def train(self) -> TrainingHistory:
+        """Executes the training loop for `spec.epochs` epochs.
 
-        Runs forward and backward passes, updates optimizer and scheduler states,
-        logs per-epoch loss and accuracy metrics, records a `TrainingHistory`,
-        and saves the final checkpoint upon training completion. The validation
-        loader is evaluated every `eval_every` epochs and always after the last
-        epoch; the last evaluation doubles as the final validation report, so
-        no extra pass runs at the end. The checkpoint is always the last epoch.
+        Records the configuration next to the histories, runs forward and
+        backward passes, updates optimizer and scheduler states, logs per-epoch
+        loss and accuracy metrics, records a `TrainingHistory`, and saves the
+        final checkpoint upon training completion. The validation loader is
+        evaluated every `eval_every` epochs and always after the last epoch; the
+        last evaluation doubles as the final validation report, so no extra pass
+        runs at the end. The checkpoint is always the last epoch.
 
-        The history is written to `history_path` every `history_save_every`
-        epochs and once more on exit, including when training raises, so every
-        completed epoch is on disk before the exception propagates.
-
-        Args:
-            epochs: Total number of complete passes over the training dataset.
-            run_id: Unique identifier for this run (e.g., "seed_42"), used for
-                checkpoint file naming and as the history run identifier.
+        The history is written every `history_save_every` epochs and once more
+        on exit, including when training raises, so every completed epoch is on
+        disk before the exception propagates.
 
         Returns:
             The completed TrainingHistory. Each epoch's `duration_s` covers the
             optimization pass only, excluding the optional evaluation.
-        """
-        self.logger.info(f"Starting training run: {run_id} for {epochs} epochs.")
 
-        history = TrainingHistory(
-            run_id=run_id,
-            paradigm=self.paradigm,
-            config=self._build_history_config(epochs),
-            epochs=[],
+        Raises:
+            ConfigCollisionError: If a different spec already owns this
+                configuration ID.
+        """
+        epochs = self.spec.epochs
+        self.layout.write_config(self.spec)
+        self.logger.info(
+            f"Starting training run: {label(self.spec)} for {epochs} epochs."
         )
+
+        history = TrainingHistory(spec=self.spec, epochs=[], extras=self.extras)
         saved_epochs = 0
         last_evaluation: tuple[float, float] | None = None
 
@@ -214,11 +217,13 @@ class BaselineTrainer:
             if len(history.epochs) > saved_epochs:
                 self._save_history(history)
 
-        self.logger.info(f"Training complete for run {run_id}. Saving final model.")
+        self.logger.info(
+            f"Training complete for run {label(self.spec)}. Saving final model."
+        )
 
         if last_evaluation is None:
             last_evaluation = self._evaluate_loader(self.val_loader)
-        self._save_checkpoint(run_id, *last_evaluation)
+        self._save_checkpoint(*last_evaluation)
 
         return history
 
@@ -253,46 +258,56 @@ class BaselineTrainer:
 
         return running_loss / total_samples, correct_preds / total_samples
 
-    def _build_history_config(self, epochs: int) -> dict[str, Any]:
-        """Builds the reproducibility config stored in the training history.
+    def _check_spec_matches_setup(self) -> None:
+        """Checks that the spec describes the optimizer, loader, and scheduler.
 
-        Args:
-            epochs: Total number of epochs requested for the run.
+        The IDs are hashes of the spec, so a spec that says one thing while the
+        run does another would name a configuration that never ran.
 
-        Returns:
-            A dictionary with the learning rate, batch size, epochs, evaluation
-            cadence, and the `StepLR` step size when applicable, updated with
-            the user-supplied `config` entries.
+        Raises:
+            ValueError: Naming every field of the spec that disagrees.
         """
-        derived: dict[str, Any] = {
-            "lr": float(self.scheduler.get_last_lr()[0]),
-            "batch_size": self.train_loader.batch_size,
-            "epochs": epochs,
-            "eval_every": self.eval_every,
-        }
-        if isinstance(self.scheduler, StepLR):
-            derived["lr_step_size"] = self.scheduler.step_size
-            derived["lr_gamma"] = self.scheduler.gamma
+        mismatches: list[str] = []
 
-        return {**derived, **self.config}
+        actual_lr = float(self.scheduler.get_last_lr()[0])
+        if not math.isclose(self.spec.lr, actual_lr):
+            mismatches.append(f"lr: spec {self.spec.lr}, optimizer {actual_lr}")
+        if self.spec.batch_size != self.train_loader.batch_size:
+            mismatches.append(
+                f"batch_size: spec {self.spec.batch_size}, "
+                f"loader {self.train_loader.batch_size}"
+            )
+        if isinstance(self.scheduler, StepLR):
+            if self.spec.lr_step_size != self.scheduler.step_size:
+                mismatches.append(
+                    f"lr_step_size: spec {self.spec.lr_step_size}, "
+                    f"scheduler {self.scheduler.step_size}"
+                )
+            if not math.isclose(self.spec.lr_gamma, self.scheduler.gamma):
+                mismatches.append(
+                    f"lr_gamma: spec {self.spec.lr_gamma}, "
+                    f"scheduler {self.scheduler.gamma}"
+                )
+
+        if mismatches:
+            raise ValueError(
+                "The run spec disagrees with what will run: " + "; ".join(mismatches)
+            )
 
     def _save_history(self, history: TrainingHistory) -> None:
-        """Atomically writes the running history to `history_path`.
+        """Atomically writes the running history to the layout's history path.
 
         Writes to a sibling `.tmp` file and swaps it in with `os.replace`, so a
-        crash never leaves a partially written JSON. Does nothing when
-        `history_path` is None.
+        crash never leaves a partially written JSON.
 
         Args:
             history: The running TrainingHistory to persist.
         """
-        if self.history_path is None:
-            return
-
-        os.makedirs(os.path.dirname(self.history_path) or ".", exist_ok=True)
-        tmp_path = f"{self.history_path}.tmp"
+        path = self.layout.history_path(self.spec)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp_path = f"{path}.tmp"
         MetricsAnalyzer.save_history(history, tmp_path)
-        os.replace(tmp_path, self.history_path)
+        os.replace(tmp_path, path)
 
     def _evaluate_loader(self, loader: DataLoader) -> tuple[float, float]:
         """Computes mean loss and accuracy over a loader without gradients.
@@ -324,17 +339,14 @@ class BaselineTrainer:
 
         return total_loss / total, correct / total
 
-    def _save_checkpoint(
-        self, run_id: str, final_loss: float, final_acc: float
-    ) -> None:
+    def _save_checkpoint(self, final_loss: float, final_acc: float) -> None:
         """Logs the final validation performance and saves the model weights.
 
         Receives the validation loss and accuracy of the last epoch instead of
         evaluating again, since the weights have not changed since then.
-        Serializes the model state dictionary to disk.
+        Serializes the model state dictionary to the layout's checkpoint path.
 
         Args:
-            run_id: Unique identifier for the run used in file naming.
             final_loss: Validation loss measured after the last epoch.
             final_acc: Validation accuracy measured after the last epoch.
         """
@@ -343,6 +355,7 @@ class BaselineTrainer:
         )
 
         target_model = self.save_model if self.save_model is not None else self.model
-        save_path = os.path.join(self.save_dir, f"baseline_{run_id}.pt")
+        save_path = self.layout.checkpoint_path(self.spec)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         torch.save(target_model.state_dict(), save_path)
         self.logger.info(f"Final model saved to {save_path}")

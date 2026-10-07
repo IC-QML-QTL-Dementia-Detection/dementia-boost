@@ -26,9 +26,11 @@ import pytest
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from conftest import build_spec
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader, TensorDataset
 
+from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.core.reproducibility import set_seed
 from dementia_boost.models.classical_cnn import (
     ClassicalClassifierHead,
@@ -91,7 +93,10 @@ class TestBaselineTrainerEndToEnd:
         set_seed(_SEED)
         device = torch.device("cpu")
         logger = setup_logger("test_pipeline_execution_e2e")
-        save_dir = str(tmp_path / "checkpoints")
+        layout = ResultsLayout(str(tmp_path))
+        spec = build_spec(
+            "baseline", lr=1e-2, lr_step_size=100, lr_gamma=0.5, epochs=5, batch_size=4
+        )
 
         model = _build_end_to_end_model().to(device)
         train_loader = _build_mock_image_loader()
@@ -117,9 +122,10 @@ class TestBaselineTrainerEndToEnd:
             scheduler=scheduler,
             device=device,
             logger=logger,
-            save_dir=save_dir,
+            spec=spec,
+            layout=layout,
         )
-        trainer.train(epochs=5, run_id="e2e_test")
+        trainer.train()
 
         model.eval()
         with torch.no_grad():
@@ -128,7 +134,7 @@ class TestBaselineTrainerEndToEnd:
         assert final_loss < initial_loss
         assert len(optimizer.state_dict()["state"]) > 0
 
-        checkpoint_path = Path(save_dir) / "baseline_e2e_test.pt"
+        checkpoint_path = Path(layout.checkpoint_path(spec))
         assert checkpoint_path.exists()
 
         state_dict = torch.load(checkpoint_path, weights_only=True)
@@ -147,7 +153,7 @@ class TestBaselineTrainerLrScheduler:
         once after `step_size` completed epochs."""
         device = torch.device("cpu")
         logger = setup_logger("test_pipeline_execution_lr")
-        save_dir = str(tmp_path / "checkpoints_lr")
+        layout = ResultsLayout(str(tmp_path))
 
         model = _build_end_to_end_model().to(device)
         train_loader = _build_mock_image_loader()
@@ -156,6 +162,14 @@ class TestBaselineTrainerLrScheduler:
         initial_lr = 1e-2
         step_size = 2
         gamma = 0.1
+        spec = build_spec(
+            "baseline",
+            lr=initial_lr,
+            lr_step_size=step_size,
+            lr_gamma=gamma,
+            epochs=step_size,
+            batch_size=4,
+        )
 
         criterion = nn.BCEWithLogitsLoss()
         optimizer = optim.Adam(model.parameters(), lr=initial_lr)
@@ -170,9 +184,10 @@ class TestBaselineTrainerLrScheduler:
             scheduler=scheduler,
             device=device,
             logger=logger,
-            save_dir=save_dir,
+            spec=spec,
+            layout=layout,
         )
-        trainer.train(epochs=step_size, run_id="lr_test")
+        trainer.train()
 
         lr_after_step = optimizer.param_groups[0]["lr"]
         assert lr_after_step == pytest.approx(initial_lr * gamma)

@@ -7,7 +7,7 @@ Confusion Matrix) and serialize summaries and training histories to disk.
 """
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import numpy as np
@@ -20,6 +20,8 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.metrics import log_loss as sklearn_log_loss
+
+from dementia_boost.core import identity
 
 
 @dataclass
@@ -100,20 +102,25 @@ class EpochRecord:
 class TrainingHistory:
     """Data transfer object storing the per-epoch history of one training run.
 
+    The spec is the single source of truth for what the run was: its hash IDs
+    and label are derived from it, never read from a file name.
+
     Attributes:
-        run_id: Unique identifier for the training run.
-        paradigm: Training paradigm, one of "baseline", "ctl", "qtl" or
-            "qiskit_qtl".
-        config: Hyperparameters needed to reproduce the run (for example
-            learning rate, batch size, epochs, and for quantum heads the
-            number of qubits, layers, and gradient method).
+        spec: The run specification (paradigm, hyperparameters, backbone, split,
+            seed).
         epochs: Ordered per-epoch records.
+        extras: Details that do not define the run and are not hashed, such as
+            the evaluation cadence or the quantum device.
     """
 
-    run_id: str
-    paradigm: str
-    config: dict[str, Any]
+    spec: identity.RunSpec
     epochs: list[EpochRecord]
+    extras: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def run_id(self) -> str:
+        """The hash ID of the run, derived from the spec."""
+        return identity.run_id(self.spec)
 
 
 class MetricsAnalyzer:
@@ -229,12 +236,21 @@ class MetricsAnalyzer:
     def save_history(history: TrainingHistory, filepath: str) -> None:
         """Serializes a training history to a JSON file.
 
+        The file holds the spec, the extras, the epochs, and the run ID derived
+        from the spec (stored so a hash can be found by searching the files).
+
         Args:
             history: TrainingHistory to persist.
             filepath: Destination file path on disk.
         """
+        payload = {
+            "run_id": history.run_id,
+            "spec": history.spec.to_dict(),
+            "extras": history.extras,
+            "epochs": [asdict(record) for record in history.epochs],
+        }
         with open(filepath, "w") as f:
-            json.dump(asdict(history), f, indent=4)
+            json.dump(payload, f, indent=4)
 
     @staticmethod
     def load_history(filepath: str) -> TrainingHistory:
@@ -245,13 +261,23 @@ class MetricsAnalyzer:
 
         Returns:
             The reconstructed TrainingHistory instance.
+
+        Raises:
+            ValueError: If the stored `run_id` does not match the one derived
+                from the stored spec (a hand-edited file, or a history written
+                under another identity scheme).
         """
         with open(filepath) as f:
             payload = json.load(f)
 
-        return TrainingHistory(
-            run_id=payload["run_id"],
-            paradigm=payload["paradigm"],
-            config=payload["config"],
+        history = TrainingHistory(
+            spec=identity.RunSpec.from_dict(payload["spec"]),
             epochs=[EpochRecord(**record) for record in payload["epochs"]],
+            extras=payload["extras"],
         )
+        if payload["run_id"] != history.run_id:
+            raise ValueError(
+                f"{filepath}: stored run_id {payload['run_id']!r} does not match "
+                f"the one derived from its spec ({history.run_id!r})."
+            )
+        return history

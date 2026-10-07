@@ -476,15 +476,15 @@ class MetricsVisualizer:
     def _mark_lr_decays(ax: Axes, history: TrainingHistory) -> None:
         """Draws dashed vertical lines where the StepLR schedule decays.
 
-        Uses `lr_step_size` from the history config and draws nothing when it
-        is absent. Each line sits between the last epoch at the old rate and
+        Uses `lr_step_size` from the history's spec and draws nothing when it
+        is zero. Each line sits between the last epoch at the old rate and
         the first at the new one.
 
         Args:
             ax: Axes to draw on.
-            history: Training history providing the config and epoch count.
+            history: Training history providing the spec and epoch count.
         """
-        step_size = history.config.get("lr_step_size")
+        step_size = history.spec.lr_step_size
         if not step_size:
             return
 
