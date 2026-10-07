@@ -10,6 +10,7 @@ configuration from a file name. The seeds of one configuration share a
 directory and differ only in the file name (`seed_<n>`).
 """
 
+import glob
 import json
 import os
 
@@ -92,6 +93,31 @@ class ResultsLayout:
             `<root>/histories/<paradigm>/<config_id>`.
         """
         return self._config_dir("histories", paradigm, configuration)
+
+    def history_files(
+        self, paradigm: Paradigm | str | None = None, configuration: str | None = None
+    ) -> list[str]:
+        """Lists the training history files on disk.
+
+        Only the directory scheme is used to find the files; what a history is
+        comes from its content, not its name.
+
+        Args:
+            paradigm: Restrict to one paradigm. Defaults to all.
+            configuration: Restrict to one `config_id`. Defaults to all.
+
+        Returns:
+            The sorted paths of the `seed_*.json` files, without `config.json`
+            and without temporary files.
+        """
+        pattern = os.path.join(
+            glob.escape(self.root),
+            "histories",
+            Paradigm(paradigm).value if paradigm is not None else "*",
+            configuration if configuration is not None else "*",
+            "seed_*.json",
+        )
+        return sorted(glob.glob(pattern))
 
     def metrics_path(
         self, paradigm: Paradigm | str, configuration: str, cohort: str

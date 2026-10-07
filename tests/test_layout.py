@@ -107,6 +107,49 @@ class TestPaths:
             layout.metrics_path("qtl", "abc", "train")
 
 
+class TestHistoryFiles:
+    """Validates listing of history files by paradigm and configuration."""
+
+    def _touch(self, path: str) -> None:
+        """Creates an empty file, with its directories."""
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_bytes(b"")
+
+    def test_lists_only_history_files(self, layout: ResultsLayout) -> None:
+        """The config file and temporary files are not histories."""
+        spec = _qtl()
+        self._touch(layout.history_path(spec))
+        self._touch(layout.config_path(spec))
+        self._touch(layout.history_path(spec) + ".tmp")
+
+        assert layout.history_files() == [layout.history_path(spec)]
+
+    def test_filters_by_paradigm_and_configuration(self, layout: ResultsLayout) -> None:
+        """A paradigm or a configuration ID narrows the listing."""
+        first = _qtl()
+        other_layers = dataclasses.replace(_qtl(), n_layers=3)
+        baseline = _qtl(
+            paradigm=Paradigm.BASELINE,
+            ansatz=None,
+            n_qubits=None,
+            n_layers=None,
+            gradient=None,
+            backbone_id=None,
+        )
+        for spec in (first, other_layers, baseline):
+            self._touch(layout.history_path(spec))
+
+        assert len(layout.history_files()) == 3
+        assert len(layout.history_files("qtl")) == 2
+        assert layout.history_files("qtl", config_id(first)) == [
+            layout.history_path(first)
+        ]
+
+    def test_nothing_on_disk_gives_an_empty_list(self, layout: ResultsLayout) -> None:
+        """A layout without histories lists nothing."""
+        assert layout.history_files() == []
+
+
 class TestIsDone:
     """Validates the "skip if the checkpoint exists" check."""
 
