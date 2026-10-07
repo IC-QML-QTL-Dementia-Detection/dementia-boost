@@ -6,12 +6,14 @@ The `dementia-boost` framework is designed around clean Software Engineering and
 
 It enforces strict separation of concerns across data processing, modular neural/quantum architectures, decoupled training loops, and deterministic telemetry.
 
-The system is partitioned into five main pillars:
+The system is partitioned into six main pillars:
 
 ```mermaid
 flowchart TD
     subgraph Core ["Core Layer"]
         REP["Reproducibility Module<br/>(Deterministic Seed Locking across RNGs, PyTorch, cuDNN)"]
+        IDN["RunSpec & Hash IDs<br/>(Run Identity: config_id, run_id, Label)"]
+        LAY["ResultsLayout<br/>(Where Every Artifact of a Run Lives)"]
     end
 
     subgraph Data ["Data Engineering Layer"]
@@ -40,7 +42,12 @@ flowchart TD
         LOG["Logger<br/>(Dual Console & Timestamped Logs)"]
         MET["MetricsAnalyzer<br/>(Accuracy, Precision, Recall, F1, AUC, Log Loss, Confusion Matrix, Training History DTOs)"]
         SEL["Selection & Report<br/>(Model Selection on Validation, Comparative Report)"]
+        LST["Run Listing & Lookup Table<br/>(Runs Found from Histories, Hash to Configuration and Seed)"]
+    end
+
+    subgraph Viz ["Visualization Layer"]
         VIS["MetricsVisualizer<br/>(Seaborn Boxplots, ROC Curves, Heatmaps, Loss Curves)"]
+        RPL["run_plots<br/>(Plots per Configuration, Run Highlighted on Validation)"]
     end
 
     Core --> Data
@@ -49,6 +56,7 @@ flowchart TD
     Data --> Training
     Models --> Training
     Training --> Telemetry
+    Telemetry --> Viz
 ```
 
 ---
@@ -58,6 +66,34 @@ flowchart TD
 ### 2.1 Core Layer (`src/dementia_boost/core/`)
 
 - **`reproducibility.py`**: Provides `set_seed(seed: int)`, which enforces deterministic execution across Python's `random`, `numpy`, PyTorch CPU/CUDA engines, and locks `torch.backends.cudnn.deterministic = True` with `benchmark = False`.
+
+- **`identity.py`**: The typed run specification `RunSpec`, the `Paradigm` enumeration, and the hash IDs and label derived from a spec (see 2.1.1).
+
+- **`layout.py`**: `ResultsLayout`, the only code that knows where the artifacts of a run are written and read (see 2.1.1).
+
+#### 2.1.1 Run identity
+
+A run used to be identified by its name (`qtl_seed_3`), which said nothing about its qubits, layers, learning rate, backbone, or split, so two different configurations collided on disk. Identity is now split into three separate things:
+
+- **The specification** (`RunSpec`, a frozen dataclass): the paradigm, the ansatz, qubits and layers, the learning rates, the `StepLR` settings, epochs, batch size, the gradient method, the `backbone_id`, the `split_id`, and the `seed`. Fields that do not apply to a paradigm are `None`, and each paradigm validates that its required fields are set (a baseline has no quantum fields and no backbone, a head needs its backbone). The spec is stored in every training history, so it is the source of truth for what a run was.
+- **The IDs** (opaque hashes of the spec): `config_id` hashes every field except the seed, so all seeds of one configuration share it; `run_id` hashes every field. Both are the first 12 hex characters of a SHA-256 over the canonical JSON of the spec (sorted keys, `None` fields dropped, so adding a new optional field later does not change existing IDs). The `backbone_id` of a head is the `run_id` of the baseline it was built on, which pins its checkpoint and, through it, its split. `split_id` uses the same hash helper.
+- **The label** (output only): a readable rendering such as `qtl | paper | 6q x 4L | lr 0.0001 | seed 3`, for plots and logs. Nothing parses it.
+
+No code recovers configuration from a file name. The trainer refuses a spec that disagrees with its optimizer's learning rate, its loader's batch size, or its `StepLR` settings, so an ID never names a configuration that did not run. Details that do not define a run (devices, evaluation cadence) are stored as non-hashed extras in the history.
+
+`ResultsLayout` turns a spec into paths under `data/results`:
+
+```
+checkpoints/<paradigm>/<config_id>/seed_<n>.pt
+histories/<paradigm>/<config_id>/seed_<n>.json     the history, which carries the full spec
+histories/<paradigm>/<config_id>/config.json        the configuration (spec without the seed, label)
+metrics/<paradigm>/<config_id>/{val,test}_results.json
+plots/<paradigm>/<config_id>/
+```
+
+Seeds of one configuration share a directory, and a changed configuration gets its own, so runs never collide and the "skip a finished run" check (`ResultsLayout.is_done`) cannot skip a run whose configuration changed. `config.json` refuses to be overwritten by a different spec (a hash collision is detected, not merged). Runs are found by reading the histories (`telemetry/run_listing.py`), and a history that is not at the path its own spec gives is refused.
+
+Because IDs are hashes, `uv run scripts/list_runs.py` gives the lookup: one row per configuration (label, split, seeds), one row per run with `--runs`, the full spec and file paths of any ID prefix with `--find`, and a CSV with `--csv`. It is rebuilt from the histories on every call.
 
 ### 2.2 Data Engineering Layer (`src/dementia_boost/data/`)
 
@@ -230,7 +266,7 @@ flowchart LR
 - **`qiskit_runner.py`**: `QiskitExpectationRunner` owns only "circuit, observables, parameter batch in, expectation values out". Each call is one broadcast PUB with parameters shaped `(N, 1, P)` and observables shaped `(1, n_qubits)`, so every state is evolved once and all expectation values are read from it. `resolve_qiskit_estimator` is the Qiskit counterpart of `resolve_quantum_device`: it returns an injected estimator or, by default, Aer's `EstimatorV2` on the state-vector method with no noise model attached. `StatevectorEstimator` is the slower reference implementation and is injected explicitly where a reference is wanted, such as unit tests. Controlled rotations (`cry`, `crz`, `cp`) are decomposed once at construction, because qiskit-aer 0.17.2 evaluates them wrongly when their angle is bound at run time.
 - **`qiskit_layer.py`**: `QiskitQuantumLayer` holds the flat weight vector, laid out as `[theta, gamma, beta]`, and a custom `torch.autograd.Function`. The backward pass is a loss-level SPSA estimate: one Rademacher direction per sample is shared by all outputs by folding the upstream gradient into the finite difference, which costs one PUB of `2 * Batch` states. The directions come from a generator seeded with the run seed, so a seed reproduces its gradient noise. Exact parameter-shift is avoided because it needs 204 shifted circuits per sample at the default 6-qubit, 4-layer depth.
 - **`qiskit_heads.py` & `builder.py`**: Accept an optional `estimator` (and, on the head, `spsa_epsilon` and `seed`), so the backend is configuration rather than code.
-- **`train_qiskit_qtl_multiseed.py`**: Records the gradient method, SPSA step, and estimator class in each run's history `config`, and validates every epoch.
+- **`train_qiskit_qtl_multiseed.py`**: Records the gradient method and SPSA step in each run's spec (they change the maths, so they are part of the configuration ID) and the estimator class as a non-hashed extra in the history, and validates every epoch.
 
 ---
 
@@ -251,13 +287,13 @@ sequenceDiagram
 
     Note over Base: Step 1: Train End-to-End Baseline
     D->>Base: Train LeNet Feature Extractor + Classical Dense Head on train, monitor on val
-    Base-->>Base: Save last-epoch weights (baseline_seed_*.pt)
+    Base-->>Base: Save last-epoch weights (checkpoints/baseline/config_id/seed_n.pt)
 
     Note over Eval,Sel: Step 2: Evaluate Every Checkpoint, Select on Validation
     Base->>Eval: Evaluate each baseline checkpoint on val and on test
-    Eval-->>Sel: Validation metrics (baseline_val_results.json)
-    Eval-->>Eval: Test metrics (baseline_results.json), reported only
-    Sel-->>Base: Backbone with the best validation AUC-ROC (then F1, then lowest log loss)
+    Eval-->>Sel: Validation metrics (metrics/baseline/config_id/val_results.json)
+    Eval-->>Eval: Test metrics (test_results.json), reported only
+    Sel-->>Base: Backbone spec with the best validation AUC-ROC (then F1, then lowest log loss); its run_id becomes the heads' backbone_id
 
     Note over Cache: Step 3: Extract & Cache Invariant Embeddings
     Base->>Cache: Load selected backbone weights & Freeze parameters
@@ -297,18 +333,18 @@ flowchart LR
     end
 
     subgraph Storage ["Telemetry Storage"]
-        JSON_STORE["Test results JSON<br/>(cohort, individual_runs + aggregated_statistics)"]
+        JSON_STORE["Test results JSON<br/>(metrics/{paradigm}/{config_id}/test_results.json: cohort, configuration, individual_runs + aggregated_statistics)"]
         JSON_VAL["Validation results JSON<br/>(same schema, cohort = val)"]
-        JSON_HIST["History JSON<br/>(histories/nifti/{paradigm}/{run_id}.json)"]
+        JSON_HIST["History JSON<br/>(histories/{paradigm}/{config_id}/seed_{n}.json: spec, extras, epochs)"]
         LOGS["Timestamped Logs<br/>(logs/YYYYMMDD_HHMMSS_*.log)"]
     end
 
     subgraph Selection ["Selection & Report"]
-        SELECT["select_best_baseline<br/>(reads validation JSON only)"]
+        SELECT["select_backbone / select_best_validation_run<br/>(reads validation JSON only)"]
         REPORT["build_comparative_report<br/>(mean / std on test + run selected on validation)"]
     end
 
-    subgraph Visualization ["Telemetry Visualizer"]
+    subgraph Visualization ["Visualization (dementia_boost.viz)"]
         BOXPLOT["MetricsVisualizer.plot_metric_distributions()"]
         ROC_AGG["MetricsVisualizer.plot_comparative_roc()"]
         ROC_ISO["MetricsVisualizer.plot_isolated_roc()"]
@@ -337,9 +373,9 @@ flowchart LR
     JSON_HIST --> LOSS_CMP
 ```
 
-Evaluation and selection follow one protocol. `checkpoint_evaluation` evaluates every saved checkpoint once on the `val` cohort and once on the `test` cohort, and writes two files per paradigm: `<stem>_val_results.json` and `<stem>_results.json` (test). Each file carries a `cohort` marker. Model selection (`select_best_baseline`) accepts only a file marked `val` and ranks by validation AUC-ROC, then F1, then lowest log loss, then run ID; it raises on anything else, so test metrics can never decide a choice. The comparative report (`scripts/metrics/generate_improvement_report.py`, built by `build_comparative_report`) leads with the mean and standard deviation across seeds on test, shows the test metrics of the run selected on validation next to them, and reports percentage changes between the means. No run is chosen on test metrics.
+Evaluation and selection follow one protocol. `evaluate_paradigm` (in `checkpoint_evaluation`) finds the finished runs of a paradigm through their histories, groups them by configuration, builds each configuration's model from its own spec, evaluates every checkpoint once on the `val` cohort and once on the `test` cohort, and writes `metrics/<paradigm>/<config_id>/val_results.json` and `test_results.json`. Each file carries a `cohort` marker and the `configuration` (ID, label, spec without the seed) it was computed for. Model selection (`select_best_validation_run`, and `select_backbone`, which resolves the best baseline to its spec) accepts only a file marked `val` and ranks by validation AUC-ROC, then F1, then lowest log loss, then run ID; it raises on anything else, so test metrics can never decide a choice. The comparative report (`scripts/metrics/generate_improvement_report.py`, built by `build_comparative_report`) takes one configuration per paradigm (the only one with results, or one named with `--config`), leads with the mean and standard deviation across seeds on test, shows the test metrics of the run selected on validation next to them, and reports percentage changes between the means. It refuses to mix paradigms trained on different splits. No run is chosen on test metrics, and the run highlighted in the isolated ROC curve and confusion matrix plots is the one selected on validation.
 
-Training histories follow the same boundary as the evaluation metrics. During training, `BaselineTrainer` only sees the train and validation loaders; its per-epoch `val_loss` and `val_acc` are validation values. It only records a `TrainingHistory` and writes it to JSON (every `history_save_every` epochs, default 10, and once more on exit, atomically through a temporary file), so the Training layer never imports plotting code. Loss curves are produced afterwards by `scripts/viz/visualize_loss.py`, which reads the history files and writes per-seed and distribution plots to `plots/nifti/loss/{paradigm}/` and the cross-paradigm comparison to `plots/nifti/loss/`.
+Training histories follow the same boundary as the evaluation metrics. During training, `BaselineTrainer` only sees the train and validation loaders; its per-epoch `val_loss` and `val_acc` are validation values. It only records a `TrainingHistory` and writes it to JSON (every `history_save_every` epochs, default 10, and once more on exit, atomically through a temporary file), so the Training layer never imports plotting code. Loss curves are produced afterwards by `scripts/viz/visualize_loss.py`, which reads the history files through the results layout and writes per-seed and distribution plots to `plots/<paradigm>/<config_id>/` and the comparison across configurations to `plots/loss_comparison.png`. The plotting steps live in `dementia_boost.viz` (`run_plots`), next to `MetricsVisualizer`; the scripts under `scripts/viz` are thin callers.
 
 ---
 
@@ -353,7 +389,9 @@ dementia-boost/
 │   └── qtl_to_boost_dementia_detection.md # Foundational paper (Bhowmik et al. 2025)
 ├── src/
 │   └── dementia_boost/
-│       ├── core/                          # Reproducibility & runtime utilities
+│       ├── core/                          # Reproducibility, run identity & results layout
+│       │   ├── identity.py                # Paradigm, RunSpec, hash IDs (config_id, run_id) and label
+│       │   ├── layout.py                  # ResultsLayout: where each artifact of a run lives
 │       │   └── reproducibility.py         # Deterministic seed locker
 │       ├── data/                          # Data processing & loaders
 │       │   ├── cohort_audit.py            # Read-only listing of subjects per cohort and shared subjects
@@ -382,27 +420,32 @@ dementia-boost/
 │       │   ├── checkpoint_evaluation.py   # Each checkpoint on the val and test cohorts, per-cohort result files
 │       │   ├── evaluator.py               # Weight loading and inference predictor
 │       │   └── trainer.py                 # Training loop with validation, checkpointing & history recording
-│       └── telemetry/                     # Metrics calculation, serialization & plotting
-│           ├── logger.py                  # Standardized dual console/file logger
-│           ├── metrics.py                 # MetricsAnalyzer, metric DTOs and training history DTOs
-│           ├── report.py                  # Comparative report across paradigms
-│           ├── selection.py               # Model selection on validation metrics only
+│       ├── telemetry/                     # Metrics calculation, serialization, selection & reporting
+│       │   ├── logger.py                  # Standardized dual console/file logger
+│       │   ├── metrics.py                 # MetricsAnalyzer, metric DTOs and training history DTOs
+│       │   ├── report.py                  # Comparative report across paradigms
+│       │   ├── run_listing.py             # Finds runs from their histories, groups them by configuration
+│       │   ├── run_table.py               # Lookup table and ID search behind scripts/list_runs.py
+│       │   └── selection.py               # Model selection on validation metrics only
+│       └── viz/                           # Plotting
+│           ├── run_plots.py               # Plots per configuration and loss plots, through the layout
 │           └── visualizer.py              # Publication-ready Seaborn/Matplotlib plots, incl. loss curves
 ├── scripts/                               # CLI entry-points for training and evaluation
 │   ├── audit_cohorts.py                   # Read-only check that no subject is in two cohorts
 │   ├── etl_pipeline.py                    # 3D NIfTI to 2D slice ETL & patient-split orchestrator
+│   ├── list_runs.py                       # Read-only lookup of configurations and runs by hash ID
 │   ├── metrics/                           # Batch evaluation (val and test) and comparative report scripts
 │   │   ├── evaluate_baseline.py           # Multiseed evaluation of classical baseline models
 │   │   ├── evaluate_qiskit_qtl.py         # Multiseed evaluation of Qiskit QTL models
 │   │   ├── evaluate_qtl.py                # Multiseed evaluation of QTL models
 │   │   ├── evaluate_tl.py                 # Multiseed evaluation of CTL models
 │   │   └── generate_improvement_report.py # Comparative report (test means, run selected on validation)
-│   ├── training/                          # Multi-seed training scripts with checkpoint resumption
+│   ├── training/                          # Multi-seed training scripts (finished runs are skipped)
 │   │   ├── train_baseline.py              # Classical baseline CNN training
 │   │   ├── train_qiskit_qtl_multiseed.py  # Qiskit Quantum Transfer Learning training
 │   │   ├── train_qtl_multiseed.py         # Quantum Transfer Learning (QTL) training
 │   │   └── train_tl_multiseed.py          # Classical Transfer Learning (CTL) training
-│   └── viz/                               # Telemetry plotting and visualization scripts
+│   └── viz/                               # Plotting and visualization scripts (thin callers of dementia_boost.viz)
 │       ├── visualize_baselines.py         # Boxplots, ROC curves, confusion matrices for baseline
 │       ├── visualize_loss.py              # Loss curves from saved training histories (per paradigm and comparison)
 │       ├── visualize_qiskit_qtl.py        # Boxplots, ROC curves, confusion matrices for Qiskit QTL
