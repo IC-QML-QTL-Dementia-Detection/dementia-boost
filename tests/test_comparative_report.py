@@ -6,26 +6,38 @@ Regression coverage
   chosen on the same cohort they were reported on.
 """
 
+from pathlib import Path
+
 import pytest
 
+from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.telemetry.report import (
     build_comparative_report,
     calculate_percentage_delta,
+    resolve_configuration,
 )
 
 _METRICS = ("accuracy", "precision", "recall", "f1_score", "auc")
 
 
-def _payload(cohort: str, runs: dict[str, dict[str, float]]) -> dict:
+def _payload(
+    cohort: str,
+    runs: dict[str, dict[str, float]],
+    split_id: str = "split_a",
+    config: str = "config_a",
+) -> dict:
     """Builds a results payload as `save_to_json` writes it.
 
     Args:
         cohort: Cohort marker of the payload.
         runs: Mapping of run ID to its metrics; missing metrics default to 0.5
             and `log_loss` to 0.7.
+        split_id: Split the configuration was trained on.
+        config: Configuration ID the results belong to.
 
     Returns:
-        A payload with `cohort`, `individual_runs`, and mean/std statistics.
+        A payload with `cohort`, `configuration`, `individual_runs`, and
+        mean/std statistics.
     """
     individual = [
         {
@@ -44,14 +56,27 @@ def _payload(cohort: str, runs: dict[str, dict[str, float]]) -> dict:
         stats[name] = {"mean": mean, "std": std}
     return {
         "cohort": cohort,
+        "configuration": {
+            "config_id": config,
+            "label": "test configuration",
+            "spec": {"split_id": split_id},
+        },
         "aggregated_statistics": stats,
         "individual_runs": individual,
     }
 
 
-def _paradigm(val_runs: dict, test_runs: dict | None = None) -> tuple[dict, dict]:
+def _paradigm(
+    val_runs: dict,
+    test_runs: dict | None = None,
+    split_id: str = "split_a",
+    config: str = "config_a",
+) -> tuple[dict, dict]:
     """Returns the (val, test) payload pair of one paradigm."""
-    return _payload("val", val_runs), _payload("test", test_runs or val_runs)
+    return (
+        _payload("val", val_runs, split_id, config),
+        _payload("test", test_runs or val_runs, split_id, config),
+    )
 
 
 def _report(**paradigms: tuple[dict, dict]) -> dict:
@@ -147,6 +172,25 @@ class TestInputValidation:
                 test_results={"baseline": test}, val_results={"ctl": val}
             )
 
+    def test_paradigms_trained_on_different_splits_are_refused(self) -> None:
+        """Results from different splits are not comparable, so they cannot share
+        a report. The error names both split IDs."""
+        with pytest.raises(ValueError, match="split_a.*split_b|split_b.*split_a"):
+            _report(
+                baseline=_paradigm({"a": {}}, split_id="split_a"),
+                ctl=_paradigm({"a": {}}, split_id="split_b"),
+            )
+
+    def test_validation_and_test_of_different_configurations_are_refused(self) -> None:
+        """A paradigm's validation and test files must describe one configuration,
+        or the run selected on validation would be looked up in another."""
+        val = _payload("val", {"a": {}}, config="config_a")
+        test = _payload("test", {"a": {}}, config="config_b")
+        with pytest.raises(ValueError, match="configuration"):
+            build_comparative_report(
+                test_results={"baseline": test}, val_results={"baseline": val}
+            )
+
     def test_selected_run_missing_from_test_results_raises(self) -> None:
         """A run chosen on validation must exist in the test results."""
         val = _payload("val", {"a": {"auc": 0.9}})
@@ -155,6 +199,57 @@ class TestInputValidation:
             build_comparative_report(
                 test_results={"baseline": test}, val_results={"baseline": val}
             )
+
+
+class TestResolveConfiguration:
+    """Validates choosing the configuration a paradigm contributes to a report."""
+
+    def _results(self, layout: ResultsLayout, paradigm: str, config: str, *cohorts):
+        """Creates (empty) results files for a configuration and cohorts."""
+        for cohort in cohorts:
+            path = Path(layout.metrics_path(paradigm, config, cohort))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}")
+
+    def test_the_only_evaluated_configuration_is_used(self, tmp_path: Path) -> None:
+        """With one configuration that has both cohorts, no choice is needed."""
+        layout = ResultsLayout(str(tmp_path))
+        self._results(layout, "ctl", "aaa", "val", "test")
+
+        assert resolve_configuration(layout, "ctl") == "aaa"
+
+    def test_configurations_without_both_cohorts_do_not_count(
+        self, tmp_path: Path
+    ) -> None:
+        """A configuration evaluated on one cohort only cannot be reported."""
+        layout = ResultsLayout(str(tmp_path))
+        self._results(layout, "ctl", "aaa", "test")
+
+        assert resolve_configuration(layout, "ctl") is None
+
+    def test_no_results_gives_none(self, tmp_path: Path) -> None:
+        """A paradigm without results contributes nothing."""
+        assert resolve_configuration(ResultsLayout(str(tmp_path)), "qtl") is None
+
+    def test_several_configurations_need_an_explicit_choice(
+        self, tmp_path: Path
+    ) -> None:
+        """Choosing between configurations silently would be a hidden decision."""
+        layout = ResultsLayout(str(tmp_path))
+        self._results(layout, "qtl", "aaa", "val", "test")
+        self._results(layout, "qtl", "bbb", "val", "test")
+
+        with pytest.raises(ValueError, match="configuration"):
+            resolve_configuration(layout, "qtl")
+        assert resolve_configuration(layout, "qtl", "bbb") == "bbb"
+
+    def test_an_unavailable_choice_raises(self, tmp_path: Path) -> None:
+        """A requested configuration must have both cohorts evaluated."""
+        layout = ResultsLayout(str(tmp_path))
+        self._results(layout, "qtl", "aaa", "val", "test")
+
+        with pytest.raises(ValueError, match="zzz"):
+            resolve_configuration(layout, "qtl", "zzz")
 
 
 def test_percentage_delta_is_zero_for_a_zero_base() -> None:

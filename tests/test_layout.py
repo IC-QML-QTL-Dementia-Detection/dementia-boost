@@ -150,6 +150,11 @@ class TestHistoryFiles:
         assert layout.history_files() == []
 
 
+def test_report_path_is_under_metrics(layout: ResultsLayout, tmp_path: Path) -> None:
+    """The comparative report sits next to the per-configuration metrics."""
+    assert layout.report_path() == str(tmp_path / "metrics" / "comparative_report.json")
+
+
 class TestConfigsWithMetrics:
     """Validates listing of configurations that have a results file."""
 

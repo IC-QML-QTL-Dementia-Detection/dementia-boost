@@ -18,6 +18,7 @@ import seaborn as sns
 from matplotlib.axes import Axes
 from sklearn.metrics import roc_curve
 
+from dementia_boost.core.layout import HISTORY_GLOB
 from dementia_boost.telemetry.metrics import MetricsAnalyzer, TrainingHistory
 
 
@@ -393,18 +394,21 @@ class MetricsVisualizer:
 
     @staticmethod
     def _load_histories(history_dir: str) -> list[TrainingHistory]:
-        """Loads every `*.json` training history in a directory.
+        """Loads every training history in a directory.
+
+        Only the history files (`HISTORY_GLOB`) are read, so the directory's
+        `config.json` is not mistaken for a history.
 
         Args:
             history_dir: Directory holding history JSON files.
 
         Returns:
             Histories sorted by file name. Empty if the directory is missing
-            or holds no JSON files.
+            or holds no history files.
         """
         return [
             MetricsAnalyzer.load_history(str(path))
-            for path in sorted(Path(history_dir).glob("*.json"))
+            for path in sorted(Path(history_dir).glob(HISTORY_GLOB))
         ]
 
     @staticmethod

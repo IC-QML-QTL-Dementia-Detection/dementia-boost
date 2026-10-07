@@ -44,7 +44,7 @@ from dementia_boost.telemetry.metrics import (
     MetricsAnalyzer,
     TrainingHistory,
 )
-from dementia_boost.telemetry.visualizer import MetricsVisualizer
+from dementia_boost.viz.visualizer import MetricsVisualizer
 
 _KNOWN_METRIC_KEYS: tuple[str, ...] = (
     "accuracy",

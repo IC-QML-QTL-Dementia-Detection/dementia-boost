@@ -18,8 +18,8 @@ from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.telemetry.metrics import MetricsAnalyzer, TrainingHistory
 from dementia_boost.telemetry.selection import (
     select_backbone,
-    select_best_baseline,
     select_best_run,
+    select_best_validation_run,
 )
 
 
@@ -82,7 +82,7 @@ class TestSelectBestRun:
             select_best_run([])
 
 
-class TestSelectBestBaseline:
+class TestSelectBestValidationRun:
     """Validates reading the validation results file."""
 
     def _write(self, path: Path, cohort: str | None, runs: list[dict]) -> str:
@@ -98,7 +98,7 @@ class TestSelectBestBaseline:
         path = self._write(
             tmp_path / "val.json", "val", [_run("baseline_seed_1", 0.7), _run("x", 0.9)]
         )
-        assert select_best_baseline(path) == "x"
+        assert select_best_validation_run(path) == "x"
 
     @pytest.mark.parametrize("cohort", ["test", "train", None])
     def test_refuses_results_from_another_cohort(
@@ -107,12 +107,12 @@ class TestSelectBestBaseline:
         """Test metrics, or metrics of unknown origin, can never drive selection."""
         path = self._write(tmp_path / "r.json", cohort, [_run("a", 0.9)])
         with pytest.raises(ValueError, match="validation"):
-            select_best_baseline(path)
+            select_best_validation_run(path)
 
     def test_missing_file_raises(self, tmp_path: Path) -> None:
         """A missing results file raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
-            select_best_baseline(str(tmp_path / "absent.json"))
+            select_best_validation_run(str(tmp_path / "absent.json"))
 
 
 class TestSelectBackbone:

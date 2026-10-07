@@ -9,6 +9,8 @@ on test metrics.
 from collections.abc import Mapping
 from typing import Any
 
+from dementia_boost.core.identity import Paradigm
+from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.telemetry.selection import select_best_run
 
 REPORT_METRICS = ("accuracy", "precision", "recall", "f1_score", "auc")
@@ -38,6 +40,45 @@ def calculate_percentage_delta(base: float, new: float) -> float:
     return ((new - base) / base) * 100.0
 
 
+def resolve_configuration(
+    layout: ResultsLayout, paradigm: Paradigm | str, requested: str | None = None
+) -> str | None:
+    """Chooses the configuration a paradigm contributes to a report.
+
+    Only configurations evaluated on both validation and test can be reported.
+
+    Args:
+        layout: The results layout to look in.
+        paradigm: The paradigm.
+        requested: An explicit `config_id`. Required when the paradigm has
+            several reportable configurations.
+
+    Returns:
+        The `config_id` to use, or None if the paradigm has nothing to report.
+
+    Raises:
+        ValueError: If `requested` is not reportable, or the paradigm has
+            several reportable configurations and none was requested.
+    """
+    reportable = sorted(
+        set(layout.configs_with_metrics(paradigm, "val"))
+        & set(layout.configs_with_metrics(paradigm, "test"))
+    )
+    if requested is not None:
+        if requested not in reportable:
+            raise ValueError(
+                f"Configuration {requested!r} of {Paradigm(paradigm).value} has "
+                f"no validation and test results; available: {reportable}."
+            )
+        return requested
+    if len(reportable) > 1:
+        raise ValueError(
+            f"{Paradigm(paradigm).value} has several configurations with results "
+            f"({reportable}); name the configuration to report."
+        )
+    return reportable[0] if reportable else None
+
+
 def build_comparative_report(
     test_results: Mapping[str, Mapping[str, Any]],
     val_results: Mapping[str, Mapping[str, Any]],
@@ -60,8 +101,10 @@ def build_comparative_report(
 
     Raises:
         ValueError: If there are no paradigms, validation and test cover
-            different paradigms, a payload is marked with the wrong cohort, or a
-            run selected on validation is absent from the test results.
+            different paradigms or describe different configurations of one
+            paradigm, a payload is marked with the wrong cohort, the paradigms
+            were trained on different splits, or a run selected on validation
+            is absent from the test results.
     """
     if not test_results:
         raise ValueError("No paradigms to report.")
@@ -74,6 +117,24 @@ def build_comparative_report(
         _require_cohort(name, payload, "test")
     for name, payload in val_results.items():
         _require_cohort(name, payload, "val")
+    for name in test_results:
+        if (
+            val_results[name]["configuration"]["config_id"]
+            != test_results[name]["configuration"]["config_id"]
+        ):
+            raise ValueError(
+                f"{name}: the validation and test results describe different "
+                "configurations."
+            )
+    split_ids = {
+        name: payload["configuration"]["spec"]["split_id"]
+        for name, payload in test_results.items()
+    }
+    if len(set(split_ids.values())) > 1:
+        raise ValueError(
+            f"The paradigms were trained on different splits and cannot share a "
+            f"report: {split_ids}."
+        )
 
     selected_runs = {
         name: select_best_run(val_results[name]["individual_runs"])

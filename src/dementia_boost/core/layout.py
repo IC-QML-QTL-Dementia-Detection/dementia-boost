@@ -19,6 +19,7 @@ from dementia_boost.core.identity import Paradigm, RunSpec, config_id, label
 DEFAULT_RESULTS_ROOT = "./data/results"
 RESULT_COHORTS = ("val", "test")
 CONFIG_NAME = "config.json"
+HISTORY_GLOB = "seed_*.json"
 
 
 def config_payload(spec: RunSpec) -> dict:
@@ -137,7 +138,7 @@ class ResultsLayout:
             "histories",
             Paradigm(paradigm).value if paradigm is not None else "*",
             configuration if configuration is not None else "*",
-            "seed_*.json",
+            HISTORY_GLOB,
         )
         return sorted(glob.glob(pattern))
 
@@ -185,6 +186,14 @@ class ResultsLayout:
             f"{cohort}_results.json",
         )
         return sorted(os.path.basename(os.path.dirname(p)) for p in glob.glob(pattern))
+
+    def report_path(self) -> str:
+        """Returns the file the comparative report is written to.
+
+        Returns:
+            `<root>/metrics/comparative_report.json`.
+        """
+        return os.path.join(self.root, "metrics", "comparative_report.json")
 
     def plots_dir(self, paradigm: Paradigm | str, configuration: str) -> str:
         """Returns the plot directory of one configuration.

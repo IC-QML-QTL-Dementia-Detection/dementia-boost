@@ -2,7 +2,7 @@
 
 Choosing a model with the test cohort, and then reporting that same cohort,
 makes the reported numbers optimistic. Everything here reads validation
-metrics: `select_best_baseline` refuses any results file that was not computed
+metrics: `select_best_validation_run` refuses any results file that was not computed
 on the validation cohort.
 """
 
@@ -59,15 +59,15 @@ def select_best_run(runs: Sequence[Mapping[str, Any]]) -> str:
     return str(best["run_id"])
 
 
-def select_best_baseline(val_results_path: str) -> str:
-    """Selects the best baseline run from a validation results JSON.
+def select_best_validation_run(val_results_path: str) -> str:
+    """Selects the best run from a validation results JSON.
 
     Args:
         val_results_path: Path to the results file written by the evaluation
-            script for the validation cohort.
+            script for the validation cohort of one configuration.
 
     Returns:
-        The run ID of the selected baseline.
+        The run ID of the best run on validation.
 
     Raises:
         FileNotFoundError: If the file does not exist.
@@ -126,7 +126,7 @@ def select_backbone(layout: ResultsLayout, configuration: str | None = None) -> 
             )
         configuration = configurations[0]
 
-    selected = select_best_baseline(
+    selected = select_best_validation_run(
         layout.metrics_path(Paradigm.BASELINE, configuration, VALIDATION_COHORT)
     )
     for history in load_runs(layout, Paradigm.BASELINE, configuration):
