@@ -1,34 +1,24 @@
 """Evaluation of saved checkpoints on the validation and test cohorts.
 
 Every checkpoint is evaluated once per cohort. Validation metrics feed model
-selection; test metrics are only reported. The two are written to separate
-files so a consumer can never confuse them.
+selection; test metrics are only reported. The two are written to separate files
+per configuration, each carrying the configuration it was computed for, so a
+consumer can never confuse cohorts or mix configurations.
 """
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from logging import Logger
 
+import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from dementia_boost.core.identity import Paradigm, RunSpec, run_id
+from dementia_boost.core.layout import ResultsLayout, config_payload
 from dementia_boost.telemetry.metrics import EvaluationResult, MetricsAnalyzer
+from dementia_boost.telemetry.run_listing import group_by_config, load_runs
 from dementia_boost.training.evaluator import ModelEvaluator
-
-
-def cohort_results_path(results_dir: str, stem: str, cohort: str) -> str:
-    """Builds the results file path for one cohort.
-
-    Args:
-        results_dir: Directory holding the metrics files.
-        stem: Paradigm file stem, for example "baseline" or "tl".
-        cohort: "val" or "test".
-
-    Returns:
-        `<results_dir>/<stem>_results.json` for the test cohort and
-        `<results_dir>/<stem>_val_results.json` for the validation cohort.
-    """
-    suffix = "_results.json" if cohort == "test" else f"_{cohort}_results.json"
-    return os.path.join(results_dir, f"{stem}{suffix}")
 
 
 def evaluate_checkpoints(
@@ -50,12 +40,12 @@ def evaluate_checkpoints(
         checkpoint order.
     """
     results: dict[str, list[EvaluationResult]] = {cohort: [] for cohort in loaders}
-    for run_id, path in checkpoints:
+    for checkpoint_run_id, path in checkpoints:
         evaluator.load_weights(path)
         for cohort, loader in loaders.items():
             y_true, y_prob = evaluator.predict(loader)
             results[cohort].append(
-                MetricsAnalyzer.calculate_metrics(run_id, y_true, y_prob)
+                MetricsAnalyzer.calculate_metrics(checkpoint_run_id, y_true, y_prob)
             )
     return results
 
@@ -85,27 +75,89 @@ def log_cohort_summaries(
             )
 
 
-def save_cohort_results(
+def save_configuration_results(
+    layout: ResultsLayout,
+    spec: RunSpec,
     results_by_cohort: Mapping[str, list[EvaluationResult]],
-    results_dir: str,
-    stem: str,
 ) -> dict[str, str]:
-    """Aggregates and saves the results of each cohort to its own JSON file.
+    """Aggregates and saves one configuration's results, a file per cohort.
 
     Args:
-        results_by_cohort: Output of `evaluate_checkpoints`.
-        results_dir: Directory for the metrics files, created if missing.
-        stem: Paradigm file stem used in the file names.
+        layout: The results layout that decides the file paths.
+        spec: The spec of any run of the configuration.
+        results_by_cohort: Output of `evaluate_checkpoints` for that
+            configuration's runs.
 
     Returns:
         Mapping of cohort name to the path written.
     """
-    os.makedirs(results_dir, exist_ok=True)
+    configuration = config_payload(spec)
     paths: dict[str, str] = {}
     for cohort, results in results_by_cohort.items():
-        path = cohort_results_path(results_dir, stem, cohort)
+        path = layout.metrics_path(spec.paradigm, configuration["config_id"], cohort)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         MetricsAnalyzer.save_to_json(
-            results, MetricsAnalyzer.aggregate_results(results), path, cohort=cohort
+            results,
+            MetricsAnalyzer.aggregate_results(results),
+            path,
+            cohort=cohort,
+            configuration=configuration,
         )
         paths[cohort] = path
     return paths
+
+
+def evaluate_paradigm(
+    layout: ResultsLayout,
+    paradigm: Paradigm | str,
+    build_model: Callable[[RunSpec], nn.Module],
+    loaders: Mapping[str, DataLoader],
+    device: torch.device,
+    logger: Logger,
+    configuration: str | None = None,
+) -> dict[str, dict[str, list[EvaluationResult]]]:
+    """Evaluates every finished run of a paradigm, configuration by configuration.
+
+    Runs are found through their histories. A run whose checkpoint is missing
+    (it did not finish) is left out. The model of each configuration is built
+    from its own spec, so its architecture never comes from a constant.
+
+    Args:
+        layout: The results layout to read runs from and write results to.
+        paradigm: The paradigm to evaluate.
+        build_model: Builds the model architecture a configuration's checkpoints
+            fit, from the spec of one of its runs.
+        loaders: Mapping of cohort name to its DataLoader.
+        device: Device to run inference on.
+        logger: Logger for progress and summaries.
+        configuration: Restrict to one `config_id`. Defaults to all.
+
+    Returns:
+        Mapping of `config_id` to the per-cohort results written for it.
+        Empty if there is nothing to evaluate.
+    """
+    outcome: dict[str, dict[str, list[EvaluationResult]]] = {}
+    groups = group_by_config(load_runs(layout, paradigm, configuration))
+
+    for config, histories in groups.items():
+        specs = [history.spec for history in histories]
+        finished = [spec for spec in specs if layout.is_done(spec)]
+        if len(finished) < len(specs):
+            logger.warning(
+                f"Configuration {config}: {len(specs) - len(finished)} run(s) "
+                "without a checkpoint are left out."
+            )
+        if not finished:
+            continue
+
+        logger.info(f"Evaluating {len(finished)} run(s) of configuration {config}...")
+        evaluator = ModelEvaluator(model=build_model(finished[0]), device=device)
+        checkpoints = [(run_id(s), layout.checkpoint_path(s)) for s in finished]
+        results = evaluate_checkpoints(evaluator, checkpoints, loaders)
+        paths = save_configuration_results(layout, finished[0], results)
+
+        logger.info(f"Results saved to {paths}")
+        log_cohort_summaries(logger, results)
+        outcome[config] = results
+
+    return outcome

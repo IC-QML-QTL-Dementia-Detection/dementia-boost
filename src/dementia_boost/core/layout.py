@@ -21,6 +21,28 @@ RESULT_COHORTS = ("val", "test")
 CONFIG_NAME = "config.json"
 
 
+def config_payload(spec: RunSpec) -> dict:
+    """Builds the description of a spec's configuration (the spec minus the seed).
+
+    This is the content of `config.json`, and it is also stored in the results
+    files, so metrics always say which configuration they were computed for.
+
+    Args:
+        spec: The run specification.
+
+    Returns:
+        A dictionary with the `config_id`, the label without the seed, and the
+        spec without the seed.
+    """
+    data = spec.to_dict()
+    del data["seed"]
+    return {
+        "config_id": config_id(spec),
+        "label": label(spec, include_seed=False),
+        "spec": data,
+    }
+
+
 class ConfigCollisionError(ValueError):
     """Raised when two different specs map to the same configuration ID."""
 
@@ -204,7 +226,7 @@ class ResultsLayout:
                 ID with a different spec.
         """
         path = self.config_path(spec)
-        payload = self._config_payload(spec)
+        payload = config_payload(spec)
 
         if os.path.exists(path):
             with open(path) as handle:
@@ -228,14 +250,3 @@ class ResultsLayout:
     ) -> str:
         """Joins the root, artifact kind, paradigm, and configuration ID."""
         return os.path.join(self.root, kind, Paradigm(paradigm).value, configuration)
-
-    @staticmethod
-    def _config_payload(spec: RunSpec) -> dict:
-        """Builds the content of `config.json` for a spec."""
-        data = spec.to_dict()
-        del data["seed"]
-        return {
-            "config_id": config_id(spec),
-            "label": label(spec, include_seed=False),
-            "spec": data,
-        }

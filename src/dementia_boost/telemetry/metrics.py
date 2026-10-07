@@ -7,6 +7,7 @@ Confusion Matrix) and serialize summaries and training histories to disk.
 """
 
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -208,12 +209,16 @@ class MetricsAnalyzer:
         aggregated: dict[str, AggregateMetrics],
         filepath: str,
         cohort: str,
+        configuration: Mapping[str, Any],
     ) -> None:
         """Serializes evaluation metrics and aggregate statistics to a JSON file.
 
         The exported JSON structure contains:
         - `cohort`: the cohort the metrics were measured on ("val" or "test"),
           so a consumer can refuse metrics from the wrong cohort.
+        - `configuration`: the configuration the runs belong to (its ID, label,
+          and spec without the seed), so a report can group results and refuse
+          to mix splits without reading file names.
         - `aggregated_statistics`: mapping metric names to summary statistics.
         - `individual_runs`: list of per-run evaluation metric dictionaries.
 
@@ -222,9 +227,11 @@ class MetricsAnalyzer:
             aggregated: Dictionary mapping metric names to AggregateMetrics objects.
             filepath: Destination file path on disk.
             cohort: Name of the cohort the results were computed on.
+            configuration: The configuration payload of the evaluated runs.
         """
         payload = {
             "cohort": cohort,
+            "configuration": dict(configuration),
             "aggregated_statistics": {k: asdict(v) for k, v in aggregated.items()},
             "individual_runs": [asdict(res) for res in individual_results],
         }

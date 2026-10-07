@@ -205,17 +205,27 @@ class TestMetricsAnalyzerSaveToJson:
         aggregated = MetricsAnalyzer.aggregate_results([result])
         filepath = tmp_path / "metrics.json"
 
-        MetricsAnalyzer.save_to_json([result], aggregated, str(filepath), cohort="val")
+        configuration = {"config_id": "abc123", "label": "qtl", "spec": {"lr": 1e-4}}
+
+        MetricsAnalyzer.save_to_json(
+            [result],
+            aggregated,
+            str(filepath),
+            cohort="val",
+            configuration=configuration,
+        )
 
         with open(filepath) as f:
             payload = json.load(f)
 
         assert set(payload.keys()) == {
             "cohort",
+            "configuration",
             "aggregated_statistics",
             "individual_runs",
         }
         assert payload["cohort"] == "val"
+        assert payload["configuration"] == configuration
         assert payload["individual_runs"][0]["run_id"] == "run_json"
 
         for key in _KNOWN_METRIC_KEYS:
@@ -331,7 +341,9 @@ class TestMetricsVisualizerPlotGeneration:
         ]
         aggregated = MetricsAnalyzer.aggregate_results(results)
         filepath = tmp_path / "mock_metrics.json"
-        MetricsAnalyzer.save_to_json(results, aggregated, str(filepath), cohort="test")
+        MetricsAnalyzer.save_to_json(
+            results, aggregated, str(filepath), cohort="test", configuration={}
+        )
         return str(filepath)
 
     def test_all_plot_methods_write_nonzero_png_files(
