@@ -26,7 +26,7 @@ flowchart TD
     subgraph Models ["Model Architectures Layer"]
         FE["LeNetFeatureExtractor<br/>(Convolutional Spatial Backbone)"]
         CH["ClassicalClassifierHead<br/>(Linear Dense Head)"]
-        QH["QuantumClassifierHead<br/>(Dressed Quantum Network - DQN)"]
+        QH["PennylaneQuantumClassifierHead<br/>(Dressed Quantum Network - DQN)"]
         QKH["QiskitQuantumClassifierHead<br/>(DQN on Qiskit Primitives V2)"]
         DC["DementiaClassifier<br/>(Dependency-Injected Orchestrator)"]
         BUILDER["Model Builder<br/>(Weight Loading, Freezing & Swapping)"]
@@ -77,7 +77,7 @@ A run used to be identified by its name (`qtl_seed_3`), which said nothing about
 
 - **The specification** (`RunSpec`, a frozen dataclass): the paradigm, the ansatz, qubits and layers, the learning rates, the `StepLR` settings, epochs, batch size, the gradient method, the `backbone_id`, the `split_id`, and the `seed`. Fields that do not apply to a paradigm are `None`, and each paradigm validates that its required fields are set (a baseline has no quantum fields and no backbone, a head needs its backbone). The spec is stored in every training history, so it is the source of truth for what a run was.
 - **The IDs** (opaque hashes of the spec): `config_id` hashes every field except the seed, so all seeds of one configuration share it; `run_id` hashes every field. Both are the first 12 hex characters of a SHA-256 over the canonical JSON of the spec (sorted keys, `None` fields dropped, so adding a new optional field later does not change existing IDs). The `backbone_id` of a head is the `run_id` of the baseline it was built on, which pins its checkpoint and, through it, its split. `split_id` uses the same hash helper.
-- **The label** (output only): a readable rendering such as `qtl | paper | 6q x 4L | lr 0.0001 | seed 3`, for plots and logs. Nothing parses it.
+- **The label** (output only): a readable rendering such as `pl_qtl | paper | 6q x 4L | lr 0.0001 | seed 3`, for plots and logs. Nothing parses it.
 
 No code recovers configuration from a file name. The trainer refuses a spec that disagrees with its optimizer's learning rate, its loader's batch size, or its `StepLR` settings, so an ID never names a configuration that did not run. Details that do not define a run (devices, evaluation cadence) are stored as non-hashed extras in the history.
 
@@ -189,7 +189,7 @@ flowchart TD
         FLAT_C --> D1 --> D2 --> SIG
     end
 
-    subgraph QuantumHead ["Option B: QuantumClassifierHead (DQN / QTL)"]
+    subgraph QuantumHead ["Option B: PennylaneQuantumClassifierHead (DQN / PL QTL)"]
         FLAT_Q["Flatten -> 2304"]
         PRE["Pre-Net: Linear(2304 -> n_qubits)"]
         SCALE["Angle Scaling: tanh(x) * (pi / 2)"]
@@ -243,13 +243,13 @@ flowchart TD
 
 For low-qubit variational circuits ($n_{\text{qubits}} = 6$, corresponding to a statevector of $2^6 = 64$ complex amplitudes), CPU state-vector simulation (`lightning.qubit` / `default.qubit`) provides superior execution throughput compared to GPU simulators (`lightning.gpu`), eliminating host-to-device memory transfer latency and CUDA kernel launch overhead.
 
-- **`circuit.py` (`resolve_quantum_device`)**: Resolves the PennyLane device backend, defaulting to `lightning.qubit` with deterministic fallback to `default.qubit`, while allowing manual backend specification or custom device injection.
-- **`heads.py` & `builder.py`**: Accept explicit `quantum_device` parameters to configure the underlying QNode simulator.
-- **QTL Scripts (`train_qtl_multiseed.py`, `evaluate_qtl.py`)**: Expose configurable `DEFAULT_TORCH_DEVICE` and `DEFAULT_QUANTUM_DEVICE` variables with `get_device()` manual override support.
+- **`pennylane_circuit.py` (`resolve_quantum_device`)**: Resolves the PennyLane device backend, defaulting to `lightning.qubit` with deterministic fallback to `default.qubit`, while allowing manual backend specification or custom device injection.
+- **`pennylane_heads.py` & `builder.py`**: Accept explicit `quantum_device` parameters to configure the underlying QNode simulator.
+- **PL QTL scripts (`train_pl_qtl_multiseed.py`, `evaluate_pl_qtl.py`)**: Expose configurable `DEFAULT_TORCH_DEVICE` and `DEFAULT_QUANTUM_DEVICE` variables with `get_device()` manual override support.
 
 ### 3.3 Qiskit Execution Path
 
-`QiskitQuantumClassifierHead` is an independent, interchangeable counterpart of `QuantumClassifierHead`. It uses the same pre-net, angle scaling, ansatz, and post-net, but runs the circuit through Qiskit Primitives V2, hand-written against `BaseEstimatorV2` with no `qiskit-machine-learning` dependency.
+`QiskitQuantumClassifierHead` is an independent, interchangeable counterpart of `PennylaneQuantumClassifierHead`. It uses the same pre-net, angle scaling, ansatz, and post-net, but runs the circuit through Qiskit Primitives V2, hand-written against `BaseEstimatorV2` with no `qiskit-machine-learning` dependency.
 
 ```mermaid
 flowchart LR
@@ -410,8 +410,8 @@ dementia-boost/
 │       │   │   ├── feature_extractor.py   # LeNetFeatureExtractor backbone
 │       │   │   └── heads.py               # ClassicalClassifierHead
 │       │   └── quantum_cnn/               # Quantum neural network components
-│       │       ├── circuit.py             # PennyLane QNode and custom Ansatz definition
-│       │       ├── heads.py               # QuantumClassifierHead (DQN)
+│       │       ├── pennylane_circuit.py   # PennyLane QNode and custom Ansatz definition
+│       │       ├── pennylane_heads.py     # PennylaneQuantumClassifierHead (DQN)
 │       │       ├── qiskit_circuit.py      # Qiskit QuantumCircuit, parameters and observables
 │       │       ├── qiskit_heads.py        # QiskitQuantumClassifierHead (DQN on Qiskit)
 │       │       ├── qiskit_layer.py        # Autograd layer with loss-level SPSA gradients
@@ -436,20 +436,20 @@ dementia-boost/
 │   ├── list_runs.py                       # Read-only lookup of configurations and runs by hash ID
 │   ├── metrics/                           # Batch evaluation (val and test) and comparative report scripts
 │   │   ├── evaluate_baseline.py           # Multiseed evaluation of classical baseline models
+│   │   ├── evaluate_ctl.py                # Multiseed evaluation of CTL models
+│   │   ├── evaluate_pl_qtl.py             # Multiseed evaluation of PL QTL models
 │   │   ├── evaluate_qiskit_qtl.py         # Multiseed evaluation of Qiskit QTL models
-│   │   ├── evaluate_qtl.py                # Multiseed evaluation of QTL models
-│   │   ├── evaluate_tl.py                 # Multiseed evaluation of CTL models
 │   │   └── generate_improvement_report.py # Comparative report (test means, run selected on validation)
 │   ├── training/                          # Multi-seed training scripts (finished runs are skipped)
 │   │   ├── train_baseline.py              # Classical baseline CNN training
-│   │   ├── train_qiskit_qtl_multiseed.py  # Qiskit Quantum Transfer Learning training
-│   │   ├── train_qtl_multiseed.py         # Quantum Transfer Learning (QTL) training
-│   │   └── train_tl_multiseed.py          # Classical Transfer Learning (CTL) training
+│   │   ├── train_ctl_multiseed.py         # Classical Transfer Learning (CTL) training
+│   │   ├── train_pl_qtl_multiseed.py      # PennyLane Quantum Transfer Learning (PL QTL) training
+│   │   └── train_qiskit_qtl_multiseed.py  # Qiskit Quantum Transfer Learning training
 │   └── viz/                               # Plotting and visualization scripts (thin callers of dementia_boost.viz)
 │       ├── visualize_baselines.py         # Boxplots, ROC curves, confusion matrices for baseline
+│       ├── visualize_ctl.py               # Boxplots, ROC curves, confusion matrices for CTL
 │       ├── visualize_loss.py              # Loss curves from saved training histories (per paradigm and comparison)
-│       ├── visualize_qiskit_qtl.py        # Boxplots, ROC curves, confusion matrices for Qiskit QTL
-│       ├── visualize_qtl.py               # Boxplots, ROC curves, confusion matrices for QTL
-│       └── visualize_tl.py                # Boxplots, ROC curves, confusion matrices for CTL
+│       ├── visualize_pl_qtl.py            # Boxplots, ROC curves, confusion matrices for PL QTL
+│       └── visualize_qiskit_qtl.py        # Boxplots, ROC curves, confusion matrices for Qiskit QTL
 └── tests/                                 # Unit and integration test suites
 ```

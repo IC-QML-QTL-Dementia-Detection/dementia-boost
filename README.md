@@ -40,7 +40,7 @@ The codebase enforces strict modularity and MLOps practices, keeping neural netw
 
 - **`data/`**: Data loading and ETL pipelines with patient-level leakage prevention (canonical subject IDs, a deterministic stratified train/val/test split, a `split_manifest.json`, and an integrity check of the cohort files against it), NIfTI slice loaders, custom `MinMaxNormalize` transforms, and in-memory feature embedding caching for fast transfer learning (`subject_ids.py`, `split.py`, `split_manifest.py`, `split_guards.py`, `cohort_audit.py`, `data_loader.py`, `data_processor.py`, `dataset.py`, `embedding_cache.py`).
 
-- **`models/`**: Dependency-injected architectures pairing a `LeNetFeatureExtractor` backbone with interchangeable heads: `ClassicalClassifierHead` (CTL), `QuantumClassifierHead` (DQN / QTL on PennyLane), or `QiskitQuantumClassifierHead` (the same DQN on Qiskit Primitives V2, with an injectable estimator and Aer as the default noiseless backend) built via `builder.py`.
+- **`models/`**: Dependency-injected architectures pairing a `LeNetFeatureExtractor` backbone with interchangeable heads: `ClassicalClassifierHead` (CTL), `PennylaneQuantumClassifierHead` (DQN / PL QTL on PennyLane), or `QiskitQuantumClassifierHead` (the same DQN on Qiskit Primitives V2, with an injectable estimator and Aer as the default noiseless backend) built via `builder.py`.
 
 - **`training/`**: Isolated `BaselineTrainer` and `ModelEvaluator` separating training/optimization loops from model definitions and file I/O, and `checkpoint_evaluation` to evaluate every checkpoint on the validation and test cohorts. The trainer only sees the train and validation loaders, records a per-epoch `TrainingHistory` and saves it as JSON, but never plots.
 
@@ -122,10 +122,10 @@ uv run scripts/metrics/evaluate_baseline.py
 
 # Train Classical Transfer Learning (CTL) dense heads on the baseline selected on
 # validation (best validation AUC-ROC, then F1, then lowest log loss)
-uv run scripts/training/train_tl_multiseed.py
+uv run scripts/training/train_ctl_multiseed.py
 
-# Train Quantum Transfer Learning (QTL) Dressed Quantum Network
-uv run scripts/training/train_qtl_multiseed.py
+# Train PennyLane Quantum Transfer Learning (PL QTL) Dressed Quantum Network
+uv run scripts/training/train_pl_qtl_multiseed.py
 
 # Train the same Dressed Quantum Network on Qiskit (Aer state-vector, SPSA gradients)
 uv run scripts/training/train_qiskit_qtl_multiseed.py
@@ -150,8 +150,8 @@ Changing any hyperparameter gives a new `config_id`, so a new configuration neve
 ```bash
 uv run scripts/list_runs.py                    # one row per configuration (label, split, seeds)
 uv run scripts/list_runs.py --runs             # one row per run (seed, run_id, finished, paths)
-uv run scripts/list_runs.py --paradigm qtl     # only one paradigm
-uv run scripts/list_runs.py --find 62753438    # full spec and files of a config or run ID prefix
+uv run scripts/list_runs.py --paradigm pl_qtl  # only one paradigm
+uv run scripts/list_runs.py --find dc658242    # full spec and files of a config or run ID prefix
 uv run scripts/list_runs.py --runs --csv runs.csv
 ```
 
@@ -163,8 +163,8 @@ uv run scripts/list_runs.py --runs --csv runs.csv
 # data/results/metrics/<paradigm>/<config_id>/. evaluate_baseline.py was already
 # run in step 3.
 uv run scripts/metrics/evaluate_baseline.py
-uv run scripts/metrics/evaluate_tl.py
-uv run scripts/metrics/evaluate_qtl.py
+uv run scripts/metrics/evaluate_ctl.py
+uv run scripts/metrics/evaluate_pl_qtl.py
 uv run scripts/metrics/evaluate_qiskit_qtl.py
 
 # Generate the comparative report: mean and std across seeds on test, the run
@@ -178,8 +178,8 @@ uv run scripts/metrics/generate_improvement_report.py
 # configuration, to data/results/plots/<paradigm>/<config_id>/. The isolated ROC
 # curve and confusion matrix show the run selected on validation.
 uv run scripts/viz/visualize_baselines.py
-uv run scripts/viz/visualize_tl.py
-uv run scripts/viz/visualize_qtl.py
+uv run scripts/viz/visualize_ctl.py
+uv run scripts/viz/visualize_pl_qtl.py
 uv run scripts/viz/visualize_qiskit_qtl.py
 
 # Plot loss curves from the saved training histories: per-run and distribution
