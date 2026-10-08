@@ -1,9 +1,9 @@
 """Qiskit parameterized variational circuit ansatz for Dressed Quantum Networks.
 
-Constructs the angle embedding and 3-parameter ansatz (theta, gamma, beta)
-described by Bhowmik et al. (2025) using Qiskit v2.x `QuantumCircuit`,
+Constructs the Hadamard layer, angle embedding, and 3-parameter ansatz (theta,
+gamma, beta) described by Bhowmik et al. (2025) using Qiskit v2.x `QuantumCircuit`,
 `ParameterVector`, and `SparsePauliOp` observables. This is an independent,
-interchangeable counterpart to the PennyLane ansatz in `circuit.py`, sharing
+interchangeable counterpart to the PennyLane ansatz in `pennylane_circuit.py`, sharing
 the same mathematical formulation but executed through Qiskit Primitives.
 """
 
@@ -25,14 +25,19 @@ def build_qiskit_ansatz(
 ]:
     """Constructs the parameterized Qiskit circuit and Pauli-Z observables.
 
-    Builds an initial RZ angle embedding of the classical input features,
-    followed by `n_layers` repetitions of the Bhowmik et al. (2025) ansatz:
+    Builds an initial Hadamard layer followed by an RZ angle embedding of the
+    classical input features, then `n_layers` repetitions of the Bhowmik et
+    al. (2025) ansatz:
     1. Parameterized RZ rotation on each qubit: `RZ(theta[layer, i])`.
     2. Entangling ring of CNOT gates between adjacent qubits:
        `CNOT(i, (i + 1) % n_qubits)`.
     3. Second parameterized RZ rotation on each qubit: `RZ(gamma[layer, i])`.
     4. Entangling controlled-RY gate:
        `CRY(beta[layer, i], control=(i + 1) % n_qubits, target=i)`.
+
+    The Hadamard layer is a deliberate departure from the circuit drawn in the
+    paper. Without it the state stays at `|0...0>` and every expectation value
+    is 1 for all inputs and weights.
 
     Pauli-Z observables are built with `SparsePauliOp` strings reversed
     relative to qubit index, since Qiskit orders Pauli strings from the most
@@ -51,6 +56,9 @@ def build_qiskit_ansatz(
               qubit.
     """
     circuit = QuantumCircuit(n_qubits)
+
+    for i in range(n_qubits):
+        circuit.h(i)
 
     input_params = ParameterVector("x", n_qubits)
     for i in range(n_qubits):

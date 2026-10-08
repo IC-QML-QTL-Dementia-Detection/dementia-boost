@@ -10,7 +10,7 @@ from dementia_boost.models.classical_cnn import (
 from dementia_boost.models.quantum_cnn import (
     DEFAULT_QUANTUM_DEVICE,
     FALLBACK_QUANTUM_DEVICE,
-    QuantumClassifierHead,
+    PennylaneQuantumClassifierHead,
     resolve_quantum_device,
 )
 
@@ -94,15 +94,15 @@ def test_resolve_quantum_device() -> None:
 
 
 def test_quantum_classifier_head_output_shape(batch_size: int) -> None:
-    """Ensures the QuantumClassifierHead processes flattened features and outputs
-    raw logits with the expected shape [Batch, 1].
+    """Ensures the PennylaneQuantumClassifierHead processes flattened features and
+    outputs raw logits with the expected shape [Batch, 1].
     """
     in_features = 2304
     n_qubits = 4
     n_layers = 2
     dummy_features = torch.randn(batch_size, in_features)
 
-    head = QuantumClassifierHead(
+    head = PennylaneQuantumClassifierHead(
         in_features=in_features,
         n_qubits=n_qubits,
         n_layers=n_layers,
@@ -118,11 +118,11 @@ def test_quantum_classifier_head_output_shape(batch_size: int) -> None:
 
 def test_dementia_classifier_quantum_integration(batch_size: int) -> None:
     """Ensures the DementiaClassifier orchestrator operates seamlessly with
-    a QuantumClassifierHead.
+    a PennylaneQuantumClassifierHead.
     """
     dummy_input = torch.randn(batch_size, 1, 128, 128)
     extractor = LeNetFeatureExtractor()
-    head = QuantumClassifierHead(
+    head = PennylaneQuantumClassifierHead(
         in_features=2304,
         n_qubits=4,
         n_layers=2,

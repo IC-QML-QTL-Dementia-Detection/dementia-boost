@@ -1,6 +1,6 @@
 [project]
 name = "dementia-boost"
-version = "1.7.0"
+version = "1.9.0"
 description = "QML for classifying patients with dementia "
 readme = "README.md"
 authors = [{ name = "Kaue Miziara", email = "kauemiziara@gmail.com" }]
@@ -11,7 +11,6 @@ dependencies = [
     "numpy>=2.4.3",
     "pandas>=3.0.1",
     "pennylane>=0.45.1",
-    "pillow>=12.1.1",
     "qiskit>=2.5.2",
     "qiskit-aer>=0.17.2",
     "scikit-learn>=1.8.0",

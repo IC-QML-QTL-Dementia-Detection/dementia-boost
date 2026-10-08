@@ -1,17 +1,21 @@
 """Batch evaluation engine for classical baseline CNN models on NIfTI data.
 
-This script iterates across all saved classical baseline checkpoints (.pt)
-trained on NIfTI MRI axial slices, executes inference on the isolated test
-dataset, computes comprehensive binary classification metrics (Accuracy,
-Precision, Recall, F1-score, AUC-ROC, Confusion Matrix), aggregates statistical
-distributions across runs, and serializes the telemetry payload to JSON.
+This script finds every finished baseline run through its training history,
+executes inference on the validation and test cohorts for each configuration,
+computes comprehensive binary classification metrics (Accuracy, Precision,
+Recall, F1-score, AUC-ROC, log loss, Confusion Matrix), aggregates statistical
+distributions across the seeds of a configuration, and serializes one telemetry
+payload per cohort to JSON. Validation metrics are only for model selection (the
+transfer learning scripts read them to pick a backbone); test metrics are only
+reported.
 """
 
-import os
 import sys
 
 import torch
 
+from dementia_boost.core.identity import Paradigm, RunSpec
+from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.data.data_loader import OasisDataLoader
 from dementia_boost.models.classical_cnn import (
     ClassicalClassifierHead,
@@ -19,8 +23,9 @@ from dementia_boost.models.classical_cnn import (
     LeNetFeatureExtractor,
 )
 from dementia_boost.telemetry.logger import setup_logger
-from dementia_boost.telemetry.metrics import MetricsAnalyzer
-from dementia_boost.training.evaluator import ModelEvaluator
+from dementia_boost.training.checkpoint_evaluation import evaluate_paradigm
+
+DEFAULT_BATCH_SIZE: int = 64
 
 
 def get_device() -> torch.device:
@@ -36,76 +41,41 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
-def main() -> None:
-    """Executes the batch evaluation pipeline for classical NIfTI baseline models."""
-    logger = setup_logger("evaluate_baseline_nifti")
-    device = get_device()
-    models_dir = "./data/results/trained_models/nifti"
-    results_dir = "./data/results/metrics/nifti"
+def build_model(spec: RunSpec) -> DementiaClassifier:
+    """Builds the baseline architecture the checkpoints of a configuration fit.
 
-    os.makedirs(results_dir, exist_ok=True)
+    Args:
+        spec: Spec of one run of the configuration (unused: the baseline
+            architecture has no configurable size).
 
-    if not os.path.exists(models_dir):
-        logger.error(f"Checkpoint directory {models_dir} not found.")
-        sys.exit(1)
-
-    model_files = sorted([f for f in os.listdir(models_dir) if f.endswith(".pt")])
-    if not model_files:
-        logger.error(f"No .pt model checkpoint files found in {models_dir}.")
-        sys.exit(1)
-
-    base_model = DementiaClassifier(
+    Returns:
+        An untrained baseline classifier.
+    """
+    return DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
         classifier_head=ClassicalClassifierHead(use_sigmoid=False),
     )
 
-    batch_size = 64
-    loader_manager = OasisDataLoader(batch_size=batch_size, mode="nifti")
-    test_loader = loader_manager.get_data_loader(is_train=False)
-    evaluator = ModelEvaluator(model=base_model, device=device)
 
-    all_results = []
-    logger.info(f"Found {len(model_files)} models. Beginning batch evaluation...")
+def main() -> None:
+    """Executes the batch evaluation pipeline for classical NIfTI baseline models."""
+    logger = setup_logger("evaluate_baseline_nifti")
+    device = get_device()
 
-    for file_name in model_files:
-        run_id = file_name.replace(".pt", "")
-        file_path = os.path.join(models_dir, file_name)
+    loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE)
+    loaders = {
+        cohort: loader_manager.get_data_loader(cohort) for cohort in ("val", "test")
+    }
 
-        logger.info(f"Evaluating model checkpoint: {run_id}...")
-        evaluator.load_weights(file_path)
-
-        y_true, y_prob = evaluator.predict(test_loader)
-
-        result_dto = MetricsAnalyzer.calculate_metrics(run_id, y_true, y_prob)
-        all_results.append(result_dto)
-
-    logger.info("Aggregating statistical metrics across all runs...")
-    aggregated_stats = MetricsAnalyzer.aggregate_results(all_results)
-
-    output_json = os.path.join(results_dir, "baseline_results.json")
-    MetricsAnalyzer.save_to_json(all_results, aggregated_stats, output_json)
-
-    logger.info(f"Success! Batch evaluation complete. Results saved to {output_json}")
-
-    logger.info(
-        f"Mean Acc: {aggregated_stats['accuracy'].mean:.4f} "
-        f"\\pm {aggregated_stats['accuracy'].std:.4f}"
+    outcome = evaluate_paradigm(
+        ResultsLayout(), Paradigm.BASELINE, build_model, loaders, device, logger
     )
+    if not outcome:
+        logger.error("No finished baseline runs found. Run train_baseline.py first.")
+        sys.exit(1)
+
     logger.info(
-        f"Mean Precision: {aggregated_stats['precision'].mean:.4f} "
-        f"\\pm {aggregated_stats['precision'].std:.4f}"
-    )
-    logger.info(
-        f"Mean Recall: {aggregated_stats['recall'].mean:.4f} "
-        f"\\pm {aggregated_stats['recall'].std:.4f}"
-    )
-    logger.info(
-        f"Mean F1: {aggregated_stats['f1_score'].mean:.4f} "
-        f"\\pm {aggregated_stats['f1_score'].std:.4f}"
-    )
-    logger.info(
-        f"Mean AUC: {aggregated_stats['auc'].mean:.4f} "
-        f"\\pm {aggregated_stats['auc'].std:.4f}"
+        f"Success! Batch evaluation complete for {len(outcome)} configuration(s)."
     )
 
 

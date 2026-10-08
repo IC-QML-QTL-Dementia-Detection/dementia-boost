@@ -1,6 +1,6 @@
 """Dressed Quantum Network (DQN) classification head for hybrid QTL models.
 
-This module provides `QuantumClassifierHead`, which replaces classical dense
+This module provides `PennylaneQuantumClassifierHead`, which replaces classical dense
 layers with a hybrid architecture comprising a classical pre-net linear projection,
 trigonometric angle scaling, a variational quantum circuit, and a classical
 post-net linear layer producing classification logits.
@@ -13,10 +13,10 @@ import torch.nn as nn
 from pennylane.devices import Device
 from torch import Tensor
 
-from .circuit import DEFAULT_N_LAYERS, DEFAULT_N_QUBITS, create_quantum_layer
+from .pennylane_circuit import DEFAULT_N_LAYERS, DEFAULT_N_QUBITS, create_quantum_layer
 
 
-class QuantumClassifierHead(nn.Module):
+class PennylaneQuantumClassifierHead(nn.Module):
     """Dressed Quantum Network (DQN) classification head for binary prediction.
 
     Replaces classical dense layers with a parameterized quantum circuit flanked

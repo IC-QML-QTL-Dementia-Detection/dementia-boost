@@ -11,8 +11,8 @@ import torch.nn as nn
 from qiskit.primitives import BaseEstimatorV2
 
 from dementia_boost.models.quantum_cnn import (
+    PennylaneQuantumClassifierHead,
     QiskitQuantumClassifierHead,
-    QuantumClassifierHead,
 )
 
 from .classical_cnn import (
@@ -54,7 +54,7 @@ def load_baseline_backbone(
     return extractor
 
 
-def build_classical_tl_model(
+def build_ctl_model(
     baseline_weights_path: str,
     device: torch.device,
     use_sigmoid: bool = False,
@@ -95,11 +95,11 @@ def build_classical_tl_model(
     return model.to(device)
 
 
-def build_quantum_tl_model(
+def build_pl_qtl_model(
     baseline_weights_path: str,
     device: torch.device,
-    n_qubits: int = QuantumClassifierHead.DEFAULT_N_QUBITS,
-    n_layers: int = QuantumClassifierHead.DEFAULT_N_LAYERS,
+    n_qubits: int = PennylaneQuantumClassifierHead.DEFAULT_N_QUBITS,
+    n_layers: int = PennylaneQuantumClassifierHead.DEFAULT_N_LAYERS,
     quantum_device: str | None = None,
 ) -> nn.Module:
     """Builds a Quantum Transfer Learning (QTL) hybrid model.
@@ -135,18 +135,18 @@ def build_quantum_tl_model(
     for param in model.feature_extractor.parameters():
         param.requires_grad = False
 
-    model.classifier_head = QuantumClassifierHead(
-        in_features=QuantumClassifierHead.DEFAULT_IN_FEATURES,
+    model.classifier_head = PennylaneQuantumClassifierHead(
+        in_features=PennylaneQuantumClassifierHead.DEFAULT_IN_FEATURES,
         n_qubits=n_qubits,
         n_layers=n_layers,
         quantum_device=quantum_device,
     )
 
-    model.classifier_head.apply(QuantumClassifierHead.apply_glorot_init)
+    model.classifier_head.apply(PennylaneQuantumClassifierHead.apply_glorot_init)
     return model.to(device)
 
 
-def build_qiskit_quantum_tl_model(
+def build_qiskit_qtl_model(
     baseline_weights_path: str,
     device: torch.device,
     n_qubits: int = QiskitQuantumClassifierHead.DEFAULT_N_QUBITS,
@@ -159,7 +159,7 @@ def build_qiskit_quantum_tl_model(
     convolutional backbone parameters, and substitutes its classification head
     with a Qiskit v2.x Dressed Quantum Network (pre-net + VQC + post-net)
     initialized with Glorot Uniform weights. Independent and interchangeable
-    with `build_quantum_tl_model`, sharing the same classical backbone and
+    with `build_pl_qtl_model`, sharing the same classical backbone and
     ansatz formulation while executing on Qiskit Primitives V2 instead of
     PennyLane.
 

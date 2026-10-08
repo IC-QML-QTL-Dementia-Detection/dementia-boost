@@ -9,9 +9,14 @@ This module validates:
   the SPSA perturbations.
 - ``QiskitQuantumClassifierHead`` end-to-end forward/backward pass and
   Glorot init isolation from quantum circuit weights.
+- Input and weight dependence of the circuit output, and agreement of the
+  PennyLane and Qiskit layers on identical parameters.
 
 Regression coverage
 --------------------
+- The circuit degenerating into a constant function (every `<Z_i>` equal to
+  1, zero gradients), as the paper's gate sequence does without a Hadamard
+  layer.
 - Drift in the ansatz's theta/gamma/beta parameter counts breaking dynamic
   qubit/layer configuration.
 - Parameter or qubit ordering mismatches between the layer's flat weight
@@ -26,7 +31,7 @@ import math
 from collections.abc import Iterable
 
 import torch
-from qiskit.circuit import ParameterVector, QuantumCircuit
+from qiskit.circuit import QuantumCircuit
 from qiskit.primitives import (
     PrimitiveJob,
     PrimitiveResult,
@@ -34,13 +39,14 @@ from qiskit.primitives import (
     StatevectorEstimator,
 )
 from qiskit.primitives.containers.estimator_pub import EstimatorPubLike
-from qiskit.quantum_info import SparsePauliOp, Statevector
+from qiskit.quantum_info import Statevector
 from qiskit_aer.primitives import EstimatorV2 as AerEstimator
 
 from dementia_boost.models.quantum_cnn import (
     QiskitExpectationRunner,
     QiskitQuantumClassifierHead,
 )
+from dementia_boost.models.quantum_cnn.pennylane_circuit import create_quantum_layer
 from dementia_boost.models.quantum_cnn.qiskit_circuit import build_qiskit_ansatz
 from dementia_boost.models.quantum_cnn.qiskit_layer import (
     QiskitQuantumLayer,
@@ -51,43 +57,16 @@ _EXPECTATION_TOLERANCE: float = 1e-5
 _PARITY_TOLERANCE: float = 1e-10
 _FINITE_DIFFERENCE_STEP: float = 1e-3
 _MIN_SPSA_COSINE_SIMILARITY: float = 0.9
+_MIN_SPREAD: float = 1e-3
+_MIN_GRADIENT: float = 1e-6
 
 
-def _hadamard_ansatz(
-    n_qubits: int, n_layers: int
-) -> tuple[QuantumCircuit, ParameterVector, list[ParameterVector], list[SparsePauliOp]]:
-    """Builds the ansatz with a Hadamard layer in front, for tests only.
-
-    The paper ansatz keeps the state at `|0...0>`, so its expectation values
-    and gradients are identically constant and cannot exercise the layer. The
-    Hadamard layer leaves the gate sequence, the parameters, and the
-    observables untouched, but makes outputs depend on both inputs and
-    weights.
-
-    Args:
-        n_qubits: Number of qubits in the circuit.
-        n_layers: Number of ansatz layer repetitions.
-
-    Returns:
-        The same tuple as `build_qiskit_ansatz`.
-    """
-    circuit, input_params, weight_vectors, observables = build_qiskit_ansatz(
-        n_qubits=n_qubits, n_layers=n_layers
-    )
-    prepared = QuantumCircuit(n_qubits)
-    prepared.h(range(n_qubits))
-    prepared.compose(circuit, inplace=True)
-
-    return prepared, input_params, weight_vectors, observables
-
-
-def _hadamard_layer(n_qubits: int, n_layers: int, seed: int) -> QiskitQuantumLayer:
-    """Creates a seeded layer around the test-only Hadamard ansatz."""
+def _layer(n_qubits: int, n_layers: int, seed: int) -> QiskitQuantumLayer:
+    """Creates a seeded layer on the reference estimator, for small circuits."""
     return create_qiskit_quantum_layer(
         n_qubits=n_qubits,
         n_layers=n_layers,
         seed=seed,
-        ansatz_builder=_hadamard_ansatz,
         estimator=StatevectorEstimator(),
     )
 
@@ -95,16 +74,17 @@ def _hadamard_layer(n_qubits: int, n_layers: int, seed: int) -> QiskitQuantumLay
 def _exact_expectations(
     layer: QiskitQuantumLayer, inputs: torch.Tensor
 ) -> torch.Tensor:
-    """Evaluates the Hadamard-ansatz layer exactly with `Statevector`, per row.
+    """Evaluates the layer's circuit exactly with `Statevector`, per row.
 
     Args:
-        layer: A layer built from `_hadamard_ansatz`, supplying the flat weights.
+        layer: A layer built from `build_qiskit_ansatz`, supplying the flat
+            weights.
         inputs: Angle tensor of shape `(Batch, n_qubits)`.
 
     Returns:
         Tensor of shape `(Batch, n_qubits)` with the exact `<Z_i>` values.
     """
-    circuit, input_params, weight_vectors, observables = _hadamard_ansatz(
+    circuit, input_params, weight_vectors, observables = build_qiskit_ansatz(
         n_qubits=layer.n_qubits, n_layers=layer.n_layers
     )
     weight_params = [param for vector in weight_vectors for param in vector]
@@ -237,7 +217,7 @@ class TestQiskitQuantumLayerForward:
         exact `Statevector` evaluation, which pins the weight layout, the
         qubit ordering of the observables, and the `[-1, 1]` value range."""
         n_qubits, n_layers = 3, 2
-        layer = _hadamard_layer(n_qubits, n_layers, seed=0)
+        layer = _layer(n_qubits, n_layers, seed=0)
 
         inputs = torch.randn(4, n_qubits)
         outputs = layer(inputs)
@@ -245,6 +225,83 @@ class TestQiskitQuantumLayerForward:
         assert outputs.shape == (4, n_qubits)
         assert torch.allclose(
             outputs, _exact_expectations(layer, inputs), atol=_EXPECTATION_TOLERANCE
+        )
+
+
+class TestQiskitQuantumLayerInputDependence:
+    """Guards against the circuit degenerating into a constant function.
+
+    The paper's gate sequence applied to `|0...0>` keeps the state in the
+    `|0...0>` subspace, so every `<Z_i>` equals 1 for all inputs and weights.
+    """
+
+    def test_every_expectation_value_varies_with_the_inputs(self) -> None:
+        """Asserts that each qubit's `<Z_i>` takes clearly different values
+        across a batch of random inputs at fixed weights."""
+        n_qubits = 4
+        layer = _layer(n_qubits, n_layers=2, seed=0)
+
+        with torch.no_grad():
+            outputs = layer((torch.rand(32, n_qubits) - 0.5) * math.pi)
+
+        assert torch.all(outputs.std(dim=0) > _MIN_SPREAD)
+
+    def test_expectation_values_vary_with_the_weights(self) -> None:
+        """Asserts that two different weight draws give clearly different
+        outputs on the same inputs, so the trainable weights matter."""
+        n_qubits = 4
+        inputs = (torch.rand(8, n_qubits) - 0.5) * math.pi
+
+        def evaluate(seed: int) -> torch.Tensor:
+            torch.manual_seed(seed)
+            layer = _layer(n_qubits, n_layers=2, seed=0)
+            with torch.no_grad():
+                return layer(inputs)
+
+        assert (evaluate(0) - evaluate(1)).abs().max() > _MIN_SPREAD
+
+    def test_spsa_gradients_are_clearly_nonzero(self) -> None:
+        """Asserts the backward pass returns gradients well above float noise
+        for the circuit weights and the inputs, so training can move both."""
+        n_qubits = 3
+        layer = _layer(n_qubits, n_layers=2, seed=0)
+        inputs = ((torch.rand(8, n_qubits) - 0.5) * math.pi).requires_grad_()
+
+        output = layer(inputs)
+        (output * torch.randn_like(output)).sum().backward()
+
+        assert layer.weight.grad is not None
+        assert inputs.grad is not None
+        assert layer.weight.grad.abs().max() > _MIN_GRADIENT
+        assert inputs.grad.abs().max() > _MIN_GRADIENT
+
+
+class TestPennylaneQiskitParity:
+    """Validates that both frameworks evaluate the same circuit."""
+
+    def test_layers_agree_on_identical_inputs_and_weights(self) -> None:
+        """Binds the same angles and weights into the PennyLane layer and the
+        Qiskit layer and asserts equal `<Z_i>`. This pins the qubit ordering
+        of the observables and the mapping from PennyLane's
+        `(layer, kind, qubit)` weights to Qiskit's flat `[theta, gamma, beta]`
+        vector."""
+        n_qubits, n_layers = 3, 2
+        pennylane_layer = create_quantum_layer(
+            n_qubits=n_qubits, n_layers=n_layers, quantum_device="default.qubit"
+        )
+        qiskit_layer = _layer(n_qubits, n_layers, seed=0)
+
+        weights = pennylane_layer.weights.detach().double()
+        flat = torch.cat([weights[:, kind, :].flatten() for kind in range(3)])
+        qiskit_layer.weight.data = flat.to(qiskit_layer.weight.dtype)
+
+        inputs = ((torch.rand(4, n_qubits) - 0.5) * math.pi).double()
+        with torch.no_grad():
+            expected = pennylane_layer(inputs)
+            actual = qiskit_layer(inputs)
+
+        assert torch.allclose(
+            actual.double(), expected.double(), atol=_PARITY_TOLERANCE
         )
 
 
@@ -257,7 +314,7 @@ class TestQiskitQuantumLayerSpsaBackward:
         finite-difference gradient of the same scalar loss, for both the
         circuit weights and the upstream inputs."""
         n_qubits, n_layers, batch = 2, 1, 8
-        layer = _hadamard_layer(n_qubits, n_layers, seed=0)
+        layer = _layer(n_qubits, n_layers, seed=0)
         inputs = torch.randn(batch, n_qubits, requires_grad=True)
         upstream = torch.randn(batch, n_qubits)
 
@@ -286,7 +343,7 @@ class TestQiskitQuantumLayerSpsaBackward:
         inputs = torch.randn(4, n_qubits)
 
         def weight_gradient(seed: int) -> torch.Tensor:
-            layer = _hadamard_layer(n_qubits, n_layers, seed=seed)
+            layer = _layer(n_qubits, n_layers, seed=seed)
             layer.weight.data = torch.linspace(-1.0, 1.0, layer.weight.numel())
             layer(inputs).sum().backward()
             assert layer.weight.grad is not None
@@ -332,7 +389,7 @@ class TestDefaultEstimatorParity:
         expectation values as `StatevectorEstimator` on identical parameters,
         so a qiskit-aer upgrade cannot silently change the forward pass."""
         n_qubits, n_layers, batch = 4, 2, 8
-        circuit, input_params, weight_vectors, observables = _hadamard_ansatz(
+        circuit, input_params, weight_vectors, observables = build_qiskit_ansatz(
             n_qubits=n_qubits, n_layers=n_layers
         )
         parameters = (*input_params, *(p for vec in weight_vectors for p in vec))

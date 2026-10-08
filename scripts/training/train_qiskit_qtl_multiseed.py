@@ -1,12 +1,13 @@
 """Multiseed Qiskit Quantum Transfer Learning (QTL) training with embedding caching.
 
-This script identifies the optimal pre-trained classical CNN baseline from
-telemetry metrics, extracts and caches feature representations once, and
-trains a hybrid Qiskit v2.x Dressed Quantum Network (DQN) classification head
-across multiple random seeds (0 to 100) using BCEWithLogitsLoss on NIfTI axial
-slices. Independent and interchangeable with `train_qtl_multiseed.py`, sharing
-the same classical backbone and ansatz formulation while executing on Qiskit
-Primitives V2 instead of PennyLane.
+This script selects the pre-trained classical CNN baseline with the best
+validation metrics, extracts and caches the train and validation feature
+representations once, and trains a hybrid Qiskit v2.x Dressed Quantum Network
+(DQN) classification head across multiple random seeds (0 to 100) using
+BCEWithLogitsLoss on NIfTI axial slices. The test cohort is never loaded here.
+Independent and interchangeable with `train_qtl_multiseed.py`, sharing the same
+classical backbone and ansatz formulation while executing on Qiskit Primitives V2
+instead of PennyLane.
 
 Gradient strategy: exact parameter-shift scales linearly with the number of
 differentiable parameters (72 circuit weights + 6 angle-embedded inputs at the
@@ -18,14 +19,15 @@ approximation instead of analytic parameter-shift). The perturbation signs are
 drawn from a generator seeded with the run seed. This trade-off is necessary
 to keep the full 101-seed, 100-epoch sweep computationally tractable.
 
-Each run also persists its per-epoch training history as JSON; loss plots are
-rendered from those files by `scripts/viz/visualize_loss.py`. Circuits run on
-Aer's noiseless state-vector estimator, so a forward pass over the test set is
-cheap and validation is evaluated every epoch (`DEFAULT_EVAL_EVERY`).
+Each run is described by a `RunSpec` (qubits, layers, ansatz, gradient method,
+SPSA step, and the selected baseline as `backbone_id`); checkpoints, per-epoch
+histories, and configuration are written where `ResultsLayout` puts them, and a
+run whose checkpoint exists is skipped. Loss plots are rendered from the
+histories by `scripts/viz/visualize_loss.py`. Circuits run on Aer's noiseless
+state-vector estimator, so a forward pass over the validation set is cheap and
+validation is evaluated every epoch (`DEFAULT_EVAL_EVERY`).
 """
 
-import json
-import os
 import sys
 
 import torch
@@ -33,9 +35,12 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 
+from dementia_boost.core.identity import Paradigm, RunSpec, label, run_id
+from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.core.reproducibility import set_seed
 from dementia_boost.data.data_loader import OasisDataLoader
 from dementia_boost.data.embedding_cache import FeatureCacheManager
+from dementia_boost.data.split_manifest import read_split_id
 from dementia_boost.models.builder import (
     assemble_dementia_classifier,
     load_baseline_backbone,
@@ -46,13 +51,9 @@ from dementia_boost.models.quantum_cnn import (
 )
 from dementia_boost.models.quantum_cnn.qiskit_layer import DEFAULT_SPSA_EPSILON
 from dementia_boost.telemetry.logger import setup_logger
+from dementia_boost.telemetry.selection import select_backbone
 from dementia_boost.training.trainer import BaselineTrainer
 
-DEFAULT_BASELINE_METRICS_PATH: str = (
-    "./data/results/metrics/nifti/baseline_results.json"
-)
-DEFAULT_BASELINE_DIR: str = "./data/results/trained_models/nifti"
-DEFAULT_QTL_SAVE_DIR: str = "./data/results/trained_qiskit_qtl_models/nifti"
 DEFAULT_EXPERIMENT_SEEDS: range = range(0, 101)
 DEFAULT_EPOCHS_PER_RUN: int = 100
 DEFAULT_BATCH_SIZE: int = 64
@@ -60,12 +61,12 @@ DEFAULT_LEARNING_RATE: float = 1e-4
 DEFAULT_LR_STEP_SIZE: int = 10
 DEFAULT_LR_GAMMA: float = 0.75
 DEFAULT_FEATURE_DIM: int = 2304
+DEFAULT_ANSATZ: str = "paper"
 DEFAULT_N_QUBITS: int = 6
 DEFAULT_N_LAYERS: int = 4
+DEFAULT_GRADIENT_METHOD: str = "spsa_loss_level"
 DEFAULT_TORCH_DEVICE: str = "cpu"
-DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/qiskit_qtl"
 DEFAULT_EVAL_EVERY: int = 1
-PARADIGM: str = "qiskit_qtl"
 
 
 def get_device(device_name: str | None = None) -> torch.device:
@@ -96,73 +97,58 @@ def get_device(device_name: str | None = None) -> torch.device:
     return torch.device(target)
 
 
-def select_best_baseline(metrics_json_path: str = DEFAULT_BASELINE_METRICS_PATH) -> str:
-    """Identifies the optimal baseline model run from telemetry results JSON.
-
-    Selects the run maximizing Accuracy, with F1-score and AUC as tie-breakers.
+def build_spec(seed: int, backbone: RunSpec) -> RunSpec:
+    """Builds the specification of one Qiskit QTL run on a selected baseline.
 
     Args:
-        metrics_json_path: Filepath to the serialized baseline results JSON.
-            Defaults to DEFAULT_BASELINE_METRICS_PATH.
+        seed: Random seed of the run.
+        backbone: Spec of the baseline run the head is built on.
 
     Returns:
-        The run_id string of the top-performing baseline model.
-
-    Raises:
-        FileNotFoundError: If the metrics JSON file does not exist.
-        ValueError: If no individual runs are present in the JSON payload.
+        The Qiskit QTL spec, trained on the same split as its backbone.
     """
-    if not os.path.exists(metrics_json_path):
-        raise FileNotFoundError(
-            f"Baseline results JSON not found at: {metrics_json_path}"
-        )
-
-    with open(metrics_json_path) as file:
-        data = json.load(file)
-
-    individual_runs: list[dict[str, float | str]] = data.get("individual_runs", [])
-    if not individual_runs:
-        raise ValueError("No individual runs found in baseline telemetry JSON.")
-
-    best_run = max(
-        individual_runs,
-        key=lambda item: (
-            float(item.get("accuracy", 0.0)),
-            float(item.get("f1_score", 0.0)),
-            float(item.get("auc", 0.0)),
-        ),
+    return RunSpec(
+        paradigm=Paradigm.QISKIT_QTL,
+        ansatz=DEFAULT_ANSATZ,
+        n_qubits=DEFAULT_N_QUBITS,
+        n_layers=DEFAULT_N_LAYERS,
+        lr=DEFAULT_LEARNING_RATE,
+        lr_step_size=DEFAULT_LR_STEP_SIZE,
+        lr_gamma=DEFAULT_LR_GAMMA,
+        epochs=DEFAULT_EPOCHS_PER_RUN,
+        batch_size=DEFAULT_BATCH_SIZE,
+        gradient=DEFAULT_GRADIENT_METHOD,
+        spsa_epsilon=DEFAULT_SPSA_EPSILON,
+        split_id=backbone.split_id,
+        seed=seed,
+        backbone_id=run_id(backbone),
     )
-
-    return str(best_run["run_id"])
 
 
 def main() -> None:
     """Executes Qiskit QTL sweep across seeds on cached embeddings."""
     logger = setup_logger("qiskit_qtl_multiseed_nifti")
     device = get_device()
-
-    os.makedirs(DEFAULT_QTL_SAVE_DIR, exist_ok=True)
+    layout = ResultsLayout()
 
     try:
-        best_run_id = select_best_baseline(DEFAULT_BASELINE_METRICS_PATH)
-    except Exception as error:
-        logger.error(f"Failed to select optimal baseline model: {error}")
+        backbone = select_backbone(layout)
+    except (FileNotFoundError, ValueError) as error:
+        logger.error(f"Failed to select the baseline backbone: {error}")
         sys.exit(1)
 
-    checkpoint_name = (
-        best_run_id if best_run_id.endswith(".pt") else f"{best_run_id}.pt"
-    )
-    baseline_weights_path = os.path.join(DEFAULT_BASELINE_DIR, checkpoint_name)
-
-    if not os.path.exists(baseline_weights_path):
+    split_id = read_split_id(OasisDataLoader.RESULTS_PATH)
+    if backbone.split_id != split_id:
         logger.error(
-            f"Selected optimal baseline weights missing at: {baseline_weights_path}"
+            f"The selected baseline was trained on split {backbone.split_id}, but "
+            f"the data on disk is split {split_id}. Retrain the baselines."
         )
         sys.exit(1)
 
+    baseline_weights_path = layout.checkpoint_path(backbone)
     logger.info(f"Target PyTorch Device: {device}")
     logger.info(
-        f"Selected Optimal Baseline Backbone: '{best_run_id}' ({baseline_weights_path})"
+        f"Selected Baseline Backbone: {label(backbone)} ({baseline_weights_path})"
     )
     logger.info(
         f"Beginning Qiskit QTL sweep ({DEFAULT_N_QUBITS} qubits, {DEFAULT_N_LAYERS} "
@@ -176,9 +162,9 @@ def main() -> None:
 
     feature_extractor = load_baseline_backbone(baseline_weights_path, device)
 
-    raw_loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE, mode="nifti")
-    raw_train_loader = raw_loader_manager.get_data_loader(is_train=True)
-    raw_test_loader = raw_loader_manager.get_data_loader(is_train=False)
+    raw_loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE)
+    raw_train_loader = raw_loader_manager.get_data_loader("train")
+    raw_val_loader = raw_loader_manager.get_data_loader("val")
 
     logger.info("Extracting and caching training embeddings from baseline backbone...")
     train_features, train_labels = FeatureCacheManager.extract_features(
@@ -186,10 +172,12 @@ def main() -> None:
         data_loader=raw_train_loader,
         device=device,
     )
-    logger.info("Extracting and caching test embeddings from baseline backbone...")
-    test_features, test_labels = FeatureCacheManager.extract_features(
+    logger.info(
+        "Extracting and caching validation embeddings from baseline backbone..."
+    )
+    val_features, val_labels = FeatureCacheManager.extract_features(
         feature_extractor=feature_extractor,
-        data_loader=raw_test_loader,
+        data_loader=raw_val_loader,
         device=device,
     )
 
@@ -199,9 +187,9 @@ def main() -> None:
         batch_size=DEFAULT_BATCH_SIZE,
         shuffle=True,
     )
-    test_loader = FeatureCacheManager.create_cached_loader(
-        features=test_features,
-        labels=test_labels,
+    val_loader = FeatureCacheManager.create_cached_loader(
+        features=val_features,
+        labels=val_labels,
         batch_size=DEFAULT_BATCH_SIZE,
         shuffle=False,
     )
@@ -212,20 +200,16 @@ def main() -> None:
     )
 
     for seed in DEFAULT_EXPERIMENT_SEEDS:
-        run_id = f"qiskit_qtl_seed_{seed}"
-        checkpoint_path = os.path.join(DEFAULT_QTL_SAVE_DIR, f"baseline_{run_id}.pt")
+        spec = build_spec(seed, backbone)
 
-        if os.path.exists(checkpoint_path):
+        if layout.is_done(spec):
             logger.info(
-                f"Checkpoint already exists for {run_id} at {checkpoint_path}. "
-                "Skipping execution."
+                f"Checkpoint already exists for {label(spec)} at "
+                f"{layout.checkpoint_path(spec)}. Skipping execution."
             )
             continue
 
-        logger.info(
-            f"=== Starting Qiskit QTL Experiment: {run_id} "
-            f"(Backbone: {best_run_id}) ==="
-        )
+        logger.info(f"=== Starting Qiskit QTL Experiment: {label(spec)} ===")
 
         set_seed(seed)
 
@@ -245,40 +229,31 @@ def main() -> None:
             classifier_head=head,
         )
 
-        optimizer = optim.Adam(head.parameters(), lr=DEFAULT_LEARNING_RATE)
+        optimizer = optim.Adam(head.parameters(), lr=spec.lr)
         criterion = nn.BCEWithLogitsLoss()
-        scheduler = StepLR(
-            optimizer,
-            step_size=DEFAULT_LR_STEP_SIZE,
-            gamma=DEFAULT_LR_GAMMA,
-        )
+        scheduler = StepLR(optimizer, step_size=spec.lr_step_size, gamma=spec.lr_gamma)
 
-        history_path = os.path.join(DEFAULT_HISTORY_DIR, f"{run_id}.json")
         trainer = BaselineTrainer(
             model=head,
             train_loader=train_loader,
-            test_loader=test_loader,
+            val_loader=val_loader,
             criterion=criterion,
             optimizer=optimizer,
             scheduler=scheduler,
             device=device,
             logger=logger,
-            save_dir=DEFAULT_QTL_SAVE_DIR,
+            spec=spec,
+            layout=layout,
             save_model=full_model,
-            history_path=history_path,
             eval_every=DEFAULT_EVAL_EVERY,
-            paradigm=PARADIGM,
-            config={
-                "n_qubits": DEFAULT_N_QUBITS,
-                "n_layers": DEFAULT_N_LAYERS,
-                "gradient_method": "spsa_loss_level",
-                "spsa_epsilon": DEFAULT_SPSA_EPSILON,
+            extras={
+                "torch_device": str(device),
                 "estimator": type(estimator).__name__,
             },
         )
 
-        trainer.train(epochs=DEFAULT_EPOCHS_PER_RUN, run_id=run_id)
-        logger.info(f"=== Completed Qiskit QTL Experiment: {run_id} ===\n")
+        trainer.train()
+        logger.info(f"=== Completed Qiskit QTL Experiment: {label(spec)} ===\n")
 
     logger.info("Qiskit Quantum Transfer Learning multi-seed sweep complete.")
 
