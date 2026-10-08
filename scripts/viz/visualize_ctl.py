@@ -1,7 +1,7 @@
 """Visualization script for Classical Transfer Learning metrics on NIfTI data.
 
 This script reads the per-configuration evaluation results written by
-`scripts/metrics/evaluate_tl.py` and, for every CTL configuration, produces
+`scripts/metrics/evaluate_ctl.py` and, for every CTL configuration, produces
 publication-quality charts: metric boxplots and comparative ROC curves over all
 seeds, and the isolated ROC curve and confusion matrix of the run selected on the
 validation cohort (never on test).
@@ -17,7 +17,7 @@ from dementia_boost.viz.run_plots import plot_paradigm
 
 def main() -> None:
     """Generates all visualization artifacts for CTL NIfTI models."""
-    logger = setup_logger("visualize_tl_nifti")
+    logger = setup_logger("visualize_ctl_nifti")
 
     try:
         plotted = plot_paradigm(ResultsLayout(), Paradigm.CTL, logger)
@@ -26,7 +26,7 @@ def main() -> None:
         sys.exit(1)
 
     if not plotted:
-        logger.error("No CTL results found. Run evaluate_tl.py first.")
+        logger.error("No CTL results found. Run evaluate_ctl.py first.")
         sys.exit(1)
     logger.info(f"Success! CTL plots generated for {len(plotted)} configuration(s).")
 

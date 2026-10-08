@@ -21,7 +21,7 @@ from dementia_boost.models.classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
-from dementia_boost.models.quantum_cnn import QuantumClassifierHead
+from dementia_boost.models.quantum_cnn import PennylaneQuantumClassifierHead
 
 TEST_NUM_SAMPLES: int = 16
 TEST_FEATURE_DIM: int = 2304
@@ -162,7 +162,7 @@ def test_heads_forward_with_cached_features(
     classical_output = classical_head(batch_features)
     assert classical_output.shape == (TEST_BATCH_SIZE, 1)
 
-    quantum_head = QuantumClassifierHead(
+    quantum_head = PennylaneQuantumClassifierHead(
         in_features=TEST_FEATURE_DIM,
         n_qubits=TEST_N_QUBITS,
         n_layers=TEST_N_LAYERS,

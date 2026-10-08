@@ -6,7 +6,7 @@ This module validates:
 - ``DementiaClassifier`` backbone freezing contracts under transfer learning.
 - The PennyLane variational ansatz's angle scaling bounds, Pauli-Z expectation
   bounds, and autograd differentiability.
-- ``QuantumClassifierHead`` Glorot init isolation from quantum circuit weights.
+- ``PennylaneQuantumClassifierHead`` Glorot init isolation from quantum circuit weights.
 
 Regression coverage
 -------------------
@@ -30,8 +30,8 @@ from dementia_boost.models.classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
-from dementia_boost.models.quantum_cnn import QuantumClassifierHead
-from dementia_boost.models.quantum_cnn.circuit import (
+from dementia_boost.models.quantum_cnn import PennylaneQuantumClassifierHead
+from dementia_boost.models.quantum_cnn.pennylane_circuit import (
     _build_custom_ansatz,
     create_quantum_layer,
     resolve_quantum_device,
@@ -184,13 +184,13 @@ class TestDementiaClassifierFreezingContract:
             assert param.grad is not None
 
 
-class TestQuantumClassifierHeadAngleScaling:
+class TestPennylaneQuantumClassifierHeadAngleScaling:
     """Validates the pre-net and angle scaling bound the quantum inputs."""
 
     def test_extreme_inputs_stay_within_rotation_bounds(self) -> None:
         """Passes extreme-magnitude inputs through the pre-net and angle
         scaling, asserting outputs remain strictly in [-pi/2, pi/2]."""
-        head = QuantumClassifierHead(
+        head = PennylaneQuantumClassifierHead(
             in_features=16,
             n_qubits=3,
             n_layers=1,
@@ -300,14 +300,14 @@ class TestQuantumLayerInputDependence:
         assert (evaluate(0) - evaluate(1)).abs().max() > _MIN_SPREAD
 
 
-class TestQuantumClassifierHeadGlorotInit:
+class TestPennylaneQuantumClassifierHeadGlorotInit:
     """Validates that Glorot init isolates classical layers from the QNode."""
 
     def test_classical_layers_reinit_while_quantum_weights_preserved(self) -> None:
         """Asserts that pre-net and post-net weights change under Glorot
         init while the quantum circuit weights remain untouched and bounded
         in [-pi, pi]."""
-        head = QuantumClassifierHead(
+        head = PennylaneQuantumClassifierHead(
             in_features=16,
             n_qubits=3,
             n_layers=1,
@@ -318,7 +318,7 @@ class TestQuantumClassifierHeadGlorotInit:
         post_net_weight_before = head.post_net.weight.clone()
         qnn_weights_before = head.qnn.weights.clone()
 
-        head.apply(QuantumClassifierHead.apply_glorot_init)
+        head.apply(PennylaneQuantumClassifierHead.apply_glorot_init)
 
         assert not torch.equal(head.pre_net.weight, pre_net_weight_before)
         assert not torch.equal(head.post_net.weight, post_net_weight_before)

@@ -46,7 +46,7 @@ from dementia_boost.models.quantum_cnn import (
     QiskitExpectationRunner,
     QiskitQuantumClassifierHead,
 )
-from dementia_boost.models.quantum_cnn.circuit import create_quantum_layer
+from dementia_boost.models.quantum_cnn.pennylane_circuit import create_quantum_layer
 from dementia_boost.models.quantum_cnn.qiskit_circuit import build_qiskit_ansatz
 from dementia_boost.models.quantum_cnn.qiskit_layer import (
     QiskitQuantumLayer,

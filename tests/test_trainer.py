@@ -30,7 +30,7 @@ from dementia_boost.models.classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
-from dementia_boost.models.quantum_cnn import QuantumClassifierHead
+from dementia_boost.models.quantum_cnn import PennylaneQuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.metrics import MetricsAnalyzer, TrainingHistory
 from dementia_boost.training.evaluator import ModelEvaluator
@@ -161,12 +161,12 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
         param.requires_grad = False
     raw_loader, train_loader, val_loader = _cached_loaders(extractor, device)
 
-    qtl_head = QuantumClassifierHead(
+    qtl_head = PennylaneQuantumClassifierHead(
         in_features=FEATURE_DIM,
         n_qubits=TEST_QTL_QUBITS,
         n_layers=TEST_QTL_LAYERS,
     ).to(device)
-    qtl_head.apply(QuantumClassifierHead.apply_glorot_init)
+    qtl_head.apply(PennylaneQuantumClassifierHead.apply_glorot_init)
     full_model = assemble_dementia_classifier(
         feature_extractor=extractor, classifier_head=qtl_head
     )
@@ -197,7 +197,7 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
 
     evaluator_model = DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
-        classifier_head=QuantumClassifierHead(
+        classifier_head=PennylaneQuantumClassifierHead(
             in_features=FEATURE_DIM,
             n_qubits=TEST_QTL_QUBITS,
             n_layers=TEST_QTL_LAYERS,

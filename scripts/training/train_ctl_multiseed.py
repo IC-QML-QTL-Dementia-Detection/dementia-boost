@@ -1,13 +1,12 @@
-"""Multiseed Quantum Transfer Learning (QTL) training with embedding caching.
+"""Multiseed Classical Transfer Learning (CTL) training with embedding caching.
 
-This script selects the pre-trained classical CNN baseline with the best
-validation metrics, extracts and caches the train and validation feature
-representations once, and trains a hybrid Dressed Quantum Network (DQN)
-classification head across multiple random seeds (0 to 100) using
-BCEWithLogitsLoss on NIfTI axial slices. The test cohort is never loaded here.
-Each run is described by a `RunSpec` (qubits, layers, ansatz, gradient method,
-and the selected baseline as `backbone_id`); checkpoints, per-epoch histories,
-and configuration are written where `ResultsLayout` puts them, and a run whose
+This script reads the baseline validation results, selects the baseline run with
+the best validation metrics, extracts and caches the train and validation feature
+representations once, and trains newly initialized classical dense heads across
+multiple random seeds (0 to 100) using BCEWithLogitsLoss. The test cohort is
+never loaded here. Each run is described by a `RunSpec` that records the
+selected baseline as its `backbone_id`; checkpoints, per-epoch histories, and
+configuration are written where `ResultsLayout` puts them, and a run whose
 checkpoint exists is skipped. Loss plots are rendered from the histories by
 `scripts/viz/visualize_loss.py`.
 """
@@ -29,7 +28,7 @@ from dementia_boost.models.builder import (
     assemble_dementia_classifier,
     load_baseline_backbone,
 )
-from dementia_boost.models.quantum_cnn import QuantumClassifierHead
+from dementia_boost.models.classical_cnn import ClassicalClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.selection import select_backbone
 from dementia_boost.training.trainer import BaselineTrainer
@@ -41,64 +40,39 @@ DEFAULT_LEARNING_RATE: float = 1e-4
 DEFAULT_LR_STEP_SIZE: int = 10
 DEFAULT_LR_GAMMA: float = 0.75
 DEFAULT_FEATURE_DIM: int = 2304
-DEFAULT_ANSATZ: str = "paper"
-DEFAULT_N_QUBITS: int = 6
-DEFAULT_N_LAYERS: int = 4
-DEFAULT_TORCH_DEVICE: str = "cpu"
-DEFAULT_QUANTUM_DEVICE: str = "lightning.qubit"
-DEFAULT_GRADIENT_METHOD: str = "adjoint"
 DEFAULT_EVAL_EVERY: int = 1
 
 
-def get_device(device_name: str | None = None) -> torch.device:
-    """Resolves the target PyTorch execution device with optional manual override.
-
-    When an explicit device string is provided, returns that device. If no
-    override is given, defaults to `DEFAULT_TORCH_DEVICE` to avoid unnecessary GPU
-    transfer latency for low-qubit quantum transfer learning workflows, while
-    supporting 'auto' for automatic accelerator detection.
-
-    Args:
-        device_name: Optional device string ('cpu', 'cuda', 'mps', 'auto').
-            If None, uses `DEFAULT_TORCH_DEVICE`. If 'auto', detects available
-            hardware accelerators (CUDA, MPS) with fallback to CPU.
+def get_device() -> torch.device:
+    """Selects the best available hardware accelerator device.
 
     Returns:
-        A torch.device instance.
+        A torch.device corresponding to CUDA, MPS, or CPU.
     """
-    target = device_name if device_name is not None else DEFAULT_TORCH_DEVICE
-
-    if target == "auto":
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        if torch.backends.mps.is_available():
-            return torch.device("mps")
-        return torch.device("cpu")
-
-    return torch.device(target)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 def build_spec(seed: int, backbone: RunSpec) -> RunSpec:
-    """Builds the specification of one PennyLane QTL run on a selected baseline.
+    """Builds the specification of one CTL run on a selected baseline.
 
     Args:
         seed: Random seed of the run.
         backbone: Spec of the baseline run the head is built on.
 
     Returns:
-        The QTL spec, trained on the same split as its backbone.
+        The CTL spec, trained on the same split as its backbone.
     """
     return RunSpec(
-        paradigm=Paradigm.PL_QTL,
-        ansatz=DEFAULT_ANSATZ,
-        n_qubits=DEFAULT_N_QUBITS,
-        n_layers=DEFAULT_N_LAYERS,
+        paradigm=Paradigm.CTL,
         lr=DEFAULT_LEARNING_RATE,
         lr_step_size=DEFAULT_LR_STEP_SIZE,
         lr_gamma=DEFAULT_LR_GAMMA,
         epochs=DEFAULT_EPOCHS_PER_RUN,
         batch_size=DEFAULT_BATCH_SIZE,
-        gradient=DEFAULT_GRADIENT_METHOD,
         split_id=backbone.split_id,
         seed=seed,
         backbone_id=run_id(backbone),
@@ -106,8 +80,8 @@ def build_spec(seed: int, backbone: RunSpec) -> RunSpec:
 
 
 def main() -> None:
-    """Executes Quantum Transfer Learning sweep across seeds on cached embeddings."""
-    logger = setup_logger("qtl_multiseed_nifti")
+    """Executes Classical Transfer Learning on cached baseline embeddings."""
+    logger = setup_logger("classical_ctl_multiseed_nifti")
     device = get_device()
     layout = ResultsLayout()
 
@@ -126,8 +100,7 @@ def main() -> None:
         sys.exit(1)
 
     baseline_weights_path = layout.checkpoint_path(backbone)
-    logger.info(f"Target PyTorch Device: {device}")
-    logger.info(f"Target Quantum Device: {DEFAULT_QUANTUM_DEVICE}")
+    logger.info(f"Target Device: {device}")
     logger.info(
         f"Selected Baseline Backbone: {label(backbone)} ({baseline_weights_path})"
     )
@@ -167,8 +140,8 @@ def main() -> None:
     )
 
     logger.info(
-        f"Beginning fast in-memory QTL sweep ({DEFAULT_N_QUBITS} qubits, "
-        f"{DEFAULT_N_LAYERS} layers) across {len(DEFAULT_EXPERIMENT_SEEDS)} seeds..."
+        "Beginning fast in-memory CTL sweep across "
+        f"{len(DEFAULT_EXPERIMENT_SEEDS)} seeds..."
     )
 
     for seed in DEFAULT_EXPERIMENT_SEEDS:
@@ -181,18 +154,15 @@ def main() -> None:
             )
             continue
 
-        logger.info(f"=== Starting QTL Experiment: {label(spec)} ===")
+        logger.info(f"=== Starting CTL Experiment: {label(spec)} ===")
 
         set_seed(seed)
 
-        head = QuantumClassifierHead(
+        head = ClassicalClassifierHead(
             in_features=DEFAULT_FEATURE_DIM,
-            n_qubits=DEFAULT_N_QUBITS,
-            n_layers=DEFAULT_N_LAYERS,
-            quantum_device=DEFAULT_QUANTUM_DEVICE,
-            diff_method=DEFAULT_GRADIENT_METHOD,
+            use_sigmoid=False,
         ).to(device)
-        head.apply(QuantumClassifierHead.apply_glorot_init)
+        head.apply(ClassicalClassifierHead.apply_glorot_init)
 
         full_model = assemble_dementia_classifier(
             feature_extractor=feature_extractor,
@@ -216,16 +186,13 @@ def main() -> None:
             layout=layout,
             save_model=full_model,
             eval_every=DEFAULT_EVAL_EVERY,
-            extras={
-                "torch_device": str(device),
-                "quantum_device": DEFAULT_QUANTUM_DEVICE,
-            },
+            extras={"torch_device": str(device)},
         )
 
         trainer.train()
-        logger.info(f"=== Completed QTL Experiment: {label(spec)} ===\n")
+        logger.info(f"=== Completed CTL Experiment: {label(spec)} ===\n")
 
-    logger.info("Quantum Transfer Learning multi-seed sweep complete.")
+    logger.info("Classical Transfer Learning multi-seed sweep complete.")
 
 
 if __name__ == "__main__":

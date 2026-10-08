@@ -57,7 +57,7 @@ def build_model(spec: RunSpec) -> DementiaClassifier:
 
 def main() -> None:
     """Executes the batch evaluation pipeline for CTL NIfTI models."""
-    logger = setup_logger("evaluate_tl_nifti")
+    logger = setup_logger("evaluate_ctl_nifti")
     device = get_device()
 
     loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE)
@@ -69,7 +69,7 @@ def main() -> None:
         ResultsLayout(), Paradigm.CTL, build_model, loaders, device, logger
     )
     if not outcome:
-        logger.error("No finished CTL runs found. Run train_tl_multiseed.py first.")
+        logger.error("No finished CTL runs found. Run train_ctl_multiseed.py first.")
         sys.exit(1)
 
     logger.info(

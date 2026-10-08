@@ -1,7 +1,7 @@
-"""Visualization script for Quantum Transfer Learning metrics on NIfTI data.
+"""Visualization script for PennyLane QTL (PL QTL) metrics on NIfTI data.
 
 This script reads the per-configuration evaluation results written by
-`scripts/metrics/evaluate_qtl.py` and, for every PennyLane QTL configuration,
+`scripts/metrics/evaluate_pl_qtl.py` and, for every PennyLane QTL configuration,
 produces publication-quality charts: metric boxplots and comparative ROC curves
 over all seeds, and the isolated ROC curve and confusion matrix of the run
 selected on the validation cohort (never on test).
@@ -17,7 +17,7 @@ from dementia_boost.viz.run_plots import plot_paradigm
 
 def main() -> None:
     """Generates all visualization artifacts for QTL NIfTI models."""
-    logger = setup_logger("visualize_qtl_nifti")
+    logger = setup_logger("visualize_pl_qtl_nifti")
 
     try:
         plotted = plot_paradigm(ResultsLayout(), Paradigm.PL_QTL, logger)
@@ -26,7 +26,7 @@ def main() -> None:
         sys.exit(1)
 
     if not plotted:
-        logger.error("No QTL results found. Run evaluate_qtl.py first.")
+        logger.error("No PL QTL results found. Run evaluate_pl_qtl.py first.")
         sys.exit(1)
     logger.info(f"Success! QTL plots generated for {len(plotted)} configuration(s).")
 

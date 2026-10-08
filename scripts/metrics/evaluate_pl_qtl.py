@@ -1,4 +1,4 @@
-"""Batch evaluation engine for Quantum Transfer Learning (QTL) models on NIfTI data.
+"""Batch evaluation engine for PennyLane QTL (PL QTL) models on NIfTI data.
 
 This script finds every finished hybrid Dressed Quantum Network (DQN) run through
 its training history, performs batched inference on the validation and test
@@ -20,7 +20,7 @@ from dementia_boost.models.classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
-from dementia_boost.models.quantum_cnn import QuantumClassifierHead
+from dementia_boost.models.quantum_cnn import PennylaneQuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.training.checkpoint_evaluation import evaluate_paradigm
 
@@ -72,7 +72,7 @@ def build_model(spec: RunSpec) -> DementiaClassifier:
         raise ValueError("A QTL spec must define n_qubits and n_layers.")
     return DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
-        classifier_head=QuantumClassifierHead(
+        classifier_head=PennylaneQuantumClassifierHead(
             in_features=DEFAULT_FEATURE_DIM,
             n_qubits=spec.n_qubits,
             n_layers=spec.n_layers,
@@ -83,7 +83,7 @@ def build_model(spec: RunSpec) -> DementiaClassifier:
 
 def main() -> None:
     """Executes the batch evaluation pipeline for hybrid QTL NIfTI models."""
-    logger = setup_logger("evaluate_qtl_nifti")
+    logger = setup_logger("evaluate_pl_qtl_nifti")
     device = get_device()
     logger.info(f"Target PyTorch Device: {device}")
     logger.info(f"Target Quantum Device: {DEFAULT_QUANTUM_DEVICE}")
@@ -97,11 +97,13 @@ def main() -> None:
         ResultsLayout(), Paradigm.PL_QTL, build_model, loaders, device, logger
     )
     if not outcome:
-        logger.error("No finished QTL runs found. Run train_qtl_multiseed.py first.")
+        logger.error(
+            "No finished PL QTL runs found. Run train_pl_qtl_multiseed.py first."
+        )
         sys.exit(1)
 
     logger.info(
-        f"Success! QTL evaluation complete for {len(outcome)} configuration(s)."
+        f"Success! PL QTL evaluation complete for {len(outcome)} configuration(s)."
     )
 
 
