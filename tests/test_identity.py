@@ -62,7 +62,7 @@ def _qtl(**overrides) -> RunSpec:
     """A valid PennyLane quantum transfer learning spec (6 qubits, 4 layers)."""
     return _baseline(
         **{
-            "paradigm": Paradigm.QTL,
+            "paradigm": Paradigm.PL_QTL,
             "ansatz": "paper",
             "n_qubits": 6,
             "n_layers": 4,
@@ -91,11 +91,16 @@ class TestParadigm:
 
     def test_members_and_values(self) -> None:
         """The four paradigms exist under their current names."""
-        assert {p.value for p in Paradigm} == {"baseline", "ctl", "qtl", "qiskit_qtl"}
+        assert {p.value for p in Paradigm} == {
+            "baseline",
+            "ctl",
+            "pl_qtl",
+            "qiskit_qtl",
+        }
 
     def test_is_a_string(self) -> None:
         """A paradigm compares equal to its name, so it can sit in a path or JSON."""
-        assert Paradigm.QTL == "qtl"
+        assert Paradigm.PL_QTL == "pl_qtl"
         assert Paradigm("ctl") is Paradigm.CTL
 
 
@@ -128,8 +133,8 @@ class TestIdentity:
         """Fixed spec, fixed IDs: guards the canonical serialisation. The values
         were computed independently of the implementation."""
         spec = _qtl()
-        assert config_id(spec) == "3976415a4171"
-        assert run_id(spec) == "62753438444d"
+        assert config_id(spec) == "9e93de0f8105"
+        assert run_id(spec) == "dc65824ec4d4"
 
     def test_same_spec_same_ids(self) -> None:
         """Two equal specs give equal IDs."""
@@ -276,11 +281,13 @@ class TestLabel:
 
     def test_qtl_label(self) -> None:
         """The label names the paradigm, ansatz, size, learning rate, and seed."""
-        assert label(_qtl()) == "qtl | paper | 6q x 4L | lr 0.0001 | seed 3"
+        assert label(_qtl()) == "pl_qtl | paper | 6q x 4L | lr 0.0001 | seed 3"
 
     def test_label_without_seed_for_config_legends(self) -> None:
         """A config-level label leaves the seed out."""
-        assert label(_qtl(), include_seed=False) == "qtl | paper | 6q x 4L | lr 0.0001"
+        assert (
+            label(_qtl(), include_seed=False) == "pl_qtl | paper | 6q x 4L | lr 0.0001"
+        )
 
     def test_quantum_lr_appears_when_set(self) -> None:
         """A separate quantum learning rate is shown."""

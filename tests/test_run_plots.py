@@ -52,15 +52,15 @@ class TestPlotParadigm:
     ) -> None:
         """The highlighted run is the best on validation, not the best on test."""
         layout = ResultsLayout(str(tmp_path))
-        spec_a, spec_b = build_spec("qtl", seed=1), build_spec("qtl", seed=2)
+        spec_a, spec_b = build_spec("pl_qtl", seed=1), build_spec("pl_qtl", seed=2)
         _write_results(layout, spec_a, spec_b)
 
-        plot_paradigm(layout, Paradigm.QTL)
+        plot_paradigm(layout, Paradigm.PL_QTL)
 
-        plots = Path(layout.plots_dir("qtl", config_id(spec_a)))
+        plots = Path(layout.plots_dir("pl_qtl", config_id(spec_a)))
         names = {path.name for path in plots.glob("*.png")}
-        assert f"qtl_isolated_roc_{run_id(spec_b)}.png" in names
-        assert f"qtl_cm_{run_id(spec_b)}.png" in names
+        assert f"pl_qtl_isolated_roc_{run_id(spec_b)}.png" in names
+        assert f"pl_qtl_cm_{run_id(spec_b)}.png" in names
         assert not any(run_id(spec_a) in name for name in names)
 
     def test_writes_the_distribution_and_comparative_roc_plots(
@@ -68,22 +68,22 @@ class TestPlotParadigm:
     ) -> None:
         """The all-seeds plots are written next to the isolated ones."""
         layout = ResultsLayout(str(tmp_path))
-        spec_a, spec_b = build_spec("qtl", seed=1), build_spec("qtl", seed=2)
+        spec_a, spec_b = build_spec("pl_qtl", seed=1), build_spec("pl_qtl", seed=2)
         _write_results(layout, spec_a, spec_b)
 
-        plot_paradigm(layout, Paradigm.QTL)
+        plot_paradigm(layout, Paradigm.PL_QTL)
 
-        plots = Path(layout.plots_dir("qtl", config_id(spec_a)))
-        for name in ("qtl_distributions.png", "qtl_roc_curves.png"):
+        plots = Path(layout.plots_dir("pl_qtl", config_id(spec_a)))
+        for name in ("pl_qtl_distributions.png", "pl_qtl_roc_curves.png"):
             assert (plots / name).stat().st_size > 0
 
     def test_returns_the_configurations_it_plotted(self, tmp_path: Path) -> None:
         """The caller learns which configurations got plots."""
         layout = ResultsLayout(str(tmp_path))
-        spec_a, spec_b = build_spec("qtl", seed=1), build_spec("qtl", seed=2)
+        spec_a, spec_b = build_spec("pl_qtl", seed=1), build_spec("pl_qtl", seed=2)
         _write_results(layout, spec_a, spec_b)
 
-        assert plot_paradigm(layout, Paradigm.QTL) == [config_id(spec_a)]
+        assert plot_paradigm(layout, Paradigm.PL_QTL) == [config_id(spec_a)]
 
     def test_nothing_to_plot_returns_nothing(self, tmp_path: Path) -> None:
         """A paradigm without results produces no plots."""
@@ -111,8 +111,8 @@ class TestPlotLosses:
         configuration file in the history directory is not read as a history."""
         layout = ResultsLayout(str(tmp_path))
         specs = [
-            build_spec("qtl", seed=1),
-            build_spec("qtl", seed=2),
+            build_spec("pl_qtl", seed=1),
+            build_spec("pl_qtl", seed=2),
             build_spec("ctl", seed=1),
         ]
         for spec in specs:
@@ -121,10 +121,10 @@ class TestPlotLosses:
 
         plotted = plot_losses(layout)
 
-        qtl_plots = Path(layout.plots_dir("qtl", config_id(specs[0])))
+        qtl_plots = Path(layout.plots_dir("pl_qtl", config_id(specs[0])))
         for spec in specs[:2]:
-            assert (qtl_plots / f"qtl_{run_id(spec)}_loss.png").stat().st_size > 0
-        assert (qtl_plots / "qtl_loss_distribution.png").stat().st_size > 0
+            assert (qtl_plots / f"pl_qtl_{run_id(spec)}_loss.png").stat().st_size > 0
+        assert (qtl_plots / "pl_qtl_loss_distribution.png").stat().st_size > 0
         assert (Path(layout.root) / "plots" / "loss_comparison.png").stat().st_size > 0
         assert len(plotted) == 2
 

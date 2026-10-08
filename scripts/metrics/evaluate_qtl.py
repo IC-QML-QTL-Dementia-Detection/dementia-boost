@@ -94,7 +94,7 @@ def main() -> None:
     }
 
     outcome = evaluate_paradigm(
-        ResultsLayout(), Paradigm.QTL, build_model, loaders, device, logger
+        ResultsLayout(), Paradigm.PL_QTL, build_model, loaders, device, logger
     )
     if not outcome:
         logger.error("No finished QTL runs found. Run train_qtl_multiseed.py first.")

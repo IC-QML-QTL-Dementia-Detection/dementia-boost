@@ -253,7 +253,7 @@ class TestTrainingHistorySerialization:
         """A two-epoch PL QTL history with a spec and extras."""
         return TrainingHistory(
             spec=build_spec(
-                "qtl", seed=7, lr=1e-4, batch_size=64, n_qubits=6, n_layers=4
+                "pl_qtl", seed=7, lr=1e-4, batch_size=64, n_qubits=6, n_layers=4
             ),
             extras={"quantum_device": "lightning.qubit"},
             epochs=[
@@ -406,7 +406,7 @@ class TestMetricsVisualizerLossPlots:
                 for e in range(1, n_epochs + 1)
             ]
             history = TrainingHistory(
-                spec=build_spec("qtl", seed=i, lr_step_size=2),
+                spec=build_spec("pl_qtl", seed=i, lr_step_size=2),
                 extras={},
                 epochs=epochs,
             )
@@ -425,7 +425,7 @@ class TestMetricsVisualizerLossPlots:
         visualizer.plot_loss_distribution(str(qtl_dir), prefix="qtl")
         visualizer.plot_loss_comparison({"QTL": str(qtl_dir), "CTL": str(ctl_dir)})
 
-        seed_1_id = run_id(build_spec("qtl", seed=1, lr_step_size=2))
+        seed_1_id = run_id(build_spec("pl_qtl", seed=1, lr_step_size=2))
         for filename in (
             f"qtl_{seed_1_id}_loss.png",
             "qtl_loss_distribution.png",

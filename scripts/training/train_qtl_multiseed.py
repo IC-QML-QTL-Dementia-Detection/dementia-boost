@@ -89,7 +89,7 @@ def build_spec(seed: int, backbone: RunSpec) -> RunSpec:
         The QTL spec, trained on the same split as its backbone.
     """
     return RunSpec(
-        paradigm=Paradigm.QTL,
+        paradigm=Paradigm.PL_QTL,
         ansatz=DEFAULT_ANSATZ,
         n_qubits=DEFAULT_N_QUBITS,
         n_layers=DEFAULT_N_LAYERS,

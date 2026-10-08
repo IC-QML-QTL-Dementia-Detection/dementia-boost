@@ -16,12 +16,12 @@ from dementia_boost.telemetry.selection import select_best_run
 REPORT_METRICS = ("accuracy", "precision", "recall", "f1_score", "auc")
 SELECTION_RULE = "validation AUC-ROC, then F1-score, then lowest log loss"
 DELTA_PAIRS = (
-    ("ctl", "baseline"),
-    ("qtl", "baseline"),
-    ("qtl", "ctl"),
-    ("qiskit_qtl", "baseline"),
-    ("qiskit_qtl", "ctl"),
-    ("qiskit_qtl", "qtl"),
+    (Paradigm.CTL, Paradigm.BASELINE),
+    (Paradigm.PL_QTL, Paradigm.BASELINE),
+    (Paradigm.PL_QTL, Paradigm.CTL),
+    (Paradigm.QISKIT_QTL, Paradigm.BASELINE),
+    (Paradigm.QISKIT_QTL, Paradigm.CTL),
+    (Paradigm.QISKIT_QTL, Paradigm.PL_QTL),
 )
 
 
@@ -86,8 +86,8 @@ def build_comparative_report(
     """Builds the comparison of paradigms from their saved results.
 
     Args:
-        test_results: Mapping of paradigm name ("baseline", "ctl", "qtl",
-            "qiskit_qtl") to its test-cohort results payload.
+        test_results: Mapping of paradigm name (a `Paradigm` value) to its
+            test-cohort results payload.
         val_results: Mapping of the same paradigm names to their
             validation-cohort results payloads. Used only to select a run.
 

@@ -229,27 +229,27 @@ class TestResolveConfiguration:
 
     def test_no_results_gives_none(self, tmp_path: Path) -> None:
         """A paradigm without results contributes nothing."""
-        assert resolve_configuration(ResultsLayout(str(tmp_path)), "qtl") is None
+        assert resolve_configuration(ResultsLayout(str(tmp_path)), "pl_qtl") is None
 
     def test_several_configurations_need_an_explicit_choice(
         self, tmp_path: Path
     ) -> None:
         """Choosing between configurations silently would be a hidden decision."""
         layout = ResultsLayout(str(tmp_path))
-        self._results(layout, "qtl", "aaa", "val", "test")
-        self._results(layout, "qtl", "bbb", "val", "test")
+        self._results(layout, "pl_qtl", "aaa", "val", "test")
+        self._results(layout, "pl_qtl", "bbb", "val", "test")
 
         with pytest.raises(ValueError, match="configuration"):
-            resolve_configuration(layout, "qtl")
-        assert resolve_configuration(layout, "qtl", "bbb") == "bbb"
+            resolve_configuration(layout, "pl_qtl")
+        assert resolve_configuration(layout, "pl_qtl", "bbb") == "bbb"
 
     def test_an_unavailable_choice_raises(self, tmp_path: Path) -> None:
         """A requested configuration must have both cohorts evaluated."""
         layout = ResultsLayout(str(tmp_path))
-        self._results(layout, "qtl", "aaa", "val", "test")
+        self._results(layout, "pl_qtl", "aaa", "val", "test")
 
         with pytest.raises(ValueError, match="zzz"):
-            resolve_configuration(layout, "qtl", "zzz")
+            resolve_configuration(layout, "pl_qtl", "zzz")
 
 
 def test_percentage_delta_is_zero_for_a_zero_base() -> None:

@@ -27,7 +27,7 @@ class Paradigm(StrEnum):
 
     BASELINE = "baseline"
     CTL = "ctl"
-    QTL = "qtl"
+    PL_QTL = "pl_qtl"
     QISKIT_QTL = "qiskit_qtl"
 
 
@@ -43,7 +43,7 @@ _HEAD_FIELDS = (
 _REQUIRED: dict[Paradigm, tuple[str, ...]] = {
     Paradigm.BASELINE: (),
     Paradigm.CTL: ("backbone_id",),
-    Paradigm.QTL: ("ansatz", "n_qubits", "n_layers", "gradient", "backbone_id"),
+    Paradigm.PL_QTL: ("ansatz", "n_qubits", "n_layers", "gradient", "backbone_id"),
     Paradigm.QISKIT_QTL: (
         "ansatz",
         "n_qubits",
@@ -63,7 +63,7 @@ _FORBIDDEN: dict[Paradigm, tuple[str, ...]] = {
         "gradient",
         "spsa_epsilon",
     ),
-    Paradigm.QTL: ("spsa_epsilon",),
+    Paradigm.PL_QTL: ("spsa_epsilon",),
     Paradigm.QISKIT_QTL: (),
 }
 _FLOAT_FIELDS = ("lr", "lr_gamma", "quantum_lr", "spsa_epsilon")
@@ -229,7 +229,7 @@ def label(spec: RunSpec, include_seed: bool = True) -> str:
             legends that cover all seeds of a configuration.
 
     Returns:
-        For example `qtl | paper | 6q x 4L | lr 0.0001 | seed 3`.
+        For example `pl_qtl | paper | 6q x 4L | lr 0.0001 | seed 3`.
     """
     parts = [spec.paradigm.value]
     if spec.ansatz is not None:

@@ -51,9 +51,9 @@ class TestLoadRuns:
     ) -> None:
         """All histories are found, in a stable order."""
         specs = [
-            build_spec("qtl", seed=4),
-            build_spec("qtl", seed=3),
-            build_spec("qtl", seed=3, n_layers=2),
+            build_spec("pl_qtl", seed=4),
+            build_spec("pl_qtl", seed=3),
+            build_spec("pl_qtl", seed=3, n_layers=2),
             build_spec("baseline", seed=2),
         ]
         for spec in specs:
@@ -67,17 +67,19 @@ class TestLoadRuns:
 
     def test_filters_by_paradigm_and_configuration(self, layout: ResultsLayout) -> None:
         """A paradigm or a configuration narrows the result."""
-        target = build_spec("qtl", seed=3)
+        target = build_spec("pl_qtl", seed=3)
         for spec in (
             target,
-            build_spec("qtl", seed=4),
-            build_spec("qtl", n_layers=2),
+            build_spec("pl_qtl", seed=4),
+            build_spec("pl_qtl", n_layers=2),
             build_spec("baseline"),
         ):
             _write(layout, spec)
 
-        assert {r.spec.paradigm.value for r in load_runs(layout, "qtl")} == {"qtl"}
-        by_config = load_runs(layout, "qtl", config_id(target))
+        assert {r.spec.paradigm.value for r in load_runs(layout, "pl_qtl")} == {
+            "pl_qtl"
+        }
+        by_config = load_runs(layout, "pl_qtl", config_id(target))
         assert [r.spec.seed for r in by_config] == [3, 4]
         assert {config_id(r.spec) for r in by_config} == {config_id(target)}
 
@@ -85,7 +87,7 @@ class TestLoadRuns:
         self, layout: ResultsLayout
     ) -> None:
         """Only history files count."""
-        spec = build_spec("qtl", seed=3)
+        spec = build_spec("pl_qtl", seed=3)
         history_path = _write(layout, spec)
         layout.write_config(spec)
         Path(history_path + ".tmp").write_text("{}")
@@ -101,8 +103,8 @@ class TestLoadRuns:
     ) -> None:
         """A file moved into another configuration's directory disagrees with
         the path its own spec gives, so it is not trusted."""
-        spec = build_spec("qtl", seed=3)
-        other = build_spec("qtl", seed=3, n_layers=2)
+        spec = build_spec("pl_qtl", seed=3)
+        other = build_spec("pl_qtl", seed=3, n_layers=2)
         source = _write(layout, spec)
         destination = Path(layout.history_path(other))
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -113,7 +115,7 @@ class TestLoadRuns:
 
     def test_a_renamed_seed_file_is_refused(self, layout: ResultsLayout) -> None:
         """The seed comes from the spec, never from the file name."""
-        spec = build_spec("qtl", seed=3)
+        spec = build_spec("pl_qtl", seed=3)
         source = Path(_write(layout, spec))
         source.rename(source.with_name("seed_9.json"))
 
@@ -127,9 +129,9 @@ class TestGroupByConfig:
     def test_groups_seeds_of_one_configuration(self, layout: ResultsLayout) -> None:
         """Seeds share a configuration, a changed layer count is another one."""
         for spec in (
-            build_spec("qtl", seed=4),
-            build_spec("qtl", seed=3),
-            build_spec("qtl", seed=3, n_layers=2),
+            build_spec("pl_qtl", seed=4),
+            build_spec("pl_qtl", seed=3),
+            build_spec("pl_qtl", seed=3, n_layers=2),
         ):
             _write(layout, spec)
 
@@ -143,7 +145,7 @@ class TestGroupByConfig:
 
     def test_keys_are_configuration_ids(self, layout: ResultsLayout) -> None:
         """Groups are keyed by `config_id`."""
-        spec = build_spec("qtl")
+        spec = build_spec("pl_qtl")
         _write(layout, spec)
 
         assert list(group_by_config(load_runs(layout))) == [config_id(spec)]

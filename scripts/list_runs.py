@@ -6,7 +6,7 @@ specs stored in the training histories. Nothing is modified.
 
     uv run scripts/list_runs.py                      one row per configuration
     uv run scripts/list_runs.py --runs               one row per run
-    uv run scripts/list_runs.py --paradigm qtl       only one paradigm
+    uv run scripts/list_runs.py --paradigm pl_qtl    only one paradigm
     uv run scripts/list_runs.py --find 62753438      look an ID (prefix) up
     uv run scripts/list_runs.py --runs --csv out.csv export the table
 """

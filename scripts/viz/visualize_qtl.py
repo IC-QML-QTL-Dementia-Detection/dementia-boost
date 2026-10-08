@@ -20,7 +20,7 @@ def main() -> None:
     logger = setup_logger("visualize_qtl_nifti")
 
     try:
-        plotted = plot_paradigm(ResultsLayout(), Paradigm.QTL, logger)
+        plotted = plot_paradigm(ResultsLayout(), Paradigm.PL_QTL, logger)
     except (FileNotFoundError, ValueError) as error:
         logger.error(f"Failed to generate plots: {error}")
         sys.exit(1)

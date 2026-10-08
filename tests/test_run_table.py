@@ -52,9 +52,9 @@ def populated(tmp_path: Path):
     """A layout with two PL QTL configurations and one baseline."""
     layout = ResultsLayout(str(tmp_path))
     specs = [
-        build_spec("qtl", seed=3),
-        build_spec("qtl", seed=4),
-        build_spec("qtl", seed=3, n_layers=2),
+        build_spec("pl_qtl", seed=3),
+        build_spec("pl_qtl", seed=4),
+        build_spec("pl_qtl", seed=3, n_layers=2),
         build_spec("baseline", seed=1),
     ]
     for spec in specs:
@@ -73,8 +73,8 @@ class TestRows:
 
         assert len(rows) == 3
         paper = next(r for r in rows if r["config_id"] == config_id(specs[0]))
-        assert paper["paradigm"] == "qtl"
-        assert paper["label"] == "qtl | paper | 2q x 1L | lr 0.001"
+        assert paper["paradigm"] == "pl_qtl"
+        assert paper["label"] == "pl_qtl | paper | 2q x 1L | lr 0.001"
         assert paper["seeds"] == "3,4"
         assert paper["n_runs"] == 2
         assert paper["split_id"] == "5192b1b7c0d3"

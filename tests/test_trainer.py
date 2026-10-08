@@ -150,7 +150,7 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
     device = torch.device("cpu")
     layout = ResultsLayout(str(tmp_path))
     spec = _spec(
-        Paradigm.QTL,
+        Paradigm.PL_QTL,
         n_qubits=TEST_QTL_QUBITS,
         n_layers=TEST_QTL_LAYERS,
         epochs=1,

@@ -21,7 +21,7 @@ from dementia_boost.core.layout import ConfigCollisionError, ResultsLayout
 def _qtl(**overrides) -> RunSpec:
     """The PennyLane QTL spec used as the worked example (6 qubits, 4 layers)."""
     fields = {
-        "paradigm": Paradigm.QTL,
+        "paradigm": Paradigm.PL_QTL,
         "lr": 1e-4,
         "lr_step_size": 10,
         "lr_gamma": 0.75,
@@ -53,7 +53,7 @@ class TestPaths:
         """Checkpoint, history, config, metrics, and plots sit under
         `<kind>/<paradigm>/<config_id>/`."""
         spec = _qtl()
-        base = "qtl/3976415a4171"
+        base = "pl_qtl/9e93de0f8105"
         assert layout.checkpoint_path(spec) == str(
             tmp_path / "checkpoints" / base / "seed_3.pt"
         )
@@ -63,13 +63,15 @@ class TestPaths:
         assert layout.config_path(spec) == str(
             tmp_path / "histories" / base / "config.json"
         )
-        assert layout.metrics_path("qtl", "3976415a4171", "val") == str(
+        assert layout.metrics_path("pl_qtl", "9e93de0f8105", "val") == str(
             tmp_path / "metrics" / base / "val_results.json"
         )
-        assert layout.metrics_path("qtl", "3976415a4171", "test") == str(
+        assert layout.metrics_path("pl_qtl", "9e93de0f8105", "test") == str(
             tmp_path / "metrics" / base / "test_results.json"
         )
-        assert layout.plots_dir("qtl", "3976415a4171") == str(tmp_path / "plots" / base)
+        assert layout.plots_dir("pl_qtl", "9e93de0f8105") == str(
+            tmp_path / "plots" / base
+        )
 
     def test_seeds_of_one_configuration_share_a_directory(
         self, layout: ResultsLayout
@@ -97,14 +99,14 @@ class TestPaths:
         self, layout: ResultsLayout
     ) -> None:
         """Paths do not depend on how the paradigm is spelled."""
-        assert layout.metrics_path(Paradigm.QTL, "abc", "val") == layout.metrics_path(
-            "qtl", "abc", "val"
-        )
+        assert layout.metrics_path(
+            Paradigm.PL_QTL, "abc", "val"
+        ) == layout.metrics_path("pl_qtl", "abc", "val")
 
     def test_unknown_cohort_for_metrics_raises(self, layout: ResultsLayout) -> None:
         """Only validation and test have a results file."""
         with pytest.raises(ValueError, match="cohort"):
-            layout.metrics_path("qtl", "abc", "train")
+            layout.metrics_path("pl_qtl", "abc", "train")
 
 
 class TestHistoryFiles:
@@ -140,8 +142,8 @@ class TestHistoryFiles:
             self._touch(layout.history_path(spec))
 
         assert len(layout.history_files()) == 3
-        assert len(layout.history_files("qtl")) == 2
-        assert layout.history_files("qtl", config_id(first)) == [
+        assert len(layout.history_files("pl_qtl")) == 2
+        assert layout.history_files("pl_qtl", config_id(first)) == [
             layout.history_path(first)
         ]
 
