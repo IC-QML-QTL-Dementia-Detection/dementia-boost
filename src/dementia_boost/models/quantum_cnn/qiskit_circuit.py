@@ -3,7 +3,7 @@
 Constructs the Hadamard layer, angle embedding, and 3-parameter ansatz (theta,
 gamma, beta) described by Bhowmik et al. (2025) using Qiskit v2.x `QuantumCircuit`,
 `ParameterVector`, and `SparsePauliOp` observables. This is an independent,
-interchangeable counterpart to the PennyLane ansatz in `circuit.py`, sharing
+interchangeable counterpart to the PennyLane ansatz in `pennylane_circuit.py`, sharing
 the same mathematical formulation but executed through Qiskit Primitives.
 """
 

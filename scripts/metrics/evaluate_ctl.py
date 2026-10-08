@@ -1,13 +1,11 @@
-"""Batch evaluation engine for classical baseline CNN models on NIfTI data.
+"""Batch evaluation engine for Classical Transfer Learning models on NIfTI data.
 
-This script finds every finished baseline run through its training history,
-executes inference on the validation and test cohorts for each configuration,
-computes comprehensive binary classification metrics (Accuracy, Precision,
-Recall, F1-score, AUC-ROC, log loss, Confusion Matrix), aggregates statistical
-distributions across the seeds of a configuration, and serializes one telemetry
-payload per cohort to JSON. Validation metrics are only for model selection (the
-transfer learning scripts read them to pick a backbone); test metrics are only
-reported.
+This script finds every finished Classical Transfer Learning (CTL) run through
+its training history, performs batched inference on the validation and test
+cohorts for each configuration, calculates full classification metrics
+(Accuracy, Precision, Recall, F1-score, AUC-ROC, log loss, Confusion Matrix),
+computes statistical distributions, and exports one telemetry JSON per cohort.
+Validation metrics are only for model selection; test metrics are only reported.
 """
 
 import sys
@@ -42,14 +40,14 @@ def get_device() -> torch.device:
 
 
 def build_model(spec: RunSpec) -> DementiaClassifier:
-    """Builds the baseline architecture the checkpoints of a configuration fit.
+    """Builds the CTL architecture the checkpoints of a configuration fit.
 
     Args:
-        spec: Spec of one run of the configuration (unused: the baseline
-            architecture has no configurable size).
+        spec: Spec of one run of the configuration (unused: the classical head
+            has no configurable size).
 
     Returns:
-        An untrained baseline classifier.
+        An untrained classifier with a classical head.
     """
     return DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
@@ -58,8 +56,8 @@ def build_model(spec: RunSpec) -> DementiaClassifier:
 
 
 def main() -> None:
-    """Executes the batch evaluation pipeline for classical NIfTI baseline models."""
-    logger = setup_logger("evaluate_baseline_nifti")
+    """Executes the batch evaluation pipeline for CTL NIfTI models."""
+    logger = setup_logger("evaluate_ctl_nifti")
     device = get_device()
 
     loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE)
@@ -68,14 +66,14 @@ def main() -> None:
     }
 
     outcome = evaluate_paradigm(
-        ResultsLayout(), Paradigm.BASELINE, build_model, loaders, device, logger
+        ResultsLayout(), Paradigm.CTL, build_model, loaders, device, logger
     )
     if not outcome:
-        logger.error("No finished baseline runs found. Run train_baseline.py first.")
+        logger.error("No finished CTL runs found. Run train_ctl_multiseed.py first.")
         sys.exit(1)
 
     logger.info(
-        f"Success! Batch evaluation complete for {len(outcome)} configuration(s)."
+        f"Success! CTL evaluation complete for {len(outcome)} configuration(s)."
     )
 
 

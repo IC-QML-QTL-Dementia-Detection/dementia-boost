@@ -34,7 +34,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import build_spec
 
+from dementia_boost.core.identity import run_id
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.metrics import (
     EpochRecord,
@@ -42,7 +44,7 @@ from dementia_boost.telemetry.metrics import (
     MetricsAnalyzer,
     TrainingHistory,
 )
-from dementia_boost.telemetry.visualizer import MetricsVisualizer
+from dementia_boost.viz.visualizer import MetricsVisualizer
 
 _KNOWN_METRIC_KEYS: tuple[str, ...] = (
     "accuracy",
@@ -203,17 +205,27 @@ class TestMetricsAnalyzerSaveToJson:
         aggregated = MetricsAnalyzer.aggregate_results([result])
         filepath = tmp_path / "metrics.json"
 
-        MetricsAnalyzer.save_to_json([result], aggregated, str(filepath), cohort="val")
+        configuration = {"config_id": "abc123", "label": "qtl", "spec": {"lr": 1e-4}}
+
+        MetricsAnalyzer.save_to_json(
+            [result],
+            aggregated,
+            str(filepath),
+            cohort="val",
+            configuration=configuration,
+        )
 
         with open(filepath) as f:
             payload = json.load(f)
 
         assert set(payload.keys()) == {
             "cohort",
+            "configuration",
             "aggregated_statistics",
             "individual_runs",
         }
         assert payload["cohort"] == "val"
+        assert payload["configuration"] == configuration
         assert payload["individual_runs"][0]["run_id"] == "run_json"
 
         for key in _KNOWN_METRIC_KEYS:
@@ -228,22 +240,54 @@ class TestTrainingHistorySerialization:
 
     def test_history_round_trip_is_lossless(self, tmp_path: Path) -> None:
         """Saves a history mixing evaluated and skipped epochs, reloads it, and
-        asserts equality, so ``None`` validation values and the config dict
-        survive the trip."""
-        history = TrainingHistory(
-            run_id="seed_7",
-            paradigm="qtl",
-            config={"lr": 1e-4, "batch_size": 64, "n_qubits": 6, "lr_step_size": 10},
-            epochs=[
-                EpochRecord(1, 0.69, 0.51, 0.70, 0.50, 1e-4, 1.5),
-                EpochRecord(2, 0.65, 0.58, None, None, 1e-4, 1.4),
-            ],
-        )
+        asserts equality, so ``None`` validation values, the spec, and the
+        extras survive the trip."""
+        history = self._history()
         filepath = tmp_path / "history.json"
 
         MetricsAnalyzer.save_history(history, str(filepath))
 
         assert MetricsAnalyzer.load_history(str(filepath)) == history
+
+    def _history(self) -> TrainingHistory:
+        """A two-epoch PL QTL history with a spec and extras."""
+        return TrainingHistory(
+            spec=build_spec(
+                "pl_qtl", seed=7, lr=1e-4, batch_size=64, n_qubits=6, n_layers=4
+            ),
+            extras={"quantum_device": "lightning.qubit"},
+            epochs=[
+                EpochRecord(1, 0.69, 0.51, 0.70, 0.50, 1e-4, 1.5),
+                EpochRecord(2, 0.65, 0.58, None, None, 1e-4, 1.4),
+            ],
+        )
+
+    def test_saved_file_stores_the_run_id_for_humans(self, tmp_path: Path) -> None:
+        """The JSON carries the run ID next to the spec, so a hash can be found
+        by searching the files."""
+        history = self._history()
+        filepath = tmp_path / "history.json"
+
+        MetricsAnalyzer.save_history(history, str(filepath))
+
+        payload = json.loads(filepath.read_text())
+        assert payload["run_id"] == run_id(history.spec)
+        assert payload["spec"]["n_qubits"] == 6
+
+    def test_loading_a_history_whose_run_id_does_not_match_its_spec_raises(
+        self, tmp_path: Path
+    ) -> None:
+        """A hand-edited spec, or a history written under another identity
+        scheme, is refused instead of being trusted."""
+        history = self._history()
+        filepath = tmp_path / "history.json"
+        MetricsAnalyzer.save_history(history, str(filepath))
+        payload = json.loads(filepath.read_text())
+        payload["spec"]["n_layers"] = 3
+        filepath.write_text(json.dumps(payload))
+
+        with pytest.raises(ValueError, match="run_id"):
+            MetricsAnalyzer.load_history(str(filepath))
 
 
 class TestSetupLogger:
@@ -297,7 +341,9 @@ class TestMetricsVisualizerPlotGeneration:
         ]
         aggregated = MetricsAnalyzer.aggregate_results(results)
         filepath = tmp_path / "mock_metrics.json"
-        MetricsAnalyzer.save_to_json(results, aggregated, str(filepath), cohort="test")
+        MetricsAnalyzer.save_to_json(
+            results, aggregated, str(filepath), cohort="test", configuration={}
+        )
         return str(filepath)
 
     def test_all_plot_methods_write_nonzero_png_files(
@@ -360,9 +406,8 @@ class TestMetricsVisualizerLossPlots:
                 for e in range(1, n_epochs + 1)
             ]
             history = TrainingHistory(
-                run_id=f"seed_{i}",
-                paradigm="qtl",
-                config={"lr_step_size": 2},
+                spec=build_spec("pl_qtl", seed=i, lr_step_size=2),
+                extras={},
                 epochs=epochs,
             )
             MetricsAnalyzer.save_history(history, str(directory / f"seed_{i}.json"))
@@ -380,8 +425,9 @@ class TestMetricsVisualizerLossPlots:
         visualizer.plot_loss_distribution(str(qtl_dir), prefix="qtl")
         visualizer.plot_loss_comparison({"QTL": str(qtl_dir), "CTL": str(ctl_dir)})
 
+        seed_1_id = run_id(build_spec("pl_qtl", seed=1, lr_step_size=2))
         for filename in (
-            "qtl_seed_1_loss.png",
+            f"qtl_{seed_1_id}_loss.png",
             "qtl_loss_distribution.png",
             "loss_comparison.png",
         ):

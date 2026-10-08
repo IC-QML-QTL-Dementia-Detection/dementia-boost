@@ -1,18 +1,26 @@
 """Unit tests for evaluating saved checkpoints on the validation and test cohorts."""
 
 import json
+import logging
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn as nn
+from conftest import build_spec
 from torch.utils.data import DataLoader, TensorDataset
 
-from dementia_boost.telemetry.metrics import MetricsAnalyzer
+from dementia_boost.core.identity import RunSpec, config_id, run_id
+from dementia_boost.core.layout import ResultsLayout, config_payload
+from dementia_boost.telemetry.metrics import (
+    EpochRecord,
+    MetricsAnalyzer,
+    TrainingHistory,
+)
 from dementia_boost.training.checkpoint_evaluation import (
-    cohort_results_path,
     evaluate_checkpoints,
-    save_cohort_results,
+    evaluate_paradigm,
+    save_configuration_results,
 )
 from dementia_boost.training.evaluator import ModelEvaluator
 
@@ -40,6 +48,24 @@ def _checkpoints(tmp_path: Path, n: int = 3) -> list[tuple[str, str]]:
         torch.save(_model().state_dict(), path)
         saved.append((f"run_{i}", str(path)))
     return saved
+
+
+def _train_run(layout: ResultsLayout, spec: RunSpec, seed_for_weights: int) -> None:
+    """Writes a history and a checkpoint for a spec, as the trainer would."""
+    history_path = Path(layout.history_path(spec))
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    MetricsAnalyzer.save_history(
+        TrainingHistory(
+            spec=spec,
+            epochs=[EpochRecord(1, 0.7, 0.5, 0.7, 0.5, spec.lr, 1.0)],
+            extras={},
+        ),
+        str(history_path),
+    )
+    checkpoint_path = Path(layout.checkpoint_path(spec))
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.manual_seed(seed_for_weights)
+    torch.save(_model().state_dict(), checkpoint_path)
 
 
 def test_every_checkpoint_is_evaluated_on_every_cohort(tmp_path: Path) -> None:
@@ -71,24 +97,125 @@ def test_metrics_match_direct_inference_per_cohort(tmp_path: Path) -> None:
     assert results["val"][0].y_prob != results["test"][0].y_prob
 
 
-def test_results_are_saved_per_cohort_with_the_cohort_marker(tmp_path: Path) -> None:
-    """Validation and test metrics go to separate files that name their cohort."""
+def test_results_are_saved_per_cohort_with_the_configuration(
+    tmp_path: Path,
+) -> None:
+    """Validation and test metrics go to separate files that name their cohort
+    and carry the configuration they were computed for."""
+    layout = ResultsLayout(str(tmp_path / "results"))
+    spec = build_spec("baseline", seed=1)
     evaluator = ModelEvaluator(_model(), torch.device("cpu"))
     loaders = {"val": _loader(1), "test": _loader(2)}
     results = evaluate_checkpoints(evaluator, _checkpoints(tmp_path), loaders)
 
-    paths = save_cohort_results(results, str(tmp_path / "metrics"), "base")
+    paths = save_configuration_results(layout, spec, results)
 
-    assert paths["test"] == str(tmp_path / "metrics" / "base_results.json")
-    assert paths["val"] == str(tmp_path / "metrics" / "base_val_results.json")
+    configuration = config_id(spec)
+    assert paths["val"] == layout.metrics_path("baseline", configuration, "val")
+    assert paths["test"] == layout.metrics_path("baseline", configuration, "test")
     for cohort, path in paths.items():
         payload = json.loads(Path(path).read_text())
         assert payload["cohort"] == cohort
+        assert payload["configuration"] == config_payload(spec)
         assert len(payload["individual_runs"]) == 3
         assert set(payload["aggregated_statistics"]) >= {"auc", "accuracy"}
 
 
-def test_cohort_results_path_convention() -> None:
-    """The test file keeps the plain name; validation gets a `_val` suffix."""
-    assert cohort_results_path("m", "tl", "test") == "m/tl_results.json"
-    assert cohort_results_path("m", "tl", "val") == "m/tl_val_results.json"
+class TestEvaluateParadigm:
+    """Validates evaluating every configuration of a paradigm."""
+
+    def _evaluate(self, layout: ResultsLayout, calls: list[RunSpec]):
+        """Runs `evaluate_paradigm` with a recording model builder."""
+
+        def build_model(spec: RunSpec) -> nn.Module:
+            calls.append(spec)
+            return _model()
+
+        return evaluate_paradigm(
+            layout,
+            "baseline",
+            build_model,
+            {"val": _loader(1), "test": _loader(2)},
+            torch.device("cpu"),
+            logging.getLogger("test_evaluate_paradigm"),
+        )
+
+    def test_each_configuration_gets_its_own_results_with_its_own_runs(
+        self, tmp_path: Path
+    ) -> None:
+        """Seeds of one configuration are evaluated together, and another
+        configuration is evaluated and saved separately."""
+        layout = ResultsLayout(str(tmp_path))
+        specs = [
+            build_spec("baseline", seed=1),
+            build_spec("baseline", seed=2),
+            build_spec("baseline", seed=1, lr=5e-4),
+        ]
+        for index, spec in enumerate(specs):
+            _train_run(layout, spec, index)
+
+        outcome = self._evaluate(layout, [])
+
+        assert set(outcome) == {config_id(specs[0]), config_id(specs[2])}
+        first = json.loads(
+            Path(
+                layout.metrics_path("baseline", config_id(specs[0]), "val")
+            ).read_text()
+        )
+        assert [r["run_id"] for r in first["individual_runs"]] == [
+            run_id(specs[0]),
+            run_id(specs[1]),
+        ]
+        other = json.loads(
+            Path(
+                layout.metrics_path("baseline", config_id(specs[2]), "test")
+            ).read_text()
+        )
+        assert [r["run_id"] for r in other["individual_runs"]] == [run_id(specs[2])]
+
+    def test_the_model_is_built_from_the_spec_of_each_configuration(
+        self, tmp_path: Path
+    ) -> None:
+        """The architecture comes from the configuration, once per configuration."""
+        layout = ResultsLayout(str(tmp_path))
+        specs = [
+            build_spec("baseline", seed=1),
+            build_spec("baseline", seed=1, lr=5e-4),
+        ]
+        for index, spec in enumerate(specs):
+            _train_run(layout, spec, index)
+        calls: list[RunSpec] = []
+
+        self._evaluate(layout, calls)
+
+        assert sorted(config_id(spec) for spec in calls) == sorted(
+            config_id(spec) for spec in specs
+        )
+
+    def test_runs_without_a_checkpoint_are_left_out(self, tmp_path: Path) -> None:
+        """A run that did not finish has a history but no checkpoint, and is
+        not evaluated."""
+        layout = ResultsLayout(str(tmp_path))
+        finished, unfinished = (
+            build_spec("baseline", seed=1),
+            build_spec("baseline", seed=2),
+        )
+        _train_run(layout, finished, 0)
+        _train_run(layout, unfinished, 1)
+        Path(layout.checkpoint_path(unfinished)).unlink()
+
+        self._evaluate(layout, [])
+
+        payload = json.loads(
+            Path(
+                layout.metrics_path("baseline", config_id(finished), "val")
+            ).read_text()
+        )
+        assert [r["run_id"] for r in payload["individual_runs"]] == [run_id(finished)]
+
+    def test_nothing_to_evaluate_returns_nothing(self, tmp_path: Path) -> None:
+        """A layout without histories evaluates nothing and writes nothing."""
+        layout = ResultsLayout(str(tmp_path))
+
+        assert self._evaluate(layout, []) == {}
+        assert list(Path(tmp_path).rglob("*.json")) == []

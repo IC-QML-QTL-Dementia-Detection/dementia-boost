@@ -2,7 +2,7 @@
 
 Composes the classical pre-net, angle scaling, Qiskit quantum layer, and
 classical post-net into an interchangeable PyTorch `nn.Module`, mirroring the
-PennyLane `QuantumClassifierHead` contract while executing the variational
+`PennylaneQuantumClassifierHead` contract while executing the variational
 circuit through Qiskit Primitives V2.
 """
 

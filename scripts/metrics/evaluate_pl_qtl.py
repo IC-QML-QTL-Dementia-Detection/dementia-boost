@@ -1,13 +1,12 @@
-"""Batch evaluation engine for Qiskit Quantum Transfer Learning (QTL) models.
+"""Batch evaluation engine for PennyLane QTL (PL QTL) models on NIfTI data.
 
-This script finds every finished Qiskit v2.x hybrid Dressed Quantum Network (DQN)
-run through its training history, performs batched inference on the validation
-and test cohorts for each configuration (building each architecture from the
-qubits and layers recorded in its spec), computes full binary classification
-metrics (Accuracy, Precision, Recall, F1-score, AUC-ROC, log loss, Confusion
-Matrix), aggregates statistical distributions, and exports one telemetry JSON per
-cohort. Validation metrics are only for model selection; test metrics are only
-reported.
+This script finds every finished hybrid Dressed Quantum Network (DQN) run through
+its training history, performs batched inference on the validation and test
+cohorts for each configuration (building each architecture from the qubits and
+layers recorded in its spec), computes full binary classification metrics
+(Accuracy, Precision, Recall, F1-score, AUC-ROC, log loss, Confusion Matrix),
+aggregates statistical distributions, and exports one telemetry JSON per cohort.
+Validation metrics are only for model selection; test metrics are only reported.
 """
 
 import sys
@@ -21,11 +20,12 @@ from dementia_boost.models.classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
-from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
+from dementia_boost.models.quantum_cnn import PennylaneQuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.training.checkpoint_evaluation import evaluate_paradigm
 
 DEFAULT_TORCH_DEVICE: str = "cpu"
+DEFAULT_QUANTUM_DEVICE: str = "lightning.qubit"
 DEFAULT_FEATURE_DIM: int = 2304
 DEFAULT_BATCH_SIZE: int = 64
 
@@ -59,32 +59,34 @@ def get_device(device_name: str | None = None) -> torch.device:
 
 
 def build_model(spec: RunSpec) -> DementiaClassifier:
-    """Builds the Qiskit QTL architecture a configuration's checkpoints fit.
+    """Builds the PennyLane QTL architecture a configuration's checkpoints fit.
 
     Args:
         spec: Spec of one run of the configuration; its qubits and layers set the
             size of the quantum head.
 
     Returns:
-        An untrained classifier with a Qiskit quantum head.
+        An untrained classifier with a PennyLane quantum head.
     """
     if spec.n_qubits is None or spec.n_layers is None:
-        raise ValueError("A Qiskit QTL spec must define n_qubits and n_layers.")
+        raise ValueError("A QTL spec must define n_qubits and n_layers.")
     return DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
-        classifier_head=QiskitQuantumClassifierHead(
+        classifier_head=PennylaneQuantumClassifierHead(
             in_features=DEFAULT_FEATURE_DIM,
             n_qubits=spec.n_qubits,
             n_layers=spec.n_layers,
+            quantum_device=DEFAULT_QUANTUM_DEVICE,
         ),
     )
 
 
 def main() -> None:
-    """Executes the batch evaluation pipeline for Qiskit hybrid QTL NIfTI models."""
-    logger = setup_logger("evaluate_qiskit_qtl_nifti")
+    """Executes the batch evaluation pipeline for hybrid QTL NIfTI models."""
+    logger = setup_logger("evaluate_pl_qtl_nifti")
     device = get_device()
     logger.info(f"Target PyTorch Device: {device}")
+    logger.info(f"Target Quantum Device: {DEFAULT_QUANTUM_DEVICE}")
 
     loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE)
     loaders = {
@@ -92,16 +94,16 @@ def main() -> None:
     }
 
     outcome = evaluate_paradigm(
-        ResultsLayout(), Paradigm.QISKIT_QTL, build_model, loaders, device, logger
+        ResultsLayout(), Paradigm.PL_QTL, build_model, loaders, device, logger
     )
     if not outcome:
         logger.error(
-            "No finished Qiskit QTL runs found. Run its training script first."
+            "No finished PL QTL runs found. Run train_pl_qtl_multiseed.py first."
         )
         sys.exit(1)
 
     logger.info(
-        f"Success! Qiskit QTL evaluation complete for {len(outcome)} configuration(s)."
+        f"Success! PL QTL evaluation complete for {len(outcome)} configuration(s)."
     )
 
 

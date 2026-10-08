@@ -2,11 +2,14 @@
 
 This module validates that BaselineTrainer supports both end-to-end full model
 training on raw images and fast transfer learning on cached feature embeddings
-with composite model checkpoint serialization for CTL and QTL heads, and that
-it records a per-epoch `TrainingHistory`, persists it atomically every few
-epochs and on exit, and rejects non-positive evaluation or save cadences.
+with composite model checkpoint serialization for CTL and QTL heads, that it
+takes its identity from a `RunSpec` and refuses a spec that does not describe
+what actually runs, and that it records a per-epoch `TrainingHistory` carrying
+the spec, persists it atomically every few epochs and on exit, and rejects
+non-positive evaluation or save cadences.
 """
 
+import json
 import math
 from pathlib import Path
 
@@ -14,9 +17,12 @@ import pytest
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from conftest import build_spec
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader, TensorDataset
 
+from dementia_boost.core.identity import Paradigm, RunSpec, config_id, run_id
+from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.data.embedding_cache import FeatureCacheManager
 from dementia_boost.models.builder import assemble_dementia_classifier
 from dementia_boost.models.classical_cnn import (
@@ -24,7 +30,7 @@ from dementia_boost.models.classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
-from dementia_boost.models.quantum_cnn import QuantumClassifierHead
+from dementia_boost.models.quantum_cnn import PennylaneQuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.metrics import MetricsAnalyzer, TrainingHistory
 from dementia_boost.training.evaluator import ModelEvaluator
@@ -35,7 +41,6 @@ NUM_CHANNELS: int = 1
 IMAGE_SIZE: int = 128
 BATCH_SIZE: int = 4
 FEATURE_DIM: int = 2304
-NUM_EPOCHS: int = 2
 LEARNING_RATE: float = 1e-3
 STEP_SIZE: int = 5
 GAMMA: float = 0.5
@@ -45,83 +50,80 @@ HISTORY_STEP_SIZE: int = 2
 BATCHES_PER_EPOCH: int = NUM_MOCK_SAMPLES // BATCH_SIZE
 
 
+def _spec(paradigm: Paradigm | str = Paradigm.BASELINE, **overrides) -> RunSpec:
+    """Builds a spec that matches the optimizer, scheduler, and loaders below."""
+    return build_spec(
+        paradigm,
+        **{
+            "lr": LEARNING_RATE,
+            "lr_step_size": STEP_SIZE,
+            "lr_gamma": GAMMA,
+            "batch_size": BATCH_SIZE,
+            **overrides,
+        },
+    )
+
+
+def _cached_loaders(
+    extractor: nn.Module, device: torch.device
+) -> tuple[DataLoader, DataLoader, DataLoader]:
+    """Builds a raw loader plus train and validation loaders of cached embeddings."""
+    raw_images = torch.randn(NUM_MOCK_SAMPLES, NUM_CHANNELS, IMAGE_SIZE, IMAGE_SIZE)
+    raw_labels = torch.tensor([0.0, 1.0] * (NUM_MOCK_SAMPLES // 2))
+    raw_loader = DataLoader(
+        TensorDataset(raw_images, raw_labels), batch_size=BATCH_SIZE, shuffle=False
+    )
+    features, labels = FeatureCacheManager.extract_features(
+        feature_extractor=extractor, data_loader=raw_loader, device=device
+    )
+    train_loader = FeatureCacheManager.create_cached_loader(
+        features=features, labels=labels, batch_size=BATCH_SIZE, shuffle=True
+    )
+    val_loader = FeatureCacheManager.create_cached_loader(
+        features=features, labels=labels, batch_size=BATCH_SIZE, shuffle=False
+    )
+    return raw_loader, train_loader, val_loader
+
+
 def test_baseline_trainer_with_cached_embeddings_and_save_model(
     tmp_path: Path,
 ) -> None:
     """Validates training a head on cached embeddings and saving assembled model."""
     device = torch.device("cpu")
-    logger = setup_logger("test_trainer_ctl")
-    save_dir = str(tmp_path / "checkpoints_ctl")
+    layout = ResultsLayout(str(tmp_path))
+    spec = _spec(Paradigm.CTL)
 
     extractor = LeNetFeatureExtractor().to(device)
     for param in extractor.parameters():
         param.requires_grad = False
+    raw_loader, train_loader, val_loader = _cached_loaders(extractor, device)
 
-    raw_images = torch.randn(
-        NUM_MOCK_SAMPLES,
-        NUM_CHANNELS,
-        IMAGE_SIZE,
-        IMAGE_SIZE,
+    head = ClassicalClassifierHead(in_features=FEATURE_DIM, use_sigmoid=False).to(
+        device
     )
-    raw_labels = torch.tensor([0.0, 1.0] * (NUM_MOCK_SAMPLES // 2))
-    raw_dataset = TensorDataset(raw_images, raw_labels)
-    raw_loader = DataLoader(raw_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
-    train_features, train_labels = FeatureCacheManager.extract_features(
-        feature_extractor=extractor,
-        data_loader=raw_loader,
-        device=device,
-    )
-    val_features, val_labels = FeatureCacheManager.extract_features(
-        feature_extractor=extractor,
-        data_loader=raw_loader,
-        device=device,
-    )
-
-    train_cached_loader = FeatureCacheManager.create_cached_loader(
-        features=train_features,
-        labels=train_labels,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-    )
-    val_cached_loader = FeatureCacheManager.create_cached_loader(
-        features=val_features,
-        labels=val_labels,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-    )
-
-    head = ClassicalClassifierHead(
-        in_features=FEATURE_DIM,
-        use_sigmoid=False,
-    ).to(device)
     head.apply(ClassicalClassifierHead.apply_glorot_init)
-
     full_model = assemble_dementia_classifier(
-        feature_extractor=extractor,
-        classifier_head=head,
+        feature_extractor=extractor, classifier_head=head
     )
 
-    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(head.parameters(), lr=LEARNING_RATE)
-    scheduler = StepLR(optimizer, step_size=STEP_SIZE, gamma=GAMMA)
-
     trainer = BaselineTrainer(
         model=head,
-        train_loader=train_cached_loader,
-        val_loader=val_cached_loader,
-        criterion=criterion,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        criterion=nn.BCEWithLogitsLoss(),
         optimizer=optimizer,
-        scheduler=scheduler,
+        scheduler=StepLR(optimizer, step_size=STEP_SIZE, gamma=GAMMA),
         device=device,
-        logger=logger,
-        save_dir=save_dir,
+        logger=setup_logger("test_trainer_ctl"),
+        spec=spec,
+        layout=layout,
         save_model=full_model,
     )
 
-    trainer.train(epochs=NUM_EPOCHS, run_id="test_run_ctl")
+    trainer.train()
 
-    saved_checkpoint_path = Path(save_dir) / "baseline_test_run_ctl.pt"
+    saved_checkpoint_path = Path(layout.checkpoint_path(spec))
     assert saved_checkpoint_path.exists()
 
     state_dict = torch.load(saved_checkpoint_path, weights_only=True)
@@ -146,79 +148,47 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
 ) -> None:
     """Validates training a quantum head on cached embeddings and saving model."""
     device = torch.device("cpu")
-    logger = setup_logger("test_trainer_qtl")
-    save_dir = str(tmp_path / "checkpoints_qtl")
+    layout = ResultsLayout(str(tmp_path))
+    spec = _spec(
+        Paradigm.PL_QTL,
+        n_qubits=TEST_QTL_QUBITS,
+        n_layers=TEST_QTL_LAYERS,
+        epochs=1,
+    )
 
     extractor = LeNetFeatureExtractor().to(device)
     for param in extractor.parameters():
         param.requires_grad = False
+    raw_loader, train_loader, val_loader = _cached_loaders(extractor, device)
 
-    raw_images = torch.randn(
-        NUM_MOCK_SAMPLES,
-        NUM_CHANNELS,
-        IMAGE_SIZE,
-        IMAGE_SIZE,
-    )
-    raw_labels = torch.tensor([0.0, 1.0] * (NUM_MOCK_SAMPLES // 2))
-    raw_dataset = TensorDataset(raw_images, raw_labels)
-    raw_loader = DataLoader(raw_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
-    train_features, train_labels = FeatureCacheManager.extract_features(
-        feature_extractor=extractor,
-        data_loader=raw_loader,
-        device=device,
-    )
-    val_features, val_labels = FeatureCacheManager.extract_features(
-        feature_extractor=extractor,
-        data_loader=raw_loader,
-        device=device,
-    )
-
-    train_cached_loader = FeatureCacheManager.create_cached_loader(
-        features=train_features,
-        labels=train_labels,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-    )
-    val_cached_loader = FeatureCacheManager.create_cached_loader(
-        features=val_features,
-        labels=val_labels,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-    )
-
-    qtl_head = QuantumClassifierHead(
+    qtl_head = PennylaneQuantumClassifierHead(
         in_features=FEATURE_DIM,
         n_qubits=TEST_QTL_QUBITS,
         n_layers=TEST_QTL_LAYERS,
     ).to(device)
-    qtl_head.apply(QuantumClassifierHead.apply_glorot_init)
-
+    qtl_head.apply(PennylaneQuantumClassifierHead.apply_glorot_init)
     full_model = assemble_dementia_classifier(
-        feature_extractor=extractor,
-        classifier_head=qtl_head,
+        feature_extractor=extractor, classifier_head=qtl_head
     )
 
-    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(qtl_head.parameters(), lr=LEARNING_RATE)
-    scheduler = StepLR(optimizer, step_size=STEP_SIZE, gamma=GAMMA)
-
     trainer = BaselineTrainer(
         model=qtl_head,
-        train_loader=train_cached_loader,
-        val_loader=val_cached_loader,
-        criterion=criterion,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        criterion=nn.BCEWithLogitsLoss(),
         optimizer=optimizer,
-        scheduler=scheduler,
+        scheduler=StepLR(optimizer, step_size=STEP_SIZE, gamma=GAMMA),
         device=device,
-        logger=logger,
-        save_dir=save_dir,
+        logger=setup_logger("test_trainer_qtl"),
+        spec=spec,
+        layout=layout,
         save_model=full_model,
     )
 
-    trainer.train(epochs=1, run_id="test_run_qtl")
+    trainer.train()
 
-    saved_checkpoint_path = Path(save_dir) / "baseline_test_run_qtl.pt"
+    saved_checkpoint_path = Path(layout.checkpoint_path(spec))
     assert saved_checkpoint_path.exists()
 
     state_dict = torch.load(saved_checkpoint_path, weights_only=True)
@@ -227,7 +197,7 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
 
     evaluator_model = DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
-        classifier_head=QuantumClassifierHead(
+        classifier_head=PennylaneQuantumClassifierHead(
             in_features=FEATURE_DIM,
             n_qubits=TEST_QTL_QUBITS,
             n_layers=TEST_QTL_LAYERS,
@@ -262,6 +232,9 @@ def _build_history_trainer(
     criterion: nn.Module,
     eval_every: int,
     history_save_every: int = 10,
+    epochs: int = 4,
+    spec: RunSpec | None = None,
+    extras: dict | None = None,
 ) -> tuple[BaselineTrainer, Path]:
     """Builds a tiny linear-model trainer that records its history to disk."""
     features = torch.randn(NUM_MOCK_SAMPLES, 4)
@@ -269,7 +242,8 @@ def _build_history_trainer(
     loader = DataLoader(TensorDataset(features, labels), batch_size=BATCH_SIZE)
     model = nn.Linear(4, 1)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-    history_path = tmp_path / "histories" / "run.json"
+    layout = ResultsLayout(str(tmp_path))
+    spec = spec or _spec(lr_step_size=HISTORY_STEP_SIZE, epochs=epochs)
 
     trainer = BaselineTrainer(
         model=model,
@@ -280,13 +254,13 @@ def _build_history_trainer(
         scheduler=StepLR(optimizer, step_size=HISTORY_STEP_SIZE, gamma=GAMMA),
         device=torch.device("cpu"),
         logger=setup_logger("test_trainer_history"),
-        save_dir=str(tmp_path / "checkpoints"),
-        history_path=str(history_path),
+        spec=spec,
+        layout=layout,
         eval_every=eval_every,
         history_save_every=history_save_every,
-        paradigm="baseline",
+        extras=extras,
     )
-    return trainer, history_path
+    return trainer, Path(layout.history_path(spec))
 
 
 def test_train_returns_history_matching_schedule_and_disk(tmp_path: Path) -> None:
@@ -297,7 +271,7 @@ def test_train_returns_history_matching_schedule_and_disk(tmp_path: Path) -> Non
         tmp_path, nn.BCEWithLogitsLoss(), eval_every=2
     )
 
-    history = trainer.train(epochs=4, run_id="run")
+    history = trainer.train()
 
     assert [r.epoch for r in history.epochs] == [1, 2, 3, 4]
     assert all(math.isfinite(r.train_loss) for r in history.epochs)
@@ -310,8 +284,47 @@ def test_train_returns_history_matching_schedule_and_disk(tmp_path: Path) -> Non
         False,
         True,
     ]
-    assert history.config["lr_step_size"] == HISTORY_STEP_SIZE
+    assert history.spec.lr_step_size == HISTORY_STEP_SIZE
     assert MetricsAnalyzer.load_history(str(history_path)) == history
+
+
+def test_history_carries_the_spec_and_the_non_identity_extras(tmp_path: Path) -> None:
+    """Validates that the history holds the full spec (so runs can be listed
+    without parsing names) and records the cadence and caller extras separately."""
+    trainer, _ = _build_history_trainer(
+        tmp_path,
+        nn.BCEWithLogitsLoss(),
+        eval_every=2,
+        history_save_every=3,
+        extras={"quantum_device": "lightning.qubit"},
+    )
+
+    history = trainer.train()
+
+    assert history.spec == trainer.spec
+    assert history.run_id == run_id(trainer.spec)
+    assert history.extras == {
+        "eval_every": 2,
+        "history_save_every": 3,
+        "quantum_device": "lightning.qubit",
+    }
+
+
+def test_training_writes_the_config_file_next_to_the_histories(
+    tmp_path: Path,
+) -> None:
+    """Validates that a run records its configuration, so a person (or the run
+    listing) can see what a config directory holds."""
+    trainer, history_path = _build_history_trainer(
+        tmp_path, nn.BCEWithLogitsLoss(), eval_every=1
+    )
+
+    trainer.train()
+
+    config = json.loads((history_path.parent / "config.json").read_text())
+    assert config["config_id"] == config_id(trainer.spec)
+    assert config["spec"]["lr_step_size"] == HISTORY_STEP_SIZE
+    assert "seed" not in config["spec"]
 
 
 def test_last_epoch_is_always_evaluated_without_an_extra_final_pass(
@@ -321,7 +334,9 @@ def test_last_epoch_is_always_evaluated_without_an_extra_final_pass(
     """Validates that an epoch off the `eval_every` boundary still gets a
     validation value when it is the last one, and that the final report reuses
     it, so the validation loader is evaluated exactly once per recorded point."""
-    trainer, _ = _build_history_trainer(tmp_path, nn.BCEWithLogitsLoss(), eval_every=2)
+    trainer, _ = _build_history_trainer(
+        tmp_path, nn.BCEWithLogitsLoss(), eval_every=2, epochs=5
+    )
     evaluated_loaders: list[DataLoader] = []
     original_evaluate = trainer._evaluate_loader
 
@@ -331,7 +346,7 @@ def test_last_epoch_is_always_evaluated_without_an_extra_final_pass(
 
     monkeypatch.setattr(trainer, "_evaluate_loader", spy)
 
-    history = trainer.train(epochs=5, run_id="run")
+    history = trainer.train()
 
     assert [r.val_loss is not None for r in history.epochs] == [
         False,
@@ -357,7 +372,11 @@ def test_history_saved_every_n_epochs_and_once_on_exit(
     boundary and once more on exit only when epochs remain unsaved, so a run
     ending on a boundary does not write twice."""
     trainer, _ = _build_history_trainer(
-        tmp_path, nn.BCEWithLogitsLoss(), eval_every=100, history_save_every=2
+        tmp_path,
+        nn.BCEWithLogitsLoss(),
+        eval_every=100,
+        history_save_every=2,
+        epochs=epochs,
     )
     saved_lengths: list[int] = []
     original_save = trainer._save_history
@@ -368,7 +387,7 @@ def test_history_saved_every_n_epochs_and_once_on_exit(
 
     monkeypatch.setattr(trainer, "_save_history", spy)
 
-    trainer.train(epochs=epochs, run_id="run")
+    trainer.train()
 
     assert saved_lengths == expected_saved_lengths
 
@@ -393,6 +412,29 @@ def test_non_positive_cadence_is_rejected(
         )
 
 
+@pytest.mark.parametrize(
+    ("overrides", "field"),
+    [
+        ({"lr": 5e-4}, "lr"),
+        ({"batch_size": 8}, "batch_size"),
+        ({"lr_step_size": 3}, "lr_step_size"),
+        ({"lr_gamma": 0.9}, "lr_gamma"),
+    ],
+)
+def test_spec_that_disagrees_with_what_runs_is_rejected(
+    tmp_path: Path, overrides: dict, field: str
+) -> None:
+    """Validates that a spec describing another learning rate, batch size, or
+    schedule than the one that will run is refused, because the hash IDs would
+    otherwise name a configuration that never ran."""
+    spec = _spec(**{"lr_step_size": HISTORY_STEP_SIZE, "epochs": 2, **overrides})
+
+    with pytest.raises(ValueError, match=field):
+        _build_history_trainer(
+            tmp_path, nn.BCEWithLogitsLoss(), eval_every=1, spec=spec
+        )
+
+
 def test_trainer_has_no_test_loader_argument(tmp_path: Path) -> None:
     """Validates that the trainer cannot be given the test cohort: it accepts a
     validation loader only, so training and per-epoch evaluation never see test
@@ -411,10 +453,11 @@ def test_trainer_has_no_test_loader_argument(tmp_path: Path) -> None:
             test_loader=loader,  # type: ignore[call-arg]
             criterion=nn.BCEWithLogitsLoss(),
             optimizer=optimizer,
-            scheduler=StepLR(optimizer, step_size=1),
+            scheduler=StepLR(optimizer, step_size=STEP_SIZE, gamma=GAMMA),
             device=torch.device("cpu"),
             logger=setup_logger("test_trainer_no_test"),
-            save_dir=str(tmp_path),
+            spec=_spec(),
+            layout=ResultsLayout(str(tmp_path)),
         )
 
 
@@ -425,8 +468,8 @@ def test_history_survives_mid_run_crash(tmp_path: Path) -> None:
     trainer, history_path = _build_history_trainer(tmp_path, criterion, eval_every=100)
 
     with pytest.raises(RuntimeError, match="simulated crash"):
-        trainer.train(epochs=4, run_id="run")
+        trainer.train()
 
     saved = MetricsAnalyzer.load_history(str(history_path))
     assert [r.epoch for r in saved.epochs] == [1, 2]
-    assert not history_path.with_name("run.json.tmp").exists()
+    assert not history_path.with_name(f"{history_path.name}.tmp").exists()

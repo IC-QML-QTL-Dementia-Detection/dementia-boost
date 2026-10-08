@@ -36,15 +36,17 @@ The research follows a multi-stage execution schedule (see `docs/qtl_research_go
 
 The codebase enforces strict modularity and MLOps practices, keeping neural network definitions, quantum execution graphs, ETL pipelines, and metric analysis decoupled:
 
-- **`core/`**: Centralized determinism and seed locking across Python, NumPy, PyTorch, and cuDNN (`reproducibility.py`).
+- **`core/`**: Centralized determinism and seed locking across Python, NumPy, PyTorch, and cuDNN (`reproducibility.py`), the typed run specification with the hash IDs and label derived from it (`identity.py`), and the on-disk layout of every run's artifacts (`layout.py`).
 
 - **`data/`**: Data loading and ETL pipelines with patient-level leakage prevention (canonical subject IDs, a deterministic stratified train/val/test split, a `split_manifest.json`, and an integrity check of the cohort files against it), NIfTI slice loaders, custom `MinMaxNormalize` transforms, and in-memory feature embedding caching for fast transfer learning (`subject_ids.py`, `split.py`, `split_manifest.py`, `split_guards.py`, `cohort_audit.py`, `data_loader.py`, `data_processor.py`, `dataset.py`, `embedding_cache.py`).
 
-- **`models/`**: Dependency-injected architectures pairing a `LeNetFeatureExtractor` backbone with interchangeable heads: `ClassicalClassifierHead` (CTL), `QuantumClassifierHead` (DQN / QTL on PennyLane), or `QiskitQuantumClassifierHead` (the same DQN on Qiskit Primitives V2, with an injectable estimator and Aer as the default noiseless backend) built via `builder.py`.
+- **`models/`**: Dependency-injected architectures pairing a `LeNetFeatureExtractor` backbone with interchangeable heads: `ClassicalClassifierHead` (CTL), `PennylaneQuantumClassifierHead` (DQN / PL QTL on PennyLane), or `QiskitQuantumClassifierHead` (the same DQN on Qiskit Primitives V2, with an injectable estimator and Aer as the default noiseless backend) built via `builder.py`.
 
 - **`training/`**: Isolated `BaselineTrainer` and `ModelEvaluator` separating training/optimization loops from model definitions and file I/O, and `checkpoint_evaluation` to evaluate every checkpoint on the validation and test cohorts. The trainer only sees the train and validation loaders, records a per-epoch `TrainingHistory` and saves it as JSON, but never plots.
 
-- **`telemetry/`**: Stateless DTO-driven metric computation (`MetricsAnalyzer`), JSON persistence of evaluation metrics and training histories, model selection on validation metrics (`selection.py`), the comparative report across paradigms (`report.py`), dual logging (`setup_logger`), and publication-ready visualizers (`MetricsVisualizer`), including loss curves rendered from the saved histories.
+- **`telemetry/`**: Stateless DTO-driven metric computation (`MetricsAnalyzer`), JSON persistence of evaluation metrics and training histories, run discovery from the histories and the lookup table of runs (`run_listing.py`, `run_table.py`), model selection on validation metrics (`selection.py`), the comparative report across paradigms (`report.py`), and dual logging (`setup_logger`).
+
+- **`viz/`**: Publication-ready plots (`MetricsVisualizer`) and the plotting steps that draw every configuration's figures and the loss curves from the saved histories (`run_plots.py`); the scripts in `scripts/viz` are thin callers.
 
 For full technical specifications and detailed Mermaid architectural diagrams, see **[docs/architecture.md](docs/architecture.md)**.
 
@@ -114,47 +116,76 @@ The ETL is safe to rerun. It builds the whole split in a staging directory and o
 uv run scripts/training/train_baseline.py
 
 # Evaluate the baselines on val and test. The validation metrics it writes
-# (baseline_val_results.json) are what the next scripts read to select the backbone.
+# (data/results/metrics/baseline/<config_id>/val_results.json) are what the next
+# scripts read to select the backbone.
 uv run scripts/metrics/evaluate_baseline.py
 
 # Train Classical Transfer Learning (CTL) dense heads on the baseline selected on
 # validation (best validation AUC-ROC, then F1, then lowest log loss)
-uv run scripts/training/train_tl_multiseed.py
+uv run scripts/training/train_ctl_multiseed.py
 
-# Train Quantum Transfer Learning (QTL) Dressed Quantum Network
-uv run scripts/training/train_qtl_multiseed.py
+# Train PennyLane Quantum Transfer Learning (PL QTL) Dressed Quantum Network
+uv run scripts/training/train_pl_qtl_multiseed.py
 
 # Train the same Dressed Quantum Network on Qiskit (Aer state-vector, SPSA gradients)
 uv run scripts/training/train_qiskit_qtl_multiseed.py
 ```
 
-Every training script also writes a per-epoch history (loss, accuracy, learning rate, duration) as one JSON file per seed under `data/results/histories/nifti/<paradigm>/`. The `val_loss` and `val_acc` fields of the history are measured on the validation cohort. The training scripts do not produce plots; see the next step.
+Every training script writes a checkpoint and a per-epoch history (loss, accuracy, learning rate, duration, and the full run specification) for each seed, and skips a run whose checkpoint already exists. The `val_loss` and `val_acc` fields of the history are measured on the validation cohort. The training scripts do not produce plots; see the next step.
+
+#### Where the results go, and how to find a run
+
+Runs are identified by hashes of their specification, not by names: `config_id` is shared by all seeds of one configuration (paradigm, qubits, layers, learning rates, backbone, split, and so on) and `run_id` identifies one seed of it. Everything lives under `data/results`:
+
+```
+checkpoints/<paradigm>/<config_id>/seed_<n>.pt
+histories/<paradigm>/<config_id>/seed_<n>.json      history, with the full run specification
+histories/<paradigm>/<config_id>/config.json         the configuration and its label
+metrics/<paradigm>/<config_id>/{val,test}_results.json
+plots/<paradigm>/<config_id>/
+```
+
+Changing any hyperparameter gives a new `config_id`, so a new configuration never overwrites or gets skipped in place of an old one. To see what a hash is, use the read-only lookup, which is rebuilt from the histories on every call:
+
+```bash
+uv run scripts/list_runs.py                    # one row per configuration (label, split, seeds)
+uv run scripts/list_runs.py --runs             # one row per run (seed, run_id, finished, paths)
+uv run scripts/list_runs.py --paradigm pl_qtl  # only one paradigm
+uv run scripts/list_runs.py --find dc658242    # full spec and files of a config or run ID prefix
+uv run scripts/list_runs.py --runs --csv runs.csv
+```
 
 ### 4. Evaluation & Telemetry Visualization
 
 ```bash
-# Evaluate models and generate metrics JSON. Each script writes two files per
-# paradigm to data/results/metrics/nifti/: <name>_results.json (test cohort) and
-# <name>_val_results.json (validation cohort). evaluate_baseline.py was already
+# Evaluate models and generate metrics JSON. For every configuration each script
+# writes val_results.json and test_results.json to
+# data/results/metrics/<paradigm>/<config_id>/. evaluate_baseline.py was already
 # run in step 3.
 uv run scripts/metrics/evaluate_baseline.py
-uv run scripts/metrics/evaluate_tl.py
-uv run scripts/metrics/evaluate_qtl.py
+uv run scripts/metrics/evaluate_ctl.py
+uv run scripts/metrics/evaluate_pl_qtl.py
 uv run scripts/metrics/evaluate_qiskit_qtl.py
 
 # Generate the comparative report: mean and std across seeds on test, the run
-# selected on validation next to it, and percentage changes between the means
+# selected on validation next to it, and percentage changes between the means.
+# Each paradigm contributes its only configuration; if a paradigm has several,
+# name one with --config <paradigm>=<config_id>. Paradigms trained on different
+# splits are refused. Written to data/results/metrics/comparative_report.json.
 uv run scripts/metrics/generate_improvement_report.py
 
-# Plot metric distributions, ROC curves, and confusion matrices
+# Plot metric distributions, ROC curves, and confusion matrices for every
+# configuration, to data/results/plots/<paradigm>/<config_id>/. The isolated ROC
+# curve and confusion matrix show the run selected on validation.
 uv run scripts/viz/visualize_baselines.py
-uv run scripts/viz/visualize_tl.py
-uv run scripts/viz/visualize_qtl.py
+uv run scripts/viz/visualize_ctl.py
+uv run scripts/viz/visualize_pl_qtl.py
 uv run scripts/viz/visualize_qiskit_qtl.py
 
-# Plot loss curves from the saved training histories: per-seed and distribution
-# plots go to data/results/plots/nifti/loss/<paradigm>/, and the cross-paradigm
-# comparison to data/results/plots/nifti/loss/. Can run while sweeps are in progress.
+# Plot loss curves from the saved training histories: per-run and distribution
+# plots go to data/results/plots/<paradigm>/<config_id>/, and the comparison
+# across configurations to data/results/plots/loss_comparison.png. Can run while
+# sweeps are in progress.
 uv run scripts/viz/visualize_loss.py
 ```
 

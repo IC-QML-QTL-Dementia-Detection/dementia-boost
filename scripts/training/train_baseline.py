@@ -3,21 +3,23 @@
 This script trains the baseline LeNet-based Convolutional Neural Network across
 100 random seeds (1 to 100) using raw logits output and BCEWithLogitsLoss on
 preprocessed NIfTI axial slices. Training is monitored on the validation cohort
-only; the test cohort is never loaded here. Model checkpoints are serialized to
-disk for subsequent evaluation and transfer learning benchmarking. Each run also
-persists its per-epoch training history as JSON; loss plots are rendered from
-those files by `scripts/viz/visualize_loss.py`.
+only; the test cohort is never loaded here. Each run is described by a `RunSpec`
+(which records the split it trained on); its checkpoint, per-epoch history, and
+configuration are written where `ResultsLayout` puts them, and a run whose
+checkpoint exists is skipped. Loss plots are rendered from the histories by
+`scripts/viz/visualize_loss.py`.
 """
-
-import os
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 
+from dementia_boost.core.identity import Paradigm, RunSpec, label
+from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.core.reproducibility import set_seed
 from dementia_boost.data import OasisDataLoader
+from dementia_boost.data.split_manifest import read_split_id
 from dementia_boost.models.classical_cnn import (
     ClassicalClassifierHead,
     DementiaClassifier,
@@ -26,9 +28,13 @@ from dementia_boost.models.classical_cnn import (
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.training.trainer import BaselineTrainer
 
-DEFAULT_HISTORY_DIR: str = "./data/results/histories/nifti/baseline"
+DEFAULT_EXPERIMENT_SEEDS: range = range(1, 101)
+DEFAULT_EPOCHS_PER_RUN: int = 100
+DEFAULT_BATCH_SIZE: int = 64
+DEFAULT_LEARNING_RATE: float = 1e-4
+DEFAULT_LR_STEP_SIZE: int = 10
+DEFAULT_LR_GAMMA: float = 0.75
 DEFAULT_EVAL_EVERY: int = 1
-PARADIGM: str = "baseline"
 
 
 def get_device() -> torch.device:
@@ -44,17 +50,35 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
+def build_spec(seed: int, split_id: str) -> RunSpec:
+    """Builds the specification of one baseline run.
+
+    Args:
+        seed: Random seed of the run.
+        split_id: ID of the data split the run trains on.
+
+    Returns:
+        The baseline spec.
+    """
+    return RunSpec(
+        paradigm=Paradigm.BASELINE,
+        lr=DEFAULT_LEARNING_RATE,
+        lr_step_size=DEFAULT_LR_STEP_SIZE,
+        lr_gamma=DEFAULT_LR_GAMMA,
+        epochs=DEFAULT_EPOCHS_PER_RUN,
+        batch_size=DEFAULT_BATCH_SIZE,
+        split_id=split_id,
+        seed=seed,
+    )
+
+
 def main() -> None:
     """Executes the multiseed training loop for the classical CNN on NIfTI data."""
     logger = setup_logger("baseline_train_nifti")
     device = get_device()
     logger.info(f"Target Device: {device}")
 
-    experiment_seeds = range(1, 101)
-    epochs_per_run = 100
-    batch_size = 64
-
-    loader_manager = OasisDataLoader(batch_size=batch_size)
+    loader_manager = OasisDataLoader(batch_size=DEFAULT_BATCH_SIZE)
     train_loader = loader_manager.get_data_loader("train")
     val_loader = loader_manager.get_data_loader("val")
     logger.info(
@@ -62,21 +86,21 @@ def main() -> None:
         f"{len(val_loader)} validation batches."
     )
 
-    save_dir = "./data/results/trained_models/nifti"
-    os.makedirs(save_dir, exist_ok=True)
+    layout = ResultsLayout()
+    split_id = read_split_id(OasisDataLoader.RESULTS_PATH)
+    logger.info(f"Split: {split_id}")
 
-    for seed in experiment_seeds:
-        run_id = f"seed_{seed}"
-        checkpoint_path = os.path.join(save_dir, f"baseline_{run_id}.pt")
+    for seed in DEFAULT_EXPERIMENT_SEEDS:
+        spec = build_spec(seed, split_id)
 
-        if os.path.exists(checkpoint_path):
+        if layout.is_done(spec):
             logger.info(
-                f"Checkpoint already exists for {run_id} at {checkpoint_path}. "
-                "Skipping execution."
+                f"Checkpoint already exists for {label(spec)} at "
+                f"{layout.checkpoint_path(spec)}. Skipping execution."
             )
             continue
 
-        logger.info(f"=== Starting Experiment: {run_id} ===")
+        logger.info(f"=== Starting Experiment: {label(spec)} ===")
         set_seed(seed)
 
         model = DementiaClassifier(
@@ -85,10 +109,9 @@ def main() -> None:
         ).to(device)
 
         criterion = nn.BCEWithLogitsLoss()
-        optimizer = optim.Adam(model.parameters(), lr=1e-4)
-        scheduler = StepLR(optimizer, step_size=10, gamma=0.75)
+        optimizer = optim.Adam(model.parameters(), lr=spec.lr)
+        scheduler = StepLR(optimizer, step_size=spec.lr_step_size, gamma=spec.lr_gamma)
 
-        history_path = os.path.join(DEFAULT_HISTORY_DIR, f"{run_id}.json")
         trainer = BaselineTrainer(
             model=model,
             train_loader=train_loader,
@@ -98,14 +121,14 @@ def main() -> None:
             scheduler=scheduler,
             device=device,
             logger=logger,
-            save_dir=save_dir,
-            history_path=history_path,
+            spec=spec,
+            layout=layout,
             eval_every=DEFAULT_EVAL_EVERY,
-            paradigm=PARADIGM,
+            extras={"torch_device": str(device)},
         )
 
-        trainer.train(epochs=epochs_per_run, run_id=run_id)
-        logger.info(f"=== Completed Experiment: {run_id} ===\n")
+        trainer.train()
+        logger.info(f"=== Completed Experiment: {label(spec)} ===\n")
 
 
 if __name__ == "__main__":

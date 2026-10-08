@@ -1,18 +1,17 @@
-"""Telemetry, metric aggregation, logging, and publication-ready visualization.
+"""Telemetry, metric aggregation, logging, and model selection.
 
 This module provides structured data transfer objects (DTOs), metrics evaluation
-and multi-run aggregation utilities, console/file loggers, and plotting tools
-for ROC curves, metric distributions, and confusion matrices.
+and multi-run aggregation utilities, console/file loggers, model selection on
+validation metrics, and the comparative report. Plotting lives in
+`dementia_boost.viz`.
 """
 
 from .logger import setup_logger
 from .metrics import AggregateMetrics, EvaluationResult, MetricsAnalyzer
-from .visualizer import MetricsVisualizer
 
 __all__ = [
     "AggregateMetrics",
     "EvaluationResult",
     "MetricsAnalyzer",
-    "MetricsVisualizer",
     "setup_logger",
 ]

@@ -2,7 +2,7 @@
 
 This module validates:
 - ``load_baseline_backbone`` weight restoration and parameter freezing.
-- ``build_classical_tl_model`` and ``build_quantum_tl_model`` structural
+- ``build_ctl_model`` and ``build_pl_qtl_model`` structural
   contracts (frozen backbone, freshly initialized head, device placement).
 - ``assemble_dementia_classifier`` numerical equivalence against manually
   composed backbone and head forward passes.
@@ -24,8 +24,8 @@ import torch
 
 from dementia_boost.models.builder import (
     assemble_dementia_classifier,
-    build_classical_tl_model,
-    build_quantum_tl_model,
+    build_ctl_model,
+    build_pl_qtl_model,
     load_baseline_backbone,
 )
 from dementia_boost.models.classical_cnn import (
@@ -33,7 +33,7 @@ from dementia_boost.models.classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
-from dementia_boost.models.quantum_cnn import QuantumClassifierHead
+from dementia_boost.models.quantum_cnn import PennylaneQuantumClassifierHead
 
 _TEST_QUBITS: int = 2
 _TEST_LAYERS: int = 1
@@ -88,7 +88,7 @@ class TestBuildClassicalTlModel:
         device = torch.device("cpu")
         checkpoint_path = _write_mock_baseline_checkpoint(tmp_path)
 
-        model = build_classical_tl_model(checkpoint_path, device)
+        model = build_ctl_model(checkpoint_path, device)
 
         assert isinstance(model, DementiaClassifier)
         assert isinstance(model.classifier_head, ClassicalClassifierHead)
@@ -110,11 +110,11 @@ class TestBuildQuantumTlModel:
         tmp_path: Path,
     ) -> None:
         """Asserts that the returned model has a frozen backbone and an
-        active `QuantumClassifierHead`."""
+        active `PennylaneQuantumClassifierHead`."""
         device = torch.device("cpu")
         checkpoint_path = _write_mock_baseline_checkpoint(tmp_path)
 
-        model = build_quantum_tl_model(
+        model = build_pl_qtl_model(
             checkpoint_path,
             device,
             n_qubits=_TEST_QUBITS,
@@ -123,7 +123,7 @@ class TestBuildQuantumTlModel:
         )
 
         assert isinstance(model, DementiaClassifier)
-        assert isinstance(model.classifier_head, QuantumClassifierHead)
+        assert isinstance(model.classifier_head, PennylaneQuantumClassifierHead)
 
         for param in model.feature_extractor.parameters():
             assert param.requires_grad is False

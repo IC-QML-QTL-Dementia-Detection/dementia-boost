@@ -5,15 +5,14 @@ and uses sorted keys, so running the ETL twice with the same inputs produces a
 byte-identical file.
 """
 
-import hashlib
 import json
 import os
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from dementia_boost.core.identity import short_hash
 from dementia_boost.data.split import SubjectSplit
 
-SPLIT_ID_LENGTH = 12
 MANIFEST_NAME = "split_manifest.json"
 
 
@@ -27,14 +26,9 @@ def compute_split_id(split: SubjectSplit) -> str:
         split: The three sorted cohorts.
 
     Returns:
-        The first `SPLIT_ID_LENGTH` hex characters of a SHA-256 digest.
+        The short hash of the assignment (see `short_hash`).
     """
-    payload = json.dumps(
-        {"train": split.train, "val": split.val, "test": split.test},
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(payload.encode()).hexdigest()[:SPLIT_ID_LENGTH]
+    return short_hash({"train": split.train, "val": split.val, "test": split.test})
 
 
 def build_manifest(
@@ -120,6 +114,21 @@ def read_manifest(path: str) -> dict[str, Any]:
         )
     with open(path) as handle:
         return json.load(handle)
+
+
+def read_split_id(results_dir: str) -> str:
+    """Reads the ID of the split that is currently on disk.
+
+    Args:
+        results_dir: Directory holding the cohorts and the manifest.
+
+    Returns:
+        The `split_id` recorded in the manifest.
+
+    Raises:
+        FileNotFoundError: If the manifest does not exist.
+    """
+    return read_manifest(os.path.join(results_dir, MANIFEST_NAME))["split_id"]
 
 
 def write_manifest(path: str, manifest: Mapping[str, Any]) -> None:
