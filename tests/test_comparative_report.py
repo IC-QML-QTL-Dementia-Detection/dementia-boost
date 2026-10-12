@@ -101,7 +101,7 @@ class TestSelectedRuns:
         report = _report(baseline=_paradigm(val, test))
 
         assert report["metadata"]["selected_runs"] == {"baseline": "b"}
-        shown = report["comparisons"]["auc"]["paradigms"]["baseline"]
+        shown = report["comparisons"]["test"]["auc"]["paradigms"]["baseline"]
         assert shown["selected_on_validation"] == pytest.approx(0.55)
 
     def test_swapping_test_metrics_does_not_change_the_selection(self) -> None:
@@ -124,7 +124,7 @@ class TestHeadlineNumbers:
 
         report = _report(baseline=_paradigm({"a": {}, "b": {}}, runs))
 
-        shown = report["comparisons"]["auc"]["paradigms"]["baseline"]
+        shown = report["comparisons"]["test"]["auc"]["paradigms"]["baseline"]
         assert shown["mean"] == pytest.approx(0.7)
         assert shown["std"] == pytest.approx(0.1)
 
@@ -141,16 +141,70 @@ class TestHeadlineNumbers:
 
         report = _report(baseline=baseline, ctl=ctl)
 
-        deltas = report["comparisons"]["auc"]["delta_pct_of_means"]
+        deltas = report["comparisons"]["test"]["auc"]["delta_pct_of_means"]
         assert deltas["ctl_vs_baseline"] == pytest.approx(20.0)
 
     def test_missing_optional_paradigms_are_omitted(self) -> None:
         """Only paradigms that were evaluated appear, and only their deltas."""
         report = _report(baseline=_paradigm({"a": {}}), ctl=_paradigm({"a": {}}))
 
-        auc = report["comparisons"]["auc"]
-        assert set(auc["paradigms"]) == {"baseline", "ctl"}
-        assert set(auc["delta_pct_of_means"]) == {"ctl_vs_baseline"}
+        for cohort in ("test", "validation"):
+            auc = report["comparisons"][cohort]["auc"]
+            assert set(auc["paradigms"]) == {"baseline", "ctl"}
+            assert set(auc["delta_pct_of_means"]) == {"ctl_vs_baseline"}
+
+
+class TestValidationStatistics:
+    """Validates that the report also carries each paradigm's validation sweep."""
+
+    def test_validation_mean_and_std_come_from_the_validation_statistics(
+        self,
+    ) -> None:
+        """The validation entries are not copies of the test entries."""
+        val = {"a": {"auc": 0.2}, "b": {"auc": 0.4}}
+        test = {"a": {"auc": 0.6}, "b": {"auc": 0.8}}
+
+        report = _report(baseline=_paradigm(val, test))
+
+        on_val = report["comparisons"]["validation"]["auc"]["paradigms"]["baseline"]
+        on_test = report["comparisons"]["test"]["auc"]["paradigms"]["baseline"]
+        assert on_val["mean"] == pytest.approx(0.3)
+        assert on_val["std"] == pytest.approx(0.1)
+        assert on_test["mean"] == pytest.approx(0.7)
+
+    def test_validation_statistics_do_not_change_the_test_entries(self) -> None:
+        """Test entries stay the same when only the validation metrics move, as
+        long as the run selected on validation is the same."""
+        test = {"a": {"auc": 0.6}, "b": {"auc": 0.8}}
+        first = _report(
+            baseline=_paradigm({"a": {"auc": 0.2}, "b": {"auc": 0.9}}, test)
+        )
+        second = _report(
+            baseline=_paradigm({"a": {"auc": 0.1}, "b": {"auc": 0.5}}, test)
+        )
+
+        assert first["comparisons"]["test"] == second["comparisons"]["test"]
+        assert first["comparisons"]["validation"] != second["comparisons"]["validation"]
+
+    def test_validation_entries_have_no_selected_run_value(self) -> None:
+        """The selected run is shown on test only; on validation it would be the
+        value it was chosen for."""
+        report = _report(baseline=_paradigm({"a": {}}))
+
+        shown = report["comparisons"]["validation"]["auc"]["paradigms"]["baseline"]
+        assert set(shown) == {"mean", "std"}
+
+    def test_validation_deltas_use_the_validation_means(self) -> None:
+        """Percentage deltas of the validation entries compare validation means."""
+        baseline = _paradigm({"a": {"auc": 0.5}}, {"a": {"auc": 0.9}})
+        ctl = _paradigm({"a": {"auc": 0.6}}, {"a": {"auc": 0.9}})
+
+        report = _report(baseline=baseline, ctl=ctl)
+
+        deltas = report["comparisons"]["validation"]["auc"]["delta_pct_of_means"]
+        assert deltas["ctl_vs_baseline"] == pytest.approx(20.0)
+        test_deltas = report["comparisons"]["test"]["auc"]["delta_pct_of_means"]
+        assert test_deltas["ctl_vs_baseline"] == pytest.approx(0.0)
 
 
 class TestInputValidation:

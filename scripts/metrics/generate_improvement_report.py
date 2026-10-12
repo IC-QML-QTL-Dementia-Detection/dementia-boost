@@ -3,11 +3,11 @@
 This script aggregates evaluation results across the Classical Baseline, Classical
 Transfer Learning (CTL), PennyLane Quantum Transfer Learning (QTL), and Qiskit
 Quantum Transfer Learning (Qiskit QTL) runs on NIfTI data. It reports the mean
-and standard deviation of every metric across seeds on the test cohort, shows
-the test metrics of the run selected on the validation cohort, calculates the
-relative percentage change between the means, and exports a comparative JSON
-report. No run is chosen on test metrics, and paradigms trained on different
-splits are refused.
+and standard deviation of every metric across seeds on the test cohort and on
+the validation cohort, shows the test metrics of the run selected on the
+validation cohort, calculates the relative percentage change between the means
+of each cohort, and exports a comparative JSON report. No run is chosen on test
+metrics, and paradigms trained on different splits are refused.
 
 Each paradigm contributes one configuration: the only one with results, or the
 one named with `--config <paradigm>=<config_id>` when there are several.
