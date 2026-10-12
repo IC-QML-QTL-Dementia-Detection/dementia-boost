@@ -2,8 +2,10 @@
 
 The report leads with the mean and standard deviation of every metric across the
 seeds of a paradigm, measured on the test cohort. Next to them it shows the test
-metrics of the run that was selected on the validation cohort. No run is chosen
-on test metrics.
+metrics of the run that was selected on the validation cohort. The same
+statistics are also given for the validation cohort, which is the development
+cohort: it selects the backbone and monitors training. No run is chosen on test
+metrics.
 """
 
 from collections.abc import Mapping
@@ -89,13 +91,15 @@ def build_comparative_report(
         test_results: Mapping of paradigm name (a `Paradigm` value) to its
             test-cohort results payload.
         val_results: Mapping of the same paradigm names to their
-            validation-cohort results payloads. Used only to select a run.
+            validation-cohort results payloads. Select a run, and are reported
+            as the development cohort.
 
     Returns:
         A dictionary with `metadata` (the selection rule and the run selected
-        per paradigm) and `comparisons`. For each metric, `comparisons` holds
-        `paradigms` (per paradigm: `mean` and `std` across seeds on test, and
-        `selected_on_validation`, the test value of the selected run) and
+        per paradigm) and `comparisons`, which has one entry per cohort,
+        `test` and `validation`. Within a cohort, each metric holds
+        `paradigms` (per paradigm: `mean` and `std` across seeds, and on `test`
+        also `selected_on_validation`, the test value of the selected run) and
         `delta_pct_of_means` (percentage change of the means, for every pair
         with both paradigms present).
 
@@ -145,17 +149,47 @@ def build_comparative_report(
         for name in test_results
     }
 
-    comparisons: dict[str, Any] = {}
+    return {
+        "metadata": {"selection": SELECTION_RULE, "selected_runs": selected_runs},
+        "comparisons": {
+            "test": _compare_cohort(test_results, selected_metrics),
+            "validation": _compare_cohort(val_results),
+        },
+    }
+
+
+def _compare_cohort(
+    results: Mapping[str, Mapping[str, Any]],
+    selected_metrics: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Compares the paradigms on the cohort their results were computed on.
+
+    Args:
+        results: Mapping of paradigm name to its results payload on one cohort.
+        selected_metrics: Optional mapping of paradigm name to the metrics of
+            its run selected on validation, on the same cohort as `results`.
+            When given, each paradigm also reports `selected_on_validation`.
+
+    Returns:
+        For each metric, `paradigms` (per paradigm: `mean` and `std` across
+        seeds, and `selected_on_validation` if requested) and
+        `delta_pct_of_means` (percentage change of the means, for every pair
+        with both paradigms present).
+    """
+    comparison: dict[str, Any] = {}
     for metric in REPORT_METRICS:
-        paradigms = {
-            name: {
-                "mean": float(payload["aggregated_statistics"][metric]["mean"]),
-                "std": float(payload["aggregated_statistics"][metric]["std"]),
-                "selected_on_validation": float(selected_metrics[name][metric]),
+        paradigms = {}
+        for name, payload in results.items():
+            statistics = payload["aggregated_statistics"][metric]
+            paradigms[name] = {
+                "mean": float(statistics["mean"]),
+                "std": float(statistics["std"]),
             }
-            for name, payload in test_results.items()
-        }
-        comparisons[metric] = {
+            if selected_metrics is not None:
+                paradigms[name]["selected_on_validation"] = float(
+                    selected_metrics[name][metric]
+                )
+        comparison[metric] = {
             "paradigms": paradigms,
             "delta_pct_of_means": {
                 f"{new}_vs_{base}": calculate_percentage_delta(
@@ -165,11 +199,7 @@ def build_comparative_report(
                 if new in paradigms and base in paradigms
             },
         }
-
-    return {
-        "metadata": {"selection": SELECTION_RULE, "selected_runs": selected_runs},
-        "comparisons": comparisons,
-    }
+    return comparison
 
 
 def _require_cohort(name: str, payload: Mapping[str, Any], expected: str) -> None:
