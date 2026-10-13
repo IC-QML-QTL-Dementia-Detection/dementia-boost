@@ -199,7 +199,8 @@ class QiskitQuantumLayer(nn.Module):
         """Computes the Pauli-Z expectation values for a batch of angles.
 
         Args:
-            x: Embedded input angles of shape `(Batch, n_qubits)`.
+            x: Embedded input angles of shape `(Batch, n_features)`, one column
+                per input parameter of the circuit.
 
         Returns:
             Expectation values of shape `(Batch, n_qubits)`, each in `[-1, 1]`.
