@@ -62,6 +62,13 @@ def main() -> None:
         metavar="PARADIGM=CONFIG_ID",
         help="Configuration to report for a paradigm with several (repeatable).",
     )
+    parser.add_argument(
+        "--output",
+        default=None,
+        metavar="PATH",
+        help="File to write the report to (default: the standard report path), "
+        "so reports of different configurations do not overwrite each other.",
+    )
     arguments = parser.parse_args()
 
     layout = ResultsLayout()
@@ -89,8 +96,8 @@ def main() -> None:
         logger.error(f"Cannot build the report: {error}")
         sys.exit(1)
 
-    output_path = layout.report_path()
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_path = arguments.output or layout.report_path()
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, "w") as file:
         json.dump(report, file, indent=4)
 
