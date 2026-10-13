@@ -166,7 +166,14 @@ uv run scripts/training/train_pl_qtl_multiseed.py
 
 # Train the same Dressed Quantum Network on Qiskit (Aer state-vector, SPSA gradients)
 uv run scripts/training/train_qiskit_qtl_multiseed.py
+
+# The Qiskit head can use another embedding (feature map) in front of the same
+# variational block: paper (default), zz_feature_map, rx, or zz_feature_map_linear.
+# Each embedding is its own configuration. --seeds N runs only the first N seeds.
+uv run scripts/training/train_qiskit_qtl_multiseed.py --ansatz zz_feature_map
 ```
+
+The embeddings other than `paper` have only been run with the Qiskit head at the time of writing; the PennyLane head implements `paper` only. See [`docs/embedding.md`](docs/embedding.md) for the circuits and their mathematics.
 
 Every training script writes a checkpoint and a per-epoch history (loss, accuracy, learning rate, duration, and the full run specification) for each seed, and skips a run whose checkpoint already exists. The `val_loss` and `val_acc` fields of the history are measured on the validation cohort. The training scripts do not produce plots; see the next step.
 
@@ -204,13 +211,18 @@ uv run scripts/metrics/evaluate_ctl.py
 uv run scripts/metrics/evaluate_pl_qtl.py
 uv run scripts/metrics/evaluate_qiskit_qtl.py
 
+# With several configurations (for example several embeddings), evaluate just one:
+uv run scripts/metrics/evaluate_qiskit_qtl.py --config <config_id>
+
 # Generate the comparative report: mean and std across seeds on test and on
 # validation, the run selected on validation next to the test values, and
 # percentage changes between the means of each cohort.
 # Each paradigm contributes its only configuration; if a paradigm has several,
 # name one with --config <paradigm>=<config_id>. Paradigms trained on different
-# splits are refused. Written to data/results/metrics/comparative_report.json.
+# splits are refused. Written to data/results/metrics/comparative_report.json,
+# or to the file given with --output.
 uv run scripts/metrics/generate_improvement_report.py
+uv run scripts/metrics/generate_improvement_report.py --config qiskit_qtl=<config_id> --output <file>
 
 # Plot metric distributions, ROC curves, and confusion matrices for every
 # configuration, to data/results/plots/<paradigm>/<config_id>/. The isolated ROC
@@ -225,6 +237,10 @@ uv run scripts/viz/visualize_qiskit_qtl.py
 # across configurations to data/results/plots/loss_comparison.png. Can run while
 # sweeps are in progress.
 uv run scripts/viz/visualize_loss.py
+
+# Compare the metric distributions of all configurations side by side (test and
+# validation), to data/results/plots/metric_comparison_<cohort>.png.
+uv run scripts/viz/visualize_comparison.py
 ```
 
 ---

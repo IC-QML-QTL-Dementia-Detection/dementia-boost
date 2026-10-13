@@ -226,7 +226,7 @@ flowchart TD
 2. **Pre-Net Dimensionality Reduction & Angle Mapping**:
    $$\tilde{z} = \tanh(W_{\text{pre}} z_{\text{raw}} + b_{\text{pre}}) \cdot \frac{\pi}{2} \in \left[-\frac{\pi}{2}, \frac{\pi}{2}\right]^{n_{\text{qubits}}}$$
 
-3. **Quantum Encoding & Parameterized Evolution**:
+3. **Quantum Encoding & Parameterized Evolution** (the paper's angle embedding; the other embeddings of the Qiskit head are in [`embedding.md`](embedding.md)):
    $$|\psi(\tilde{z})\rangle = \bigotimes_{i=1}^{n_{\text{qubits}}} R_z(\tilde{z}_i)\, H\, |0\rangle = \bigotimes_{i=1}^{n_{\text{qubits}}} \tfrac{1}{\sqrt{2}}\left(e^{-i\tilde{z}_i/2}|0\rangle + e^{i\tilde{z}_i/2}|1\rangle\right)$$
    $$|\phi_\theta(\tilde{z})\rangle = \prod_{l=1}^{L} \left[ U_{\text{CRY}}(\theta_{l,2}) U_{R_z}(\theta_{l,1}) U_{\text{CNOT}} U_{R_z}(\theta_{l,0}) \right] |\psi(\tilde{z})\rangle$$
 
@@ -262,11 +262,12 @@ flowchart LR
     HEAD --> LAYER --> FN --> RUN --> EST
 ```
 
-- **`qiskit_circuit.py` (`build_qiskit_ansatz`)**: Builds the `QuantumCircuit`, the input and weight `ParameterVector`s, and the per-qubit Pauli-Z `SparsePauliOp` observables. Pauli strings are reversed relative to the qubit index because Qiskit orders them from the most significant qubit.
+- **`qiskit_embeddings.py`**: The registry of embeddings (see [`embedding.md`](embedding.md)): for each name, the PyTorch angle function, the number of angles, and the gates that consume them.
+- **`qiskit_circuit.py` (`build_qiskit_ansatz`)**: Builds the `QuantumCircuit` (the chosen embedding followed by the variational block), the input and weight `ParameterVector`s, and the per-qubit Pauli-Z `SparsePauliOp` observables. Pauli strings are reversed relative to the qubit index because Qiskit orders them from the most significant qubit.
 - **`qiskit_runner.py`**: `QiskitExpectationRunner` owns only "circuit, observables, parameter batch in, expectation values out". Each call is one broadcast PUB with parameters shaped `(N, 1, P)` and observables shaped `(1, n_qubits)`, so every state is evolved once and all expectation values are read from it. `resolve_qiskit_estimator` is the Qiskit counterpart of `resolve_quantum_device`: it returns an injected estimator or, by default, Aer's `EstimatorV2` on the state-vector method with no noise model attached. `StatevectorEstimator` is the slower reference implementation and is injected explicitly where a reference is wanted, such as unit tests. Controlled rotations (`cry`, `crz`, `cp`) are decomposed once at construction, because qiskit-aer 0.17.2 evaluates them wrongly when their angle is bound at run time.
 - **`qiskit_layer.py`**: `QiskitQuantumLayer` holds the flat weight vector, laid out as `[theta, gamma, beta]`, and a custom `torch.autograd.Function`. The backward pass is a loss-level SPSA estimate: one Rademacher direction per sample is shared by all outputs by folding the upstream gradient into the finite difference, which costs one PUB of `2 * Batch` states. The directions come from a generator seeded with the run seed, so a seed reproduces its gradient noise. Exact parameter-shift is avoided because it needs 204 shifted circuits per sample at the default 6-qubit, 4-layer depth.
 - **`qiskit_heads.py` & `builder.py`**: Accept an optional `estimator` (and, on the head, `spsa_epsilon` and `seed`), so the backend is configuration rather than code.
-- **`train_qiskit_qtl_multiseed.py`**: Records the gradient method and SPSA step in each run's spec (they change the maths, so they are part of the configuration ID) and the estimator class as a non-hashed extra in the history, and validates every epoch.
+- **`train_qiskit_qtl_multiseed.py`**: Records the gradient method and SPSA step in each run's spec (they change the maths, so they are part of the configuration ID) and the estimator class as a non-hashed extra in the history, and validates every epoch. `--ansatz` selects the embedding and `--seeds N` runs only the first N seeds.
 
 ---
 
@@ -413,6 +414,7 @@ dementia-boost/
 │       │       ├── pennylane_circuit.py   # PennyLane QNode and custom Ansatz definition
 │       │       ├── pennylane_heads.py     # PennylaneQuantumClassifierHead (DQN)
 │       │       ├── qiskit_circuit.py      # Qiskit QuantumCircuit, parameters and observables
+│       │       ├── qiskit_embeddings.py   # Registry of embeddings (angle functions and gates)
 │       │       ├── qiskit_heads.py        # QiskitQuantumClassifierHead (DQN on Qiskit)
 │       │       ├── qiskit_layer.py        # Autograd layer with loss-level SPSA gradients
 │       │       └── qiskit_runner.py       # Expectation runner and estimator resolver
@@ -447,6 +449,7 @@ dementia-boost/
 │   │   └── train_qiskit_qtl_multiseed.py  # Qiskit Quantum Transfer Learning training
 │   └── viz/                               # Plotting and visualization scripts (thin callers of dementia_boost.viz)
 │       ├── visualize_baselines.py         # Boxplots, ROC curves, confusion matrices for baseline
+│       ├── visualize_comparison.py        # Metric distributions of all configurations side by side
 │       ├── visualize_ctl.py               # Boxplots, ROC curves, confusion matrices for CTL
 │       ├── visualize_loss.py              # Loss curves from saved training histories (per paradigm and comparison)
 │       ├── visualize_pl_qtl.py            # Boxplots, ROC curves, confusion matrices for PL QTL
