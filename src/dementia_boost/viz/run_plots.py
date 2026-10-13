@@ -1,7 +1,9 @@
 """Plotting steps shared by the visualization scripts, on the results layout.
 
 `plot_paradigm` draws the evaluation plots of every configuration of a paradigm,
-and `plot_losses` draws the loss curves from the saved histories. Everything is
+`plot_metric_comparisons` compares the metric distributions of all configurations
+side by side, and `plot_losses` draws the loss curves from the saved histories.
+Everything is
 found through the layout and the stored specs, never through file names. The
 drawing itself is done by `MetricsVisualizer`.
 
@@ -10,6 +12,7 @@ on the validation results, like every other selection; the test results are only
 drawn.
 """
 
+import json
 import logging
 import os
 from logging import Logger
@@ -76,6 +79,46 @@ def plot_paradigm(
         plotted.append(config)
 
     return plotted
+
+
+def plot_metric_comparisons(
+    layout: ResultsLayout, logger: Logger | None = None
+) -> dict[str, list[str]]:
+    """Compares every configuration's metric distributions on each cohort.
+
+    For the test and the validation cohort it writes one figure with a box per
+    configuration and metric to `<root>/plots`, from the results of every
+    configuration of every paradigm that has them.
+
+    Args:
+        layout: The results layout to read metrics from and write plots to.
+        logger: Logger for progress. Defaults to a module logger.
+
+    Returns:
+        Mapping of each cohort (`test`, `val`) to the labels of the
+        configurations drawn on it. Cohorts without results are omitted.
+    """
+    logger = logger or _DEFAULT_LOGGER
+    drawn: dict[str, list[str]] = {}
+
+    for cohort in ("test", "val"):
+        paths: dict[str, str] = {}
+        for paradigm in Paradigm:
+            for config in layout.configs_with_metrics(paradigm, cohort):
+                path = layout.metrics_path(paradigm, config, cohort)
+                with open(path) as file:
+                    paths[json.load(file)["configuration"]["label"]] = path
+        if not paths:
+            continue
+
+        name = "validation" if cohort == "val" else cohort
+        logger.info(f"Comparing {len(paths)} configuration(s) on the {name} cohort")
+        MetricsVisualizer(
+            output_dir=os.path.join(layout.root, "plots")
+        ).plot_metric_comparison(paths, name, f"metric_comparison_{name}.png")
+        drawn[cohort] = list(paths)
+
+    return drawn
 
 
 def plot_losses(layout: ResultsLayout, logger: Logger | None = None) -> dict[str, str]:

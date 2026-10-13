@@ -392,6 +392,66 @@ class MetricsVisualizer:
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
+    def plot_metric_comparison(
+        self, results_paths: dict[str, str], cohort: str, filename: str
+    ) -> None:
+        """Compares metric distributions across configurations side by side.
+
+        Draws one group of boxes per metric (accuracy, precision, recall,
+        f1_score, auc) with one box per configuration, each box spanning the
+        seeds of that configuration.
+
+        Args:
+            results_paths: Mapping from a display label to the results JSON of
+                one configuration on one cohort.
+            cohort: Cohort name for the title, such as "test" or "validation".
+            filename: Name of the PNG file written to the output directory.
+
+        Raises:
+            ValueError: If `results_paths` is empty.
+        """
+        if not results_paths:
+            raise ValueError("No results to compare.")
+
+        metric_keys = ["accuracy", "precision", "recall", "f1_score", "auc"]
+        records = []
+        for label, path in results_paths.items():
+            with open(path) as f:
+                data = json.load(f)
+            for run in data["individual_runs"]:
+                for key in metric_keys:
+                    records.append(
+                        {
+                            "Configuration": label,
+                            "Metric": key.capitalize(),
+                            "Score": run[key],
+                        }
+                    )
+
+        fig, ax = plt.subplots(figsize=(14, 7))
+        sns.boxplot(
+            data=pd.DataFrame(records),
+            x="Metric",
+            y="Score",
+            hue="Configuration",
+            fliersize=2,
+            ax=ax,
+        )
+        ax.set_title(f"Metric Distributions across Seeds ({cohort} cohort)")
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_xlabel("Metric")
+        ax.set_ylabel("Score")
+        ax.legend(
+            title="Configuration",
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.12),
+            ncols=2,
+        )
+
+        save_path = os.path.join(self.output_dir, filename)
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
     @staticmethod
     def _load_histories(history_dir: str) -> list[TrainingHistory]:
         """Loads every training history in a directory.
