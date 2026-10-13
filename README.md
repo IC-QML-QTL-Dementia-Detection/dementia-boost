@@ -241,6 +241,12 @@ uv run scripts/viz/visualize_loss.py
 # Compare the metric distributions of all configurations side by side (test and
 # validation), to data/results/plots/metric_comparison_<cohort>.png.
 uv run scripts/viz/visualize_comparison.py
+
+# The same figures with short presentation names for posters and papers (for
+# example "QTL (Qiskit), ZZ-Feature Map"), written next to the full-label ones as
+# *_production.png. The names are set in src/dementia_boost/viz/display_names.py.
+uv run scripts/viz/visualize_comparison.py --production
+uv run scripts/viz/visualize_loss.py --production
 ```
 
 ---

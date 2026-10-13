@@ -51,4 +51,6 @@ followed by the post-net. The weights number $3Ln$ (72 at $n = 6$, $L = 4$) and 
 
 ## Comparing embeddings
 
+The legends of the comparison figures show the full configuration labels by default. With `--production` (on `visualize_comparison.py` and `visualize_loss.py`) they use short names (`Angle Embedding`, `RX Embedding`, `ZZ-Feature Map`, `ZZ-Feature Map (Linear)`, `QTL (Qiskit)`, `QTL (PennyLane)`), and the files get a `_production` suffix so both versions can exist. The names are the tables in `viz/display_names.py`.
+
 After training and evaluating each configuration, `scripts/viz/visualize_comparison.py` draws the metric distributions of all configurations side by side (test and validation), `scripts/viz/visualize_loss.py` overlays their validation loss curves, and `scripts/metrics/generate_improvement_report.py --config qiskit_qtl=<config_id> --output <file>` writes a comparative report for one chosen configuration without overwriting the standard one.

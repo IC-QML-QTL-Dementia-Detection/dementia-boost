@@ -20,6 +20,7 @@ from sklearn.metrics import roc_curve
 
 from dementia_boost.core.layout import HISTORY_GLOB
 from dementia_boost.telemetry.metrics import MetricsAnalyzer, TrainingHistory
+from dementia_boost.viz.display_names import METRIC_NAMES
 
 
 class MetricsVisualizer:
@@ -345,7 +346,9 @@ class MetricsVisualizer:
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
-    def plot_loss_comparison(self, history_dirs: dict[str, str]) -> None:
+    def plot_loss_comparison(
+        self, history_dirs: dict[str, str], filename: str = "loss_comparison.png"
+    ) -> None:
         """Overlays median validation loss curves across paradigms.
 
         Directories without any history file are skipped, so the plot can be
@@ -354,6 +357,7 @@ class MetricsVisualizer:
         Args:
             history_dirs: Mapping from a display label (for example "CTL") to
                 the directory holding that paradigm's history JSON files.
+            filename: Name of the PNG file written to the output directory.
 
         Raises:
             ValueError: If none of the directories contains a history file.
@@ -388,12 +392,16 @@ class MetricsVisualizer:
         ax.set_ylabel("Validation Loss")
         ax.legend()
 
-        save_path = os.path.join(self.output_dir, "loss_comparison.png")
+        save_path = os.path.join(self.output_dir, filename)
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
     def plot_metric_comparison(
-        self, results_paths: dict[str, str], cohort: str, filename: str
+        self,
+        results_paths: dict[str, str],
+        cohort: str,
+        filename: str,
+        production: bool = False,
     ) -> None:
         """Compares metric distributions across configurations side by side.
 
@@ -406,6 +414,10 @@ class MetricsVisualizer:
                 one configuration on one cohort.
             cohort: Cohort name for the title, such as "test" or "validation".
             filename: Name of the PNG file written to the output directory.
+            production: Whether to label the metrics with their presentation
+                names (`F1-Score`, `AUC-ROC`) instead of the capitalised keys,
+                and to title the figure `Metrics Distribution` without the
+                cohort, which the file name then carries alone.
 
         Raises:
             ValueError: If `results_paths` is empty.
@@ -414,6 +426,10 @@ class MetricsVisualizer:
             raise ValueError("No results to compare.")
 
         metric_keys = ["accuracy", "precision", "recall", "f1_score", "auc"]
+        metric_names = {
+            key: METRIC_NAMES[key] if production else key.capitalize()
+            for key in metric_keys
+        }
         records = []
         for label, path in results_paths.items():
             with open(path) as f:
@@ -423,7 +439,7 @@ class MetricsVisualizer:
                     records.append(
                         {
                             "Configuration": label,
-                            "Metric": key.capitalize(),
+                            "Metric": metric_names[key],
                             "Score": run[key],
                         }
                     )
@@ -437,7 +453,11 @@ class MetricsVisualizer:
             fliersize=2,
             ax=ax,
         )
-        ax.set_title(f"Metric Distributions across Seeds ({cohort} cohort)")
+        ax.set_title(
+            "Metrics Distribution"
+            if production
+            else f"Metric Distributions across Seeds ({cohort} cohort)"
+        )
         ax.set_ylim(-0.05, 1.05)
         ax.set_xlabel("Metric")
         ax.set_ylabel("Score")

@@ -21,6 +21,7 @@ from dementia_boost.core.identity import Paradigm, label
 from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.telemetry.run_listing import group_by_config, load_runs
 from dementia_boost.telemetry.selection import select_best_validation_run
+from dementia_boost.viz.display_names import production_labels
 from dementia_boost.viz.visualizer import MetricsVisualizer
 
 _DEFAULT_LOGGER = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ def plot_paradigm(
 
 
 def plot_metric_comparisons(
-    layout: ResultsLayout, logger: Logger | None = None
+    layout: ResultsLayout, logger: Logger | None = None, production: bool = False
 ) -> dict[str, list[str]]:
     """Compares every configuration's metric distributions on each cohort.
 
@@ -93,6 +94,10 @@ def plot_metric_comparisons(
     Args:
         layout: The results layout to read metrics from and write plots to.
         logger: Logger for progress. Defaults to a module logger.
+        production: Whether to use the short presentation names for the
+            configurations and metrics (see `display_names`) and write
+            `metric_comparison_<cohort>_production.png`, so the figure with the
+            full configuration labels is not overwritten.
 
     Returns:
         Mapping of each cohort (`test`, `val`) to the labels of the
@@ -102,26 +107,42 @@ def plot_metric_comparisons(
     drawn: dict[str, list[str]] = {}
 
     for cohort in ("test", "val"):
-        paths: dict[str, str] = {}
+        found: dict[str, tuple[str, str]] = {}
+        shown: dict[str, tuple[str, str | None]] = {}
         for paradigm in Paradigm:
             for config in layout.configs_with_metrics(paradigm, cohort):
                 path = layout.metrics_path(paradigm, config, cohort)
                 with open(path) as file:
-                    paths[json.load(file)["configuration"]["label"]] = path
-        if not paths:
+                    configuration = json.load(file)["configuration"]
+                found[config] = (configuration["label"], path)
+                shown[config] = (paradigm.value, configuration["spec"].get("ansatz"))
+        if not found:
             continue
 
+        names = production_labels(shown) if production else None
+        paths = {
+            names[config] if names else full_label: path
+            for config, (full_label, path) in found.items()
+        }
         name = "validation" if cohort == "val" else cohort
+        suffix = "_production" if production else ""
         logger.info(f"Comparing {len(paths)} configuration(s) on the {name} cohort")
         MetricsVisualizer(
             output_dir=os.path.join(layout.root, "plots")
-        ).plot_metric_comparison(paths, name, f"metric_comparison_{name}.png")
+        ).plot_metric_comparison(
+            paths,
+            name,
+            f"metric_comparison_{name}{suffix}.png",
+            production=production,
+        )
         drawn[cohort] = list(paths)
 
     return drawn
 
 
-def plot_losses(layout: ResultsLayout, logger: Logger | None = None) -> dict[str, str]:
+def plot_losses(
+    layout: ResultsLayout, logger: Logger | None = None, production: bool = False
+) -> dict[str, str]:
     """Draws the loss plots of every configuration from the saved histories.
 
     Per configuration it writes one loss curve per run and a multi-seed loss
@@ -131,6 +152,10 @@ def plot_losses(layout: ResultsLayout, logger: Logger | None = None) -> dict[str
     Args:
         layout: The results layout to read histories from and write plots to.
         logger: Logger for progress. Defaults to a module logger.
+        production: Whether to draw only the cross-configuration comparison,
+            with the short presentation names (see `display_names`), to
+            `loss_comparison_production.png`. The per-configuration plots and
+            the comparison with the full labels are not touched.
 
     Returns:
         Mapping of each configuration's label to its history directory. Empty if
@@ -138,25 +163,40 @@ def plot_losses(layout: ResultsLayout, logger: Logger | None = None) -> dict[str
     """
     logger = logger or _DEFAULT_LOGGER
     available: dict[str, str] = {}
+    shown: dict[str, tuple[str, str | None]] = {}
+    directories: dict[str, str] = {}
 
     for config, histories in group_by_config(load_runs(layout)).items():
         first = histories[0].spec
         paradigm = first.paradigm
         history_dir = layout.history_dir(paradigm, config)
-        visualizer = MetricsVisualizer(output_dir=layout.plots_dir(paradigm, config))
 
-        logger.info(
-            f"Plotting {len(histories)} loss curve(s) for {label(first, False)}"
-        )
-        for history in histories:
-            visualizer.plot_loss_curve(
-                layout.history_path(history.spec), prefix=paradigm.value
+        if not production:
+            visualizer = MetricsVisualizer(
+                output_dir=layout.plots_dir(paradigm, config)
             )
-        visualizer.plot_loss_distribution(history_dir, prefix=paradigm.value)
+            logger.info(
+                f"Plotting {len(histories)} loss curve(s) for {label(first, False)}"
+            )
+            for history in histories:
+                visualizer.plot_loss_curve(
+                    layout.history_path(history.spec), prefix=paradigm.value
+                )
+            visualizer.plot_loss_distribution(history_dir, prefix=paradigm.value)
         available[label(first, include_seed=False)] = history_dir
+        shown[config] = (paradigm.value, first.ansatz)
+        directories[config] = history_dir
 
+    if production:
+        names = production_labels(shown)
+        available = {names[config]: path for config, path in directories.items()}
     if available:
         MetricsVisualizer(
             output_dir=os.path.join(layout.root, "plots")
-        ).plot_loss_comparison(available)
+        ).plot_loss_comparison(
+            available,
+            filename="loss_comparison_production.png"
+            if production
+            else "loss_comparison.png",
+        )
     return available

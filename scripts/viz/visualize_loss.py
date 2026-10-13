@@ -7,9 +7,11 @@ loss-curve plot per run and one multi-seed loss distribution plot to that
 configuration's plot directory, plus the cross-configuration validation-loss
 comparison to `data/results/plots/loss_comparison.png`. Configurations without
 any saved history simply do not appear, so it can run while sweeps are in
-progress.
+progress. With `--production` it only draws the comparison, with short
+presentation names, to `data/results/plots/loss_comparison_production.png`.
 """
 
+import argparse
 import sys
 
 import matplotlib
@@ -21,11 +23,21 @@ from dementia_boost.viz.run_plots import plot_losses
 
 def main() -> None:
     """Generates all loss-curve visualization artifacts from saved histories."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--production",
+        action="store_true",
+        help="Draw only the cross-configuration comparison, with short "
+        "presentation names, to loss_comparison_production.png.",
+    )
+    arguments = parser.parse_args()
     matplotlib.use("Agg")
     logger = setup_logger("visualize_loss_nifti")
 
     try:
-        available = plot_losses(ResultsLayout(), logger)
+        available = plot_losses(
+            ResultsLayout(), logger, production=arguments.production
+        )
     except (FileNotFoundError, ValueError) as error:
         logger.error(f"Failed to generate plots: {error}")
         sys.exit(1)
