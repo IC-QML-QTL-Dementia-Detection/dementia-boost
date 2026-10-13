@@ -115,6 +115,44 @@ The scripts of the Quickstart reproduce every number above: the split is set by 
 
 ---
 
+## Embedding Comparison (Qiskit only)
+
+The embedding is the part of the circuit that loads the 6 scaled features into the qubits (`docs/embedding.md` gives the mathematics). The Dressed Quantum Network above uses the paper's angle embedding. To see whether another embedding helps, the Qiskit head was also run with an RX embedding, the ZZ feature map (full entanglement, two repetitions), and a ZZ feature map with nearest-neighbour entanglement. The variational block, the backbone, the split, and every hyperparameter are the same, so the embedding is the only difference. Each configuration has 101 seeds (0 to 100).
+
+> [!NOTE]
+> **These embeddings were run only with the Qiskit head** (loss-level SPSA gradients). The PennyLane head has only been run with the angle embedding. The comparison is therefore between embeddings on one framework, and it says nothing about how the same embeddings would behave with PennyLane's exact gradients. The values come from the comparative report written for each configuration.
+
+#### Test cohort
+
+| Metric        | Angle Embedding | RX Embedding  | ZZ-Feature Map | ZZ-Feature Map (Linear) |
+| :------------ | :-------------: | :-----------: | :------------: | :---------------------: |
+| **Accuracy**  | 0.625 ± 0.032   | 0.618 ± 0.035 | 0.542 ± 0.056  | 0.572 ± 0.053           |
+| **Precision** | 0.607 ± 0.072   | 0.596 ± 0.075 | 0.506 ± 0.114  | 0.530 ± 0.122           |
+| **Recall**    | 0.416 ± 0.124   | 0.411 ± 0.169 | 0.371 ± 0.165  | 0.324 ± 0.146           |
+| **F1-Score**  | 0.485 ± 0.095   | 0.467 ± 0.128 | 0.395 ± 0.115  | 0.382 ± 0.129           |
+| **AUC-ROC**   | 0.663 ± 0.020   | 0.662 ± 0.023 | 0.548 ± 0.072  | 0.581 ± 0.075           |
+
+#### Validation cohort
+
+| Metric        | Angle Embedding | RX Embedding  | ZZ-Feature Map | ZZ-Feature Map (Linear) |
+| :------------ | :-------------: | :-----------: | :------------: | :---------------------: |
+| **Accuracy**  | 0.720 ± 0.048   | 0.702 ± 0.052 | 0.556 ± 0.067  | 0.610 ± 0.070           |
+| **Precision** | 0.851 ± 0.129   | 0.839 ± 0.154 | 0.567 ± 0.161  | 0.675 ± 0.170           |
+| **Recall**    | 0.496 ± 0.129   | 0.485 ± 0.163 | 0.393 ± 0.191  | 0.360 ± 0.170           |
+| **F1-Score**  | 0.610 ± 0.105   | 0.585 ± 0.126 | 0.425 ± 0.145  | 0.438 ± 0.157           |
+| **AUC-ROC**   | 0.767 ± 0.029   | 0.770 ± 0.027 | 0.574 ± 0.090  | 0.649 ± 0.090           |
+
+![Test metric distributions across seeds for each embedding, with the baseline, CTL, and PL QTL for reference](docs/figures/embedding_metric_comparison.png)
+
+![Validation loss across configurations, median and interquartile range over seeds](docs/figures/embedding_loss_comparison.png)
+
+- **The RX embedding matches the angle embedding.** The test AUC-ROC is 0.662 against 0.663, and a seed-by-seed comparison finds no difference (RX is better in 53 of 101 seeds; Wilcoxon signed-rank test, p = 0.95). On accuracy RX is slightly lower (0.618 against 0.625), a gap that is within the spread on test and small but detectable on validation (0.702 against 0.720). The Hadamard layer in the angle embedding makes no measurable difference once an RX rotation loads the feature directly.
+- **The ZZ feature map is worse, and more entanglement is worse.** The full map reaches 0.548 test AUC-ROC and the nearest-neighbour map 0.581, against 0.663 for the angle embedding. The full ZZ map beats the angle embedding in only 8 of 101 seeds on test AUC-ROC (Wilcoxon signed-rank test, p < 1e-15), and 49 of its 101 runs have a test AUC-ROC below 0.55. Its validation loss stays close to chance (ln 2, about 0.693) through 100 epochs, while the other embeddings fall to about 0.63 to 0.64. The model barely trains.
+- **A possible reason, not tested here:** the ZZ angles $2(\pi - x_i)(\pi - x_j)$ span a wide range, so the encoded state may vary too sharply with the input for a 4-layer variational block trained with SPSA to read it. A gradient-based study of trainability would be needed to confirm this, and the result may differ with exact gradients.
+- **Reading the numbers.** The comparison uses one split, one backbone, and a 41-subject test cohort, and all heads stay far from the paper's reported accuracies. These results show that, in this setup, a richer entangling encoding did not help. They do not show that it cannot help in general.
+
+---
+
 ## Quickstart
 
 ### 1. Environment Setup
