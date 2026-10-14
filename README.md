@@ -285,6 +285,11 @@ uv run scripts/viz/visualize_comparison.py
 # *_production.png. The names are set in src/dementia_boost/viz/display_names.py.
 uv run scripts/viz/visualize_comparison.py --production
 uv run scripts/viz/visualize_loss.py --production
+
+# Both scripts can also write each comparison figure as a vector file (SVG, PDF)
+# next to the PNG, with the same name, for printing at large sizes.
+uv run scripts/viz/visualize_comparison.py --production --svg --pdf
+uv run scripts/viz/visualize_loss.py --production --svg --pdf
 ```
 
 ---

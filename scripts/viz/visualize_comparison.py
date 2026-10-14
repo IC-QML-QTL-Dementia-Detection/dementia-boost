@@ -9,7 +9,8 @@ PennyLane references. Configurations without results simply do not appear.
 
 By default the legend shows the full configuration labels, which say exactly what
 ran. `--production` writes a second set of figures, with short presentation names,
-for posters and papers; it does not overwrite the full-label figures.
+for posters and papers; it does not overwrite the full-label figures. `--svg` and
+`--pdf` also write each figure in that vector format next to the PNG.
 """
 
 import argparse
@@ -20,6 +21,7 @@ import matplotlib
 from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.viz.run_plots import plot_metric_comparisons
+from dementia_boost.viz.vector_options import add_vector_arguments, vector_formats
 
 
 def main() -> None:
@@ -31,13 +33,17 @@ def main() -> None:
         help="Use the short presentation names (for example 'QTL (Qiskit), "
         "ZZ-Feature Map') and write metric_comparison_<cohort>_production.png.",
     )
+    add_vector_arguments(parser)
     arguments = parser.parse_args()
     matplotlib.use("Agg")
     logger = setup_logger("visualize_comparison_nifti")
 
     try:
         drawn = plot_metric_comparisons(
-            ResultsLayout(), logger, production=arguments.production
+            ResultsLayout(),
+            logger,
+            production=arguments.production,
+            vector_formats=vector_formats(arguments),
         )
     except (FileNotFoundError, ValueError) as error:
         logger.error(f"Failed to generate plots: {error}")

@@ -15,6 +15,7 @@ drawn.
 import json
 import logging
 import os
+from collections.abc import Sequence
 from logging import Logger
 
 from dementia_boost.core.identity import Paradigm, label
@@ -83,7 +84,10 @@ def plot_paradigm(
 
 
 def plot_metric_comparisons(
-    layout: ResultsLayout, logger: Logger | None = None, production: bool = False
+    layout: ResultsLayout,
+    logger: Logger | None = None,
+    production: bool = False,
+    vector_formats: Sequence[str] = (),
 ) -> dict[str, list[str]]:
     """Compares every configuration's metric distributions on each cohort.
 
@@ -98,6 +102,7 @@ def plot_metric_comparisons(
             configurations and metrics (see `display_names`) and write
             `metric_comparison_<cohort>_production.png`, so the figure with the
             full configuration labels is not overwritten.
+        vector_formats: Vector formats (`svg`, `pdf`) to write next to each PNG.
 
     Returns:
         Mapping of each cohort (`test`, `val`) to the labels of the
@@ -128,7 +133,8 @@ def plot_metric_comparisons(
         suffix = "_production" if production else ""
         logger.info(f"Comparing {len(paths)} configuration(s) on the {name} cohort")
         MetricsVisualizer(
-            output_dir=os.path.join(layout.root, "plots")
+            output_dir=os.path.join(layout.root, "plots"),
+            vector_formats=vector_formats,
         ).plot_metric_comparison(
             paths,
             name,
@@ -141,7 +147,10 @@ def plot_metric_comparisons(
 
 
 def plot_losses(
-    layout: ResultsLayout, logger: Logger | None = None, production: bool = False
+    layout: ResultsLayout,
+    logger: Logger | None = None,
+    production: bool = False,
+    vector_formats: Sequence[str] = (),
 ) -> dict[str, str]:
     """Draws the loss plots of every configuration from the saved histories.
 
@@ -156,6 +165,8 @@ def plot_losses(
             with the short presentation names (see `display_names`), to
             `loss_comparison_production.png`. The per-configuration plots and
             the comparison with the full labels are not touched.
+        vector_formats: Vector formats (`svg`, `pdf`) to write next to the
+            cross-configuration comparison. The per-run plots stay PNG only.
 
     Returns:
         Mapping of each configuration's label to its history directory. Empty if
@@ -192,7 +203,8 @@ def plot_losses(
         available = {names[config]: path for config, path in directories.items()}
     if available:
         MetricsVisualizer(
-            output_dir=os.path.join(layout.root, "plots")
+            output_dir=os.path.join(layout.root, "plots"),
+            vector_formats=vector_formats,
         ).plot_loss_comparison(
             available,
             filename="loss_comparison_production.png"

@@ -11,6 +11,7 @@ Regression coverage
 from pathlib import Path
 
 import numpy as np
+import pytest
 from conftest import build_spec
 
 from dementia_boost.core.identity import Paradigm, RunSpec, config_id, run_id
@@ -22,6 +23,7 @@ from dementia_boost.telemetry.metrics import (
 )
 from dementia_boost.training.checkpoint_evaluation import save_configuration_results
 from dementia_boost.viz.run_plots import plot_losses, plot_paradigm
+from dementia_boost.viz.visualizer import MetricsVisualizer
 
 _LABELS = np.array([0, 1] * 10)
 _PERFECT = np.where(_LABELS == 1, 0.9, 0.1)
@@ -127,6 +129,30 @@ class TestPlotLosses:
         assert (qtl_plots / "pl_qtl_loss_distribution.png").stat().st_size > 0
         assert (Path(layout.root) / "plots" / "loss_comparison.png").stat().st_size > 0
         assert len(plotted) == 2
+
+    def test_vector_formats_are_written_next_to_the_comparison(
+        self, tmp_path: Path
+    ) -> None:
+        """Only the cross-configuration comparison gets the extra formats, with the
+        PNG's name; the per-run plots stay PNG."""
+        layout = ResultsLayout(str(tmp_path))
+        specs = [build_spec("pl_qtl", seed=1), build_spec("ctl", seed=1)]
+        for spec in specs:
+            self._write_history(layout, spec)
+            layout.write_config(spec)
+
+        plot_losses(layout, vector_formats=("svg", "pdf"))
+
+        plots = Path(layout.root) / "plots"
+        for extension in ("png", "svg", "pdf"):
+            assert (plots / f"loss_comparison.{extension}").stat().st_size > 0
+        run_plots = Path(layout.plots_dir("pl_qtl", config_id(specs[0])))
+        assert not list(run_plots.glob("*.svg"))
+
+    def test_unknown_vector_format_is_refused(self, tmp_path: Path) -> None:
+        """A typo in a format fails before anything is drawn."""
+        with pytest.raises(ValueError, match="Unknown vector format"):
+            MetricsVisualizer(str(tmp_path), vector_formats=("eps",))
 
     def test_no_histories_plots_nothing(self, tmp_path: Path) -> None:
         """An empty layout gives an empty result instead of blank figures."""
