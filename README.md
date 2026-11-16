@@ -19,7 +19,7 @@ The 12-month plan (`docs/qtl_research_goals_activities.md`) has six activities: 
 
 ## Code Structure
 
-The code under `src/dementia_boost` is split into layers with one responsibility each: `core` (seeds, run identity, file layout), `data` (ETL, split, loaders, feature cache), `models` (backbone and heads), `training`, `telemetry` (metrics, selection, report), and `viz` (all plotting). The scripts under `scripts/` are entry points. [docs/architecture.md](docs/architecture.md) describes each layer, the circuits and their mathematics, and the evaluation protocol.
+The code under `src/dementia_boost` is split into layers with one responsibility each: `core` (seeds, run identity, file layout), `data` (ETL, split, loaders, feature cache), `models` (backbone and heads), `training`, `telemetry` (metrics, selection, report), `viz` (all plotting), and `analysis` (diagnostics that train nothing). The scripts under `scripts/` are entry points. [docs/architecture.md](docs/architecture.md) describes each layer, the circuits and their mathematics, and the evaluation protocol.
 
 ---
 
@@ -214,6 +214,16 @@ Options of the figure scripts:
 - `--production` (comparison and loss): short presentation names, set in `src/dementia_boost/viz/display_names.py`, written as `*_production.png`.
 - `--svg`, `--pdf` (all): also write the figures as vector files next to the PNGs (the loss script only for its comparison).
 - `--exclude <config_id> ...` (comparison and loss): leave configurations out; the figures keep their names.
+
+### 5. Circuit Diagnostic (no training)
+
+```bash
+# Trainability of every embedding and variational block at random initial weights:
+# input spread and sensitivity, gradient scale and variance at 4, 6, 8, 10 qubits.
+# Writes data/results/diagnostics/trainability.json and prints a Markdown table.
+uv run scripts/analysis/trainability.py
+uv run scripts/analysis/trainability.py --qubits 4 6 --draws 10   # quicker
+```
 
 ---
 

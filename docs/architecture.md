@@ -287,9 +287,20 @@ flowchart LR
 - **`qiskit_blocks.py`**: The registry of variational blocks (section 3.2). Each entry creates its weight `ParameterVector`s, in the order of the layer's flat weight tensor, and appends one layer of gates. The default `paper` block keeps its weights laid out as `[theta, gamma, beta]`, which saved checkpoints rely on.
 - **`qiskit_circuit.py` (`build_qiskit_ansatz`)**: Builds the `QuantumCircuit` (the chosen embedding followed by `n_layers` layers of the chosen variational block, with the embedding repeated before every layer when re-uploading), the input and weight `ParameterVector`s, and the per-qubit Pauli-Z `SparsePauliOp` observables. Pauli strings are reversed relative to the qubit index because Qiskit orders them from the most significant qubit.
 - **`qiskit_runner.py`**: `QiskitExpectationRunner` owns only "circuit, observables, parameter batch in, expectation values out". Each call is one broadcast PUB with parameters shaped `(N, 1, P)` and observables shaped `(1, n_qubits)`, so every state is evolved once and all expectation values are read from it. `resolve_qiskit_estimator` is the Qiskit counterpart of `resolve_quantum_device`: it returns an injected estimator or, by default, Aer's `EstimatorV2` on the state-vector method with no noise model attached. `StatevectorEstimator` is the slower reference implementation and is injected explicitly where a reference is wanted, such as unit tests. Controlled rotations (`cry`, `crz`, `cp`) are decomposed once at construction, because qiskit-aer 0.17.2 evaluates them wrongly when their angle is bound at run time.
-- **`qiskit_layer.py`**: `QiskitQuantumLayer` holds the flat weight vector, laid out as `[theta, gamma, beta]`, and a custom `torch.autograd.Function`. The backward pass is a loss-level SPSA estimate: one Rademacher direction per sample is shared by all outputs by folding the upstream gradient into the finite difference, which costs one PUB of `2 * Batch` states. The directions come from a generator seeded with the run seed, so a seed reproduces its gradient noise. Exact parameter-shift is avoided because it needs 204 shifted circuits per sample at the default 6-qubit, 4-layer depth.
+- **`qiskit_layer.py`**: `QiskitQuantumLayer` holds the flat weight vector, in the order of the block's weight vectors (`[theta, gamma, beta]` for `paper`), and a custom `torch.autograd.Function`. The backward pass is a loss-level SPSA estimate: one Rademacher direction per sample is shared by all outputs by folding the upstream gradient into the finite difference, which costs one PUB of `2 * Batch` states. The directions come from a generator seeded with the run seed, so a seed reproduces its gradient noise. Exact parameter-shift is avoided because it needs 204 shifted circuits per sample at the default 6-qubit, 4-layer depth.
 - **`qiskit_heads.py` & `builder.py`**: Accept an optional `estimator` (and, on the head, `spsa_epsilon` and `seed`), so the backend is configuration rather than code.
 - **`train_qiskit_qtl_multiseed.py`**: Records the gradient method and SPSA step in each run's spec (they change the maths, so they are part of the configuration ID) and the estimator class as a non-hashed extra in the history.
+
+### 3.5 Trainability Diagnostic (`src/dementia_boost/analysis/`)
+
+`trainability.py` measures a circuit at initialisation, without training, so circuits can be compared before any run: weights uniform in $[-\pi, \pi]$ and scaled features uniform in $[-\pi/2, \pi/2]$, as at the start of training, simulated exactly on the default estimator. Two costs are read from the expectation values, the global $C_g = \frac{1}{n}\sum_i \langle Z_i\rangle$ and the local $C_l = \langle Z_0\rangle$, because barren-plateau results differ between global and local costs. Per circuit and qubit count it reports:
+
+- the input spread: the smallest per-qubit standard deviation of $\langle Z_i\rangle$ across inputs at fixed weights, averaged over weight draws (zero for a constant circuit);
+- the input sensitivity: the root mean square of $\partial C / \partial \tilde{z}_j$;
+- the weight-gradient scale, the root mean square of $\partial C / \partial w_k$, and its variance across random initialisations, averaged over the weights, the usual barren-plateau measure when plotted against the qubit count;
+- the number of input angles and weights, whose sum is the dimension that SPSA perturbs.
+
+Derivatives are central differences (step $10^{-4}$) on the exact simulation, every shifted circuit in one batched estimator call; CRY has no two-term parameter-shift rule, so one method serves every block. `scripts/analysis/trainability.py` runs every block with the `paper` embedding, with and without re-uploading, and every embedding with the `paper` block, at 4, 6, 8, and 10 qubits, and writes `data/results/diagnostics/trainability.json`.
 
 ---
 
@@ -412,12 +423,14 @@ dementia-boost/
 │   │   └── quantum_cnn/                   # PennyLane and Qiskit circuits, heads, embeddings, runner (3.3, 3.4)
 │   ├── training/                          # Trainer, evaluator, evaluation of every checkpoint (4, 5)
 │   ├── telemetry/                         # Metrics, histories, run listing, selection, report, logger (5)
-│   └── viz/                               # All plotting code; the viz scripts only call it (5)
+│   ├── viz/                               # All plotting code; the viz scripts only call it (5)
+│   └── analysis/                          # Diagnostics that train nothing: circuit trainability (3.5)
 ├── scripts/                               # Entry points, all run with uv run
 │   ├── etl_pipeline.py, audit_cohorts.py  # Build the split; check that no subject is in two cohorts
 │   ├── list_runs.py                       # Look up configurations and runs by hash ID
 │   ├── training/                          # One multi-seed training script per paradigm
 │   ├── metrics/                           # One evaluation script per paradigm, comparative report
-│   └── viz/                               # One plotting script per paradigm, loss and comparison figures
+│   ├── viz/                               # One plotting script per paradigm, loss and comparison figures
+│   └── analysis/                          # Circuit trainability diagnostic
 └── tests/                                 # Unit and integration tests
 ```
