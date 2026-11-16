@@ -18,6 +18,7 @@ from dementia_boost.telemetry.report import (
 )
 
 _METRICS = ("accuracy", "precision", "recall", "f1_score", "auc")
+_LABELS = [0, 0, 0, 1, 1]
 
 
 def _payload(
@@ -30,8 +31,9 @@ def _payload(
 
     Args:
         cohort: Cohort marker of the payload.
-        runs: Mapping of run ID to its metrics; missing metrics default to 0.5
-            and `log_loss` to 0.7.
+        runs: Mapping of run ID to its metrics; missing metrics default to 0.5,
+            `log_loss` to 0.7, the labels to `_LABELS`, and the confusion
+            matrix to a run that predicts both classes.
         split_id: Split the configuration was trained on.
         config: Configuration ID the results belong to.
 
@@ -43,6 +45,8 @@ def _payload(
         {
             "run_id": run_id,
             "log_loss": 0.7,
+            "y_true": _LABELS,
+            "confusion_matrix": [[2, 1], [1, 1]],
             **{name: 0.5 for name in _METRICS},
             **metrics,
         }
@@ -113,6 +117,33 @@ class TestSelectedRuns:
         )
 
         assert first["metadata"]["selected_runs"] == second["metadata"]["selected_runs"]
+
+
+class TestChanceReference:
+    """Validates the majority-class reference and the collapsed-run counts."""
+
+    def test_counts_and_majority_class_per_cohort_test_first(self) -> None:
+        """Each cohort reports the majority-class accuracy of its labels and,
+        per paradigm, the runs that predict a single class; test comes first."""
+        all_negative = {"confusion_matrix": [[3, 0], [2, 0]], "accuracy": 0.6}
+        val = {"a": {}, "b": all_negative}
+        test = {"a": all_negative, "b": all_negative}
+
+        reference = _report(ctl=_paradigm(val, test))["chance_reference"]
+
+        assert list(reference) == ["test", "validation"]
+        assert reference["test"]["majority_class_accuracy"] == pytest.approx(0.6)
+        assert reference["test"]["collapsed_runs"]["ctl"]["only_negative"] == 2
+        assert reference["validation"]["collapsed_runs"]["ctl"]["only_negative"] == 1
+
+    def test_paradigms_scored_on_different_labels_are_refused(self) -> None:
+        """All paradigms of one cohort must be scored on the same slices."""
+        other_labels = {"a": {"y_true": [0, 1]}}
+        with pytest.raises(ValueError, match="labels"):
+            _report(
+                ctl=_paradigm({"a": {}}),
+                baseline=_paradigm({"a": {}}, other_labels),
+            )
 
 
 class TestHeadlineNumbers:
