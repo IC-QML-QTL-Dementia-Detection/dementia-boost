@@ -1,7 +1,9 @@
 """Plotting steps shared by the visualization scripts, on the results layout.
 
 `plot_paradigm` draws the evaluation plots of every configuration of a paradigm,
-and `plot_losses` draws the loss curves from the saved histories. Everything is
+`plot_metric_comparisons` compares the metric distributions of all configurations
+side by side, and `plot_losses` draws the loss curves from the saved histories.
+Everything is
 found through the layout and the stored specs, never through file names. The
 drawing itself is done by `MetricsVisualizer`.
 
@@ -10,17 +12,36 @@ on the validation results, like every other selection; the test results are only
 drawn.
 """
 
+import json
 import logging
 import os
+from collections.abc import Collection, Sequence
 from logging import Logger
 
 from dementia_boost.core.identity import Paradigm, label
 from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.telemetry.run_listing import group_by_config, load_runs
 from dementia_boost.telemetry.selection import select_best_validation_run
+from dementia_boost.viz.display_names import production_labels
 from dementia_boost.viz.visualizer import MetricsVisualizer
 
 _DEFAULT_LOGGER = logging.getLogger(__name__)
+
+
+def _check_excluded(exclude: Collection[str], available: Collection[str]) -> None:
+    """Refuses excluded configuration IDs that match no configuration.
+
+    Args:
+        exclude: The `config_id`s asked to be left out of a figure.
+        available: The `config_id`s the figure would otherwise draw.
+
+    Raises:
+        ValueError: If an excluded ID is not among the available ones, so a
+            mistyped ID does not silently draw the figure with everything.
+    """
+    unknown = sorted(set(exclude) - set(available))
+    if unknown:
+        raise ValueError(f"Excluded configuration(s) {unknown} not found.")
 
 
 def plot_paradigm(
@@ -28,6 +49,7 @@ def plot_paradigm(
     paradigm: Paradigm | str,
     logger: Logger | None = None,
     configuration: str | None = None,
+    vector_formats: Sequence[str] = (),
 ) -> list[str]:
     """Draws the evaluation plots of every configuration of a paradigm.
 
@@ -40,6 +62,7 @@ def plot_paradigm(
         paradigm: The paradigm to plot.
         logger: Logger for progress. Defaults to a module logger.
         configuration: Restrict to one `config_id`. Defaults to all.
+        vector_formats: Vector formats (`svg`, `pdf`) to write next to each PNG.
 
     Returns:
         The `config_id`s that were plotted. Empty if there are no results.
@@ -63,7 +86,10 @@ def plot_paradigm(
         selected = select_best_validation_run(
             layout.metrics_path(paradigm, config, "val")
         )
-        visualizer = MetricsVisualizer(output_dir=layout.plots_dir(paradigm, config))
+        visualizer = MetricsVisualizer(
+            output_dir=layout.plots_dir(paradigm, config),
+            vector_formats=vector_formats,
+        )
         prefix = paradigm.value
 
         logger.info(
@@ -78,42 +104,160 @@ def plot_paradigm(
     return plotted
 
 
-def plot_losses(layout: ResultsLayout, logger: Logger | None = None) -> dict[str, str]:
+def plot_metric_comparisons(
+    layout: ResultsLayout,
+    logger: Logger | None = None,
+    production: bool = False,
+    vector_formats: Sequence[str] = (),
+    exclude: Collection[str] = (),
+) -> dict[str, list[str]]:
+    """Compares every configuration's metric distributions on each cohort.
+
+    For the test and the validation cohort it writes one figure with a box per
+    configuration and metric to `<root>/plots`, from the results of every
+    configuration of every paradigm that has them, except the excluded ones.
+
+    Args:
+        layout: The results layout to read metrics from and write plots to.
+        logger: Logger for progress. Defaults to a module logger.
+        production: Whether to use the short presentation names for the
+            configurations and metrics (see `display_names`) and write
+            `metric_comparison_<cohort>_production.png`, so the figure with the
+            full configuration labels is not overwritten.
+        vector_formats: Vector formats (`svg`, `pdf`) to write next to each PNG.
+        exclude: `config_id`s to leave out of the figures. The figures keep
+            their usual names.
+
+    Returns:
+        Mapping of each cohort (`test`, `val`) to the labels of the
+        configurations drawn on it. Cohorts without results are omitted.
+
+    Raises:
+        ValueError: If an excluded ID has results on neither cohort.
+    """
+    logger = logger or _DEFAULT_LOGGER
+    _check_excluded(
+        exclude,
+        [
+            config
+            for cohort in ("test", "val")
+            for paradigm in Paradigm
+            for config in layout.configs_with_metrics(paradigm, cohort)
+        ],
+    )
+    drawn: dict[str, list[str]] = {}
+
+    for cohort in ("test", "val"):
+        found: dict[str, tuple[str, str]] = {}
+        shown: dict[str, tuple[str, str | None]] = {}
+        for paradigm in Paradigm:
+            for config in layout.configs_with_metrics(paradigm, cohort):
+                if config in exclude:
+                    continue
+                path = layout.metrics_path(paradigm, config, cohort)
+                with open(path) as file:
+                    configuration = json.load(file)["configuration"]
+                found[config] = (configuration["label"], path)
+                shown[config] = (paradigm.value, configuration["spec"].get("ansatz"))
+        if not found:
+            continue
+
+        names = production_labels(shown) if production else None
+        paths = {
+            names[config] if names else full_label: path
+            for config, (full_label, path) in found.items()
+        }
+        name = "validation" if cohort == "val" else cohort
+        suffix = "_production" if production else ""
+        logger.info(f"Comparing {len(paths)} configuration(s) on the {name} cohort")
+        MetricsVisualizer(
+            output_dir=os.path.join(layout.root, "plots"),
+            vector_formats=vector_formats,
+        ).plot_metric_comparison(
+            paths,
+            name,
+            f"metric_comparison_{name}{suffix}.png",
+            production=production,
+        )
+        drawn[cohort] = list(paths)
+
+    return drawn
+
+
+def plot_losses(
+    layout: ResultsLayout,
+    logger: Logger | None = None,
+    production: bool = False,
+    vector_formats: Sequence[str] = (),
+    exclude: Collection[str] = (),
+) -> dict[str, str]:
     """Draws the loss plots of every configuration from the saved histories.
 
     Per configuration it writes one loss curve per run and a multi-seed loss
     distribution to the configuration's plot directory, and finally the
-    cross-configuration validation-loss comparison to `<root>/plots`.
+    cross-configuration validation-loss comparison to `<root>/plots`, without
+    the excluded configurations.
 
     Args:
         layout: The results layout to read histories from and write plots to.
         logger: Logger for progress. Defaults to a module logger.
+        production: Whether to draw only the cross-configuration comparison,
+            with the short presentation names (see `display_names`), to
+            `loss_comparison_production.png`. The per-configuration plots and
+            the comparison with the full labels are not touched.
+        vector_formats: Vector formats (`svg`, `pdf`) to write next to the
+            cross-configuration comparison. The per-run plots stay PNG only.
+        exclude: `config_id`s to leave out of the comparison, which keeps its
+            usual name. Their own per-configuration plots are still drawn.
 
     Returns:
-        Mapping of each configuration's label to its history directory. Empty if
-        there are no histories.
+        Mapping of each compared configuration's label to its history
+        directory. Empty if there are no histories.
+
+    Raises:
+        ValueError: If an excluded ID has no histories.
     """
     logger = logger or _DEFAULT_LOGGER
     available: dict[str, str] = {}
+    shown: dict[str, tuple[str, str | None]] = {}
+    directories: dict[str, str] = {}
 
-    for config, histories in group_by_config(load_runs(layout)).items():
+    grouped = group_by_config(load_runs(layout))
+    _check_excluded(exclude, grouped)
+    for config, histories in grouped.items():
         first = histories[0].spec
         paradigm = first.paradigm
         history_dir = layout.history_dir(paradigm, config)
-        visualizer = MetricsVisualizer(output_dir=layout.plots_dir(paradigm, config))
 
-        logger.info(
-            f"Plotting {len(histories)} loss curve(s) for {label(first, False)}"
-        )
-        for history in histories:
-            visualizer.plot_loss_curve(
-                layout.history_path(history.spec), prefix=paradigm.value
+        if not production:
+            visualizer = MetricsVisualizer(
+                output_dir=layout.plots_dir(paradigm, config)
             )
-        visualizer.plot_loss_distribution(history_dir, prefix=paradigm.value)
+            logger.info(
+                f"Plotting {len(histories)} loss curve(s) for {label(first, False)}"
+            )
+            for history in histories:
+                visualizer.plot_loss_curve(
+                    layout.history_path(history.spec), prefix=paradigm.value
+                )
+            visualizer.plot_loss_distribution(history_dir, prefix=paradigm.value)
+        if config in exclude:
+            continue
         available[label(first, include_seed=False)] = history_dir
+        shown[config] = (paradigm.value, first.ansatz)
+        directories[config] = history_dir
 
+    if production:
+        names = production_labels(shown)
+        available = {names[config]: path for config, path in directories.items()}
     if available:
         MetricsVisualizer(
-            output_dir=os.path.join(layout.root, "plots")
-        ).plot_loss_comparison(available)
+            output_dir=os.path.join(layout.root, "plots"),
+            vector_formats=vector_formats,
+        ).plot_loss_comparison(
+            available,
+            filename="loss_comparison_production.png"
+            if production
+            else "loss_comparison.png",
+        )
     return available

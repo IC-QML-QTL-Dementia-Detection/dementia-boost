@@ -4,51 +4,22 @@
 
 This project reproduces and extends the foundational research on applying **Quantum Transfer Learning (QTL)** to the classification of Dementia from structural brain MRI scans (OASIS-II dataset), based on Bhowmik et al. (2025).
 
-The core hypothesis is that a **Dressed Quantum Neural Network (DQNN)**, composed of a classical pre-net for dimensionality reduction, a Parameterized Quantum Circuit (PQC / Ansatz) for feature processing in Hilbert space, and a classical post-net for logit output, can substantially boost performance and reduce statistical variance when transferring features from a "weak" or suboptimal classical Convolutional Neural Network (CNN) backbone.
+The core hypothesis is that a **Dressed Quantum Neural Network (DQNN)**, composed of a classical pre-net for dimensionality reduction, a Parameterized Quantum Circuit (PQC / Ansatz) for feature processing in Hilbert space, and a classical post-net for logit output, improves performance and reduces the variance across seeds when transferring features from a "weak" or suboptimal classical Convolutional Neural Network (CNN) backbone.
 
 ---
 
-## Project Goals
+## Project Goals and Status
 
-The research follows a multi-stage execution schedule (see `docs/qtl_research_goals_activities.md` for the complete 12-month plan). We are currently concluding **Activity 1** and transitioning into **Activity 2**:
+The 12-month plan (`docs/qtl_research_goals_activities.md`) has six activities: reproduce the paper's model (A1), implement alternative feature maps such as the $ZZ$-Feature Map (A2), optimise how the features are delivered to the circuit (A3), run on IBM quantum hardware (A4), measure noise resilience (A5), and write up the results (A6).
 
-### Activity 1: Baseline Integration and Reproduction _(Current / Concluding)_
-
-- **ETL & Data Pipeline**: Ingest and process the OASIS-II longitudinal MRI dataset from raw NIfTI volumes into 2D slices, enforcing a deterministic patient-level split into train, validation, and test cohorts to prevent data leakage across visits.
-
-- **Classical Baseline & Transfer Learning (CTL)**: Implement the LeNet-based classical CNN architecture to establish the baseline performance and fine-tune classical dense heads under multi-seed initializations.
-
-- **Hybrid Quantum Architecture (QTL)**: Implement the Dressed Quantum Network using **Angle Embedding** and the foundational variational ansatz with PennyLane state-vector simulators (`lightning.qubit`/`default.qubit`). A Hadamard layer precedes the RZ embedding: the circuit as drawn in the paper keeps the state at $|0\ldots0\rangle$ and is a constant function (see `docs/architecture.md`, section 3.1).
-
-- **Multi-Seed Benchmark**: Establish reference metrics across multiple random seeds to measure statistical variance and evaluate the weak-baseline hypothesis.
-
-### Activity 2: Alternative Feature Maps Modeling _(Next Activity)_
-
-- **Advanced Quantum Encodings**: Mathematically formulate and implement expressive quantum data encodings beyond angle embedding, such as the **$ZZ$-Feature Map**, higher-order Pauli feature maps, and custom entanglement topologies.
-
-- **Cross-Platform State-Vector Simulation**: Prototype alternative Ansätze and encoding circuits in both Python (`PennyLane`, `Qiskit`) and Julia (`Yao.jl`) for high-performance state-vector simulation and gradient evaluation.
-
-- **Expressibility & Class Separability**: Evaluate decision boundary geometry, trainability (mitigating barren plateaus), and noise resilience under simulated NISQ channels before physical IBM QPU execution.
+- **A1, done.** OASIS-II ETL with a deterministic patient-level split, the LeNet baseline, classical transfer learning (CTL), and the Dressed Quantum Network on PennyLane and Qiskit, each over 100 seeds. A Hadamard layer precedes the RZ embedding, because the circuit as drawn in the paper is a constant function (`docs/architecture.md`, section 3.1). Results below.
+- **A2, in progress.** The RX embedding and the ZZ feature map (full and nearest-neighbour) run on the Qiskit head. Results below.
 
 ---
 
-## System Architecture
+## Code Structure
 
-The codebase enforces strict modularity and MLOps practices, keeping neural network definitions, quantum execution graphs, ETL pipelines, and metric analysis decoupled:
-
-- **`core/`**: Centralized determinism and seed locking across Python, NumPy, PyTorch, and cuDNN (`reproducibility.py`), the typed run specification with the hash IDs and label derived from it (`identity.py`), and the on-disk layout of every run's artifacts (`layout.py`).
-
-- **`data/`**: Data loading and ETL pipelines with patient-level leakage prevention (canonical subject IDs, a deterministic stratified train/val/test split, a `split_manifest.json`, and an integrity check of the cohort files against it), NIfTI slice loaders, custom `MinMaxNormalize` transforms, and in-memory feature embedding caching for fast transfer learning (`subject_ids.py`, `split.py`, `split_manifest.py`, `split_guards.py`, `cohort_audit.py`, `data_loader.py`, `data_processor.py`, `dataset.py`, `embedding_cache.py`).
-
-- **`models/`**: Dependency-injected architectures pairing a `LeNetFeatureExtractor` backbone with interchangeable heads: `ClassicalClassifierHead` (CTL), `PennylaneQuantumClassifierHead` (DQN / PL QTL on PennyLane), or `QiskitQuantumClassifierHead` (the same DQN on Qiskit Primitives V2, with an injectable estimator and Aer as the default noiseless backend) built via `builder.py`.
-
-- **`training/`**: Isolated `BaselineTrainer` and `ModelEvaluator` separating training/optimization loops from model definitions and file I/O, and `checkpoint_evaluation` to evaluate every checkpoint on the validation and test cohorts. The trainer only sees the train and validation loaders, records a per-epoch `TrainingHistory` and saves it as JSON, but never plots.
-
-- **`telemetry/`**: Stateless DTO-driven metric computation (`MetricsAnalyzer`), JSON persistence of evaluation metrics and training histories, run discovery from the histories and the lookup table of runs (`run_listing.py`, `run_table.py`), model selection on validation metrics (`selection.py`), the comparative report across paradigms (`report.py`), and dual logging (`setup_logger`).
-
-- **`viz/`**: Publication-ready plots (`MetricsVisualizer`) and the plotting steps that draw every configuration's figures and the loss curves from the saved histories (`run_plots.py`); the scripts in `scripts/viz` are thin callers.
-
-For full technical specifications and detailed Mermaid architectural diagrams, see **[docs/architecture.md](docs/architecture.md)**.
+The code under `src/dementia_boost` is split into layers with one responsibility each: `core` (seeds, run identity, file layout), `data` (ETL, split, loaders, feature cache), `models` (backbone and heads), `training`, `telemetry` (metrics, selection, report), and `viz` (all plotting). The scripts under `scripts/` are entry points. [docs/architecture.md](docs/architecture.md) describes each layer, the circuits and their mathematics, and the evaluation protocol.
 
 ---
 
@@ -95,12 +66,12 @@ The report also gives the percentage changes against CTL and between the two qua
 
 ### Key Observations & Findings
 
-- **The paper's accuracies are not reproduced.** On test, accuracy is 59.5% (baseline), 60.8% (CTL), 63.2% (PL QTL), and 62.5% (Qiskit QTL), against 55.9% for always predicting the majority class. AUC-ROC is 0.63 to 0.66 for all four, and the differences between paradigms are smaller than the spread of the baseline across seeds (0.076). On validation the values are higher (accuracy 63% to 76%), which is the expected optimism of the cohort that selects the backbone. With one split, one backbone, and a 41-subject test cohort, differences of a few points are within the noise.
-- **Baseline instability**: the baseline varies a lot across seeds (test accuracy from 44% to 72%, standard deviation 0.073). In 15 of the 100 runs it predicts a single class (recall 0 on test), and the loss curves have the widest interquartile range. Running many seeds, instead of reporting one, is what makes this visible.
-- **Classical Transfer Learning**: retraining the dense layers on the frozen backbone makes the result steadier (accuracy standard deviation 0.031) but does not raise the mean meaningfully (accuracy +2.3%, AUC-ROC +2.2% over the baseline), and recall falls (0.356). 18 of the 101 runs collapse to a single class.
-- **Quantum Transfer Learning**: the Dressed Quantum Network gives the lowest variance (PL QTL accuracy standard deviation 0.012, smallest on every metric) and no run collapsed to a single class on PennyLane (one on Qiskit). Precision rises (+22% over the baseline) and accuracy rises slightly (+6.3%), but recall stays at the baseline level (0.482 against 0.478) and the AUC-ROC is not higher than CTL's. The variance reduction reproduces; the large performance gain does not. Part of the effect may come from the head's small 6-dimensional bottleneck and not from the circuit; a classical head with the same bottleneck would tell, and has not been run.
-- **PennyLane versus Qiskit**: the two quantum heads give similar means (accuracy 0.632 and 0.625), but the Qiskit head has two to three times the spread on accuracy, precision, and recall, and its validation loss ends higher. The Qiskit head estimates gradients with a loss-level SPSA, because exact parameter-shift needs about 204 shifted circuits per sample at 6 qubits and 4 layers, while the PennyLane head uses exact adjoint gradients. The difference is therefore mostly about the gradient estimator, not the circuit.
-- **Training had not converged at epoch 100**: the validation loss of the quantum heads is still falling slowly, which may relate to the learning rate (1e-4 with a decay every 10 epochs). The learning rate has not been studied yet, and the results above should be read as those of this fixed setup.
+- **The paper's accuracies are not reproduced.** Test accuracy is 59.5% to 63.2% for all four paradigms, against 55.9% for always predicting the majority class, and AUC-ROC is 0.63 to 0.66. The gaps between paradigms are smaller than the baseline's spread across seeds (0.076), so with one split, one backbone, and 41 test subjects they are within the noise. Validation values are higher, as expected for the cohort that selects the backbone.
+- **The baseline is unstable**: test accuracy ranges from 44% to 72% across seeds, and 15 of 100 runs predict a single class (recall 0 on test).
+- **CTL is steadier, not better**: accuracy standard deviation falls to 0.031, the mean barely moves (+2.3%), recall falls (0.356), and 18 of 101 runs collapse to a single class.
+- **QTL reduces the variance; the large gain does not reproduce**: PL QTL has the smallest spread on every metric (accuracy standard deviation 0.012) and no collapsed run (one on Qiskit). Precision rises (+22%) and accuracy slightly (+6.3%), but recall stays at the baseline level and AUC-ROC is not above CTL's. Part of the effect may come from the 6-dimensional bottleneck rather than the circuit; a classical head with the same bottleneck has not been run.
+- **PennyLane and Qiskit agree on the means** (accuracy 0.632 and 0.625), but the Qiskit head has two to three times the spread and a higher final validation loss. It uses loss-level SPSA gradients (exact parameter-shift needs about 204 circuits per sample at 6 qubits and 4 layers), while PennyLane uses exact adjoint gradients, so the difference is mostly the gradient estimator.
+- **Training had not converged at epoch 100**: the quantum heads' validation loss is still falling, possibly because of the learning rate (1e-4, decayed every 10 epochs), which has not been studied yet.
 
 ### Deviations from the Base Paper
 
@@ -115,117 +86,128 @@ The scripts of the Quickstart reproduce every number above: the split is set by 
 
 ---
 
+## Embedding Comparison (Qiskit only)
+
+The embedding is the part of the circuit that loads the 6 scaled features into the qubits (`docs/architecture.md`, section 3.2, gives the mathematics). The Dressed Quantum Network above uses the paper's angle embedding. To see whether another embedding helps, the Qiskit head was also run with an RX embedding, the ZZ feature map (full entanglement, two repetitions), and a ZZ feature map with nearest-neighbour entanglement. The variational block, the backbone, the split, and every hyperparameter are the same, so the embedding is the only difference. Each configuration has 101 seeds (0 to 100).
+
+> [!NOTE]
+> **These embeddings were run only with the Qiskit head** (loss-level SPSA gradients). The PennyLane head has only been run with the angle embedding. The comparison is therefore between embeddings on one framework, and it says nothing about how the same embeddings would behave with PennyLane's exact gradients. The values come from the comparative report written for each configuration.
+
+#### Test cohort
+
+| Metric        | Angle Embedding | RX Embedding  | ZZ-Feature Map | ZZ-Feature Map (Linear) |
+| :------------ | :-------------: | :-----------: | :------------: | :---------------------: |
+| **Accuracy**  | 0.625 ± 0.032   | 0.618 ± 0.035 | 0.542 ± 0.056  | 0.572 ± 0.053           |
+| **Precision** | 0.607 ± 0.072   | 0.596 ± 0.075 | 0.506 ± 0.114  | 0.530 ± 0.122           |
+| **Recall**    | 0.416 ± 0.124   | 0.411 ± 0.169 | 0.371 ± 0.165  | 0.324 ± 0.146           |
+| **F1-Score**  | 0.485 ± 0.095   | 0.467 ± 0.128 | 0.395 ± 0.115  | 0.382 ± 0.129           |
+| **AUC-ROC**   | 0.663 ± 0.020   | 0.662 ± 0.023 | 0.548 ± 0.072  | 0.581 ± 0.075           |
+
+#### Validation cohort
+
+| Metric        | Angle Embedding | RX Embedding  | ZZ-Feature Map | ZZ-Feature Map (Linear) |
+| :------------ | :-------------: | :-----------: | :------------: | :---------------------: |
+| **Accuracy**  | 0.720 ± 0.048   | 0.702 ± 0.052 | 0.556 ± 0.067  | 0.610 ± 0.070           |
+| **Precision** | 0.851 ± 0.129   | 0.839 ± 0.154 | 0.567 ± 0.161  | 0.675 ± 0.170           |
+| **Recall**    | 0.496 ± 0.129   | 0.485 ± 0.163 | 0.393 ± 0.191  | 0.360 ± 0.170           |
+| **F1-Score**  | 0.610 ± 0.105   | 0.585 ± 0.126 | 0.425 ± 0.145  | 0.438 ± 0.157           |
+| **AUC-ROC**   | 0.767 ± 0.029   | 0.770 ± 0.027 | 0.574 ± 0.090  | 0.649 ± 0.090           |
+
+![Test metric distributions across seeds for each embedding, with the baseline, CTL, and PL QTL for reference](docs/figures/embedding_metric_comparison.png)
+
+![Validation loss across configurations, median and interquartile range over seeds](docs/figures/embedding_loss_comparison.png)
+
+- **RX matches the angle embedding.** Test AUC-ROC 0.662 against 0.663, with no seed-by-seed difference (RX better in 53 of 101 seeds; Wilcoxon signed-rank, p = 0.95). Accuracy is slightly lower (0.618 against 0.625), a gap detectable only on validation.
+- **The ZZ feature map is worse, and more entanglement is worse.** Test AUC-ROC is 0.548 for the full map and 0.581 for the nearest-neighbour one. The full map beats the angle embedding in 8 of 101 seeds (p < 1e-15), and its validation loss stays near chance (ln 2) for all 100 epochs: the model barely trains.
+- **A possible reason, not tested:** the ZZ angles $2(\pi - \tilde{z}_i)(\pi - \tilde{z}_j)$ span a wide range, so the encoded state may vary too sharply with the input for a 4-layer block trained with SPSA. The result may differ with exact gradients.
+- **Scope.** One split, one backbone, 41 test subjects: in this setup a richer entangling encoding did not help, which does not show that it cannot help in general.
+
+---
+
 ## Quickstart
 
 ### 1. Environment Setup
 
-This project uses [`uv`](https://github.com/astral-sh/uv) for fast, deterministic dependency management:
+This project uses [`uv`](https://github.com/astral-sh/uv) to manage the dependencies, pinned in `uv.lock`:
 
 ```bash
-# Create the virtual environment and sync dependencies
 uv sync
 ```
 
-The environment is managed entirely by `uv`: there is no need to activate it. Run every script and tool through `uv run` (for example `uv run scripts/etl_pipeline.py` or `uv run pytest`).
+There is no need to activate the environment: run every script and tool through `uv run` (for example `uv run pytest`).
 
-### 2. Data Indexing & ETL Pipeline
+### 2. ETL and Split
 
 ```bash
-# Process raw 3D NIfTI/HDR files into 2D slice tensors, split by patient into
-# train / val / test, and write data/results/split_manifest.json
+# Raw NIfTI volumes to 2D slice tensors, split by patient into train / val / test,
+# and data/results/split_manifest.json
 uv run scripts/etl_pipeline.py
 
-# Check that no patient appears in more than one cohort (exits with 1 if one does)
+# Check that no patient is in more than one cohort (exit status 1 if one is)
 uv run scripts/audit_cohorts.py
 ```
 
-The split is settled by the constants at the top of `scripts/etl_pipeline.py`: the seed, the test ratio (default 0.3), the validation ratio (default 0.2, taken from the non-test subjects), and the manual overrides `MANUAL_TRAIN_IDS` and `MANUAL_TEST_IDS`, which pin subjects to a cohort before the ratios are applied (subjects pinned to train never enter validation). Use canonical subject IDs such as `OAS2_0001`; an unknown ID, a visit ID such as `OAS2_0001_MR2`, or an ID in both lists is rejected.
-
-The ETL is safe to rerun. It builds the whole split in a staging directory and only then replaces the `.pt` files in `data/results/train`, `val`, and `test`, so an interrupted run leaves the previous split untouched, and the same arguments reproduce the same files. Other files in those directories are never touched. Subjects that cannot be used (no raw data, no row in the CSV, no readable 3D volume, or the `Converted` group) are listed with a reason in `split_manifest.json`. The data loader refuses to load cohorts that do not match the manifest, so a stale or hand-edited directory is never trained on silently.
+The split is set by the constants at the top of `scripts/etl_pipeline.py`: the seed, the test ratio (0.3), the validation ratio (0.2 of the non-test subjects), and `MANUAL_TRAIN_IDS` / `MANUAL_TEST_IDS`, which pin canonical subject IDs such as `OAS2_0001` to a cohort (an unknown ID, a visit ID, or an ID in both lists is rejected). The ETL is safe to rerun: it writes into a staging directory first, the same arguments reproduce the same files, and unusable subjects are listed with a reason in the manifest. The data loader refuses cohorts that do not match the manifest.
 
 > [!IMPORTANT]
-> **Evaluation protocol.** Models are trained on `train` and monitored on `val`. Model selection (for example, which baseline backbone the transfer learning heads use) reads validation metrics only. The `test` cohort is never used to train or to choose; every saved checkpoint is evaluated on it once and the results are only reported.
+> **Evaluation protocol.** Models are trained on `train` and monitored on `val`, and every choice (such as the backbone of the transfer-learning heads) reads validation metrics only. The `test` cohort is never used to train or to choose; it is evaluated once per checkpoint and only reported.
 
-### 3. Training Models
+### 3. Training
 
 ```bash
-# Train classical baseline CNN across multiple random seeds
 uv run scripts/training/train_baseline.py
-
-# Evaluate the baselines on val and test. The validation metrics it writes
-# (data/results/metrics/baseline/<config_id>/val_results.json) are what the next
-# scripts read to select the backbone.
-uv run scripts/metrics/evaluate_baseline.py
-
-# Train Classical Transfer Learning (CTL) dense heads on the baseline selected on
-# validation (best validation AUC-ROC, then F1, then lowest log loss)
-uv run scripts/training/train_ctl_multiseed.py
-
-# Train PennyLane Quantum Transfer Learning (PL QTL) Dressed Quantum Network
+uv run scripts/metrics/evaluate_baseline.py        # its validation metrics select the backbone
+uv run scripts/training/train_ctl_multiseed.py     # heads on the backbone selected on validation
 uv run scripts/training/train_pl_qtl_multiseed.py
-
-# Train the same Dressed Quantum Network on Qiskit (Aer state-vector, SPSA gradients)
 uv run scripts/training/train_qiskit_qtl_multiseed.py
+
+# Qiskit head with another embedding: paper (default), rx, zz_feature_map,
+# zz_feature_map_linear; --seeds N runs only the first N seeds
+uv run scripts/training/train_qiskit_qtl_multiseed.py --ansatz zz_feature_map
 ```
 
-Every training script writes a checkpoint and a per-epoch history (loss, accuracy, learning rate, duration, and the full run specification) for each seed, and skips a run whose checkpoint already exists. The `val_loss` and `val_acc` fields of the history are measured on the validation cohort. The training scripts do not produce plots; see the next step.
+Each training script writes a checkpoint and a per-epoch history (with the full run specification) per seed and skips runs that already finished. The PennyLane head implements only the `paper` embedding (`docs/architecture.md`, section 3.2).
 
-#### Where the results go, and how to find a run
-
-Runs are identified by hashes of their specification, not by names: `config_id` is shared by all seeds of one configuration (paradigm, qubits, layers, learning rates, backbone, split, and so on) and `run_id` identifies one seed of it. Everything lives under `data/results`:
-
-```
-checkpoints/<paradigm>/<config_id>/seed_<n>.pt
-histories/<paradigm>/<config_id>/seed_<n>.json      history, with the full run specification
-histories/<paradigm>/<config_id>/config.json         the configuration and its label
-metrics/<paradigm>/<config_id>/{val,test}_results.json
-plots/<paradigm>/<config_id>/
-```
-
-Changing any hyperparameter gives a new `config_id`, so a new configuration never overwrites or gets skipped in place of an old one. To see what a hash is, use the read-only lookup, which is rebuilt from the histories on every call:
+Runs are identified by hashes of their specification: `config_id` for a configuration (all its seeds), `run_id` for one seed, so changing any hyperparameter gives a new configuration that never overwrites an old one. Everything is written under `data/results/<kind>/<paradigm>/<config_id>/` (layout in `docs/architecture.md`, section 2.1.1). To look a hash up:
 
 ```bash
-uv run scripts/list_runs.py                    # one row per configuration (label, split, seeds)
-uv run scripts/list_runs.py --runs             # one row per run (seed, run_id, finished, paths)
-uv run scripts/list_runs.py --paradigm pl_qtl  # only one paradigm
-uv run scripts/list_runs.py --find dc658242    # full spec and files of a config or run ID prefix
+uv run scripts/list_runs.py                    # one row per configuration
+uv run scripts/list_runs.py --runs             # one row per run
+uv run scripts/list_runs.py --paradigm pl_qtl  # one paradigm only
+uv run scripts/list_runs.py --find dc658242    # full spec and files of an ID prefix
 uv run scripts/list_runs.py --runs --csv runs.csv
 ```
 
-### 4. Evaluation & Telemetry Visualization
+### 4. Evaluation, Report, and Figures
 
 ```bash
-# Evaluate models and generate metrics JSON. For every configuration each script
-# writes val_results.json and test_results.json to
-# data/results/metrics/<paradigm>/<config_id>/. evaluate_baseline.py was already
-# run in step 3.
-uv run scripts/metrics/evaluate_baseline.py
+# val_results.json and test_results.json per configuration
 uv run scripts/metrics/evaluate_ctl.py
 uv run scripts/metrics/evaluate_pl_qtl.py
 uv run scripts/metrics/evaluate_qiskit_qtl.py
+uv run scripts/metrics/evaluate_qiskit_qtl.py --config <config_id>   # one configuration only
 
-# Generate the comparative report: mean and std across seeds on test and on
-# validation, the run selected on validation next to the test values, and
-# percentage changes between the means of each cohort.
-# Each paradigm contributes its only configuration; if a paradigm has several,
-# name one with --config <paradigm>=<config_id>. Paradigms trained on different
-# splits are refused. Written to data/results/metrics/comparative_report.json.
+# Comparative report: mean and std across seeds on test, then validation, and the
+# run selected on validation. A paradigm with several configurations needs --config.
 uv run scripts/metrics/generate_improvement_report.py
+uv run scripts/metrics/generate_improvement_report.py --config qiskit_qtl=<config_id> --output <file>
 
-# Plot metric distributions, ROC curves, and confusion matrices for every
-# configuration, to data/results/plots/<paradigm>/<config_id>/. The isolated ROC
-# curve and confusion matrix show the run selected on validation.
+# Per configuration: metric distributions, ROC curves, confusion matrix
 uv run scripts/viz/visualize_baselines.py
 uv run scripts/viz/visualize_ctl.py
 uv run scripts/viz/visualize_pl_qtl.py
 uv run scripts/viz/visualize_qiskit_qtl.py
 
-# Plot loss curves from the saved training histories: per-run and distribution
-# plots go to data/results/plots/<paradigm>/<config_id>/, and the comparison
-# across configurations to data/results/plots/loss_comparison.png. Can run while
-# sweeps are in progress.
+# Loss curves from the histories, and the metrics of all configurations side by side
 uv run scripts/viz/visualize_loss.py
+uv run scripts/viz/visualize_comparison.py
 ```
+
+Options of the figure scripts:
+
+- `--production` (comparison and loss): short presentation names, set in `src/dementia_boost/viz/display_names.py`, written as `*_production.png`.
+- `--svg`, `--pdf` (all): also write the figures as vector files next to the PNGs (the loss script only for its comparison).
+- `--exclude <config_id> ...` (comparison and loss): leave configurations out; the figures keep their names.
 
 ---
 

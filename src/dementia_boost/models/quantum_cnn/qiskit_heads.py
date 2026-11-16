@@ -7,12 +7,14 @@ circuit through Qiskit Primitives V2.
 """
 
 import math
+from functools import partial
 
 import torch.nn as nn
 from qiskit.primitives import BaseEstimatorV2
 from torch import Tensor, tanh
 
-from .qiskit_circuit import DEFAULT_N_LAYERS, DEFAULT_N_QUBITS
+from .qiskit_circuit import DEFAULT_N_LAYERS, DEFAULT_N_QUBITS, build_qiskit_ansatz
+from .qiskit_embeddings import DEFAULT_EMBEDDING, get_embedding
 from .qiskit_layer import DEFAULT_SPSA_EPSILON, create_qiskit_quantum_layer
 
 
@@ -25,9 +27,12 @@ class QiskitQuantumClassifierHead(nn.Module):
     1. Flattens input feature map: `(Batch, 64, 6, 6) -> (Batch, 2304)`
     2. Pre-Net: `Linear(2304 -> n_qubits)`
     3. Angle Scaling: `tanh(x) * (pi / 2)` mapping values into `[-pi/2, pi/2]`
-    4. Variational Quantum Circuit: Evaluates expectation values `<PauliZ_i>`
+    4. Embedding angles: the chosen embedding's angle function maps the scaled
+       values to the gate angles of its feature map (the identity for the
+       paper's angle embedding).
+    5. Variational Quantum Circuit: Evaluates expectation values `<PauliZ_i>`
        through an injectable Qiskit estimator, with SPSA gradients.
-    5. Post-Net: `Linear(n_qubits -> 1)` producing raw classification logits.
+    6. Post-Net: `Linear(n_qubits -> 1)` producing raw classification logits.
 
     Attributes:
         DEFAULT_IN_FEATURES: Default number of incoming flattened features (2304).
@@ -56,6 +61,7 @@ class QiskitQuantumClassifierHead(nn.Module):
         spsa_epsilon: float = DEFAULT_SPSA_EPSILON,
         seed: int | None = None,
         estimator: BaseEstimatorV2 | None = None,
+        embedding: str = DEFAULT_EMBEDDING,
     ) -> None:
         """Initializes the hybrid Dressed Quantum Network classification head.
 
@@ -73,9 +79,12 @@ class QiskitQuantumClassifierHead(nn.Module):
                 seed locked by `core.reproducibility.set_seed`.
             estimator: Optional Qiskit Primitives V2 estimator executing the
                 circuit. If None, resolves to a noiseless `StatevectorEstimator`.
+            embedding: Registry name of the embedding (see
+                `qiskit_embeddings`). Defaults to the paper's angle embedding.
         """
         super().__init__()
 
+        self.embedding = get_embedding(embedding)
         self.flatten = nn.Flatten()
         self.pre_net = nn.Linear(in_features=in_features, out_features=n_qubits)
         self.qnn = create_qiskit_quantum_layer(
@@ -83,6 +92,7 @@ class QiskitQuantumClassifierHead(nn.Module):
             n_layers=n_layers,
             spsa_epsilon=spsa_epsilon,
             seed=seed,
+            ansatz_builder=partial(build_qiskit_ansatz, embedding=embedding),
             estimator=estimator,
         )
         self.post_net = nn.Linear(in_features=n_qubits, out_features=out_features)
@@ -100,6 +110,7 @@ class QiskitQuantumClassifierHead(nn.Module):
         x = self.flatten(x)
         x = self.pre_net(x)
         x = tanh(x) * self.ANGLE_SCALING_FACTOR
+        x = self.embedding.angles(x)
         x = self.qnn(x)
         x = self.post_net(x)
 

@@ -1,4 +1,4 @@
-"""Publication-ready visualization generators for evaluation metrics and ROC curves.
+"""Plots of evaluation metrics, ROC curves, and training histories.
 
 This module provides `MetricsVisualizer` to generate Seaborn boxplots/stripplots,
 multi-run comparative and isolated ROC curves, and annotated confusion matrix
@@ -9,6 +9,7 @@ and cross-paradigm loss curves from serialized `TrainingHistory` files.
 import json
 import math
 import os
+from collections.abc import Sequence
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -16,14 +17,16 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from sklearn.metrics import roc_curve
 
 from dementia_boost.core.layout import HISTORY_GLOB
 from dementia_boost.telemetry.metrics import MetricsAnalyzer, TrainingHistory
+from dementia_boost.viz.display_names import METRIC_NAMES
 
 
 class MetricsVisualizer:
-    """Generates publication-quality charts and plots from JSON evaluation metrics.
+    """Draws charts from JSON evaluation metrics and training histories.
 
     Reads telemetry JSON files containing individual and aggregate experiment
     runs and renders metric distributions, ROC curves, confusion matrices, and
@@ -32,22 +35,54 @@ class MetricsVisualizer:
     Attributes:
         CHANCE_LEVEL_LOSS: Binary cross-entropy of a chance-level predictor on
             balanced classes, ln 2.
+        PNG_DPI: Resolution of the PNG files, in dots per inch.
         output_dir: Destination directory path where plots will be saved.
+        vector_formats: Extra vector formats (`svg`, `pdf`) each figure is
+            also written in, next to its PNG with the same name.
     """
 
     CHANCE_LEVEL_LOSS: float = math.log(2)
+    PNG_DPI: int = 300
+    VECTOR_FORMATS: tuple[str, ...] = ("svg", "pdf")
 
-    def __init__(self, output_dir: str = "./data/results/plots") -> None:
+    def __init__(
+        self,
+        output_dir: str = "./data/results/plots",
+        vector_formats: Sequence[str] = (),
+    ) -> None:
         """Initializes the visualizer and ensures output directory exists.
 
         Args:
             output_dir: Path to directory where generated plots will be saved.
                 Defaults to "./data/results/plots".
+            vector_formats: Vector formats to write besides the PNG, each one
+                of `VECTOR_FORMATS`. Defaults to none.
+
+        Raises:
+            ValueError: If a format is not one of `VECTOR_FORMATS`.
         """
+        unknown = [name for name in vector_formats if name not in self.VECTOR_FORMATS]
+        if unknown:
+            raise ValueError(
+                f"Unknown vector format(s) {unknown}; use {self.VECTOR_FORMATS}."
+            )
         self.output_dir = output_dir
+        self.vector_formats = tuple(vector_formats)
         os.makedirs(self.output_dir, exist_ok=True)
 
         sns.set_theme(style="whitegrid")
+
+    def _save(self, fig: Figure, save_path: str) -> None:
+        """Writes a figure as a PNG and in every requested vector format.
+
+        Args:
+            fig: The figure to write.
+            save_path: Path of the PNG; the vector files replace its extension.
+        """
+        fig.savefig(save_path, dpi=self.PNG_DPI, bbox_inches="tight")
+        stem = os.path.splitext(save_path)[0]
+        for extension in self.vector_formats:
+            fig.savefig(f"{stem}.{extension}", bbox_inches="tight")
 
     def plot_metric_distributions(self, json_filepath: str, prefix: str) -> None:
         """Generates boxplots with jittered Seaborn stripplots across all runs.
@@ -112,7 +147,7 @@ class MetricsVisualizer:
         ax.set_ylabel("Score")
 
         save_path = os.path.join(self.output_dir, f"{prefix}_distributions.png")
-        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        self._save(fig, save_path)
         plt.close(fig)
 
     def plot_comparative_roc(self, json_filepath: str, prefix: str) -> None:
@@ -154,7 +189,7 @@ class MetricsVisualizer:
         )
 
         save_path = os.path.join(self.output_dir, f"{prefix}_roc_curves.png")
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        self._save(plt.gcf(), save_path)
         plt.close()
 
     def plot_isolated_roc(self, json_filepath: str, run_id: str, prefix: str) -> None:
@@ -192,7 +227,7 @@ class MetricsVisualizer:
         plt.legend(loc="lower right")
 
         save_path = os.path.join(self.output_dir, f"{prefix}_isolated_roc_{run_id}.png")
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        self._save(plt.gcf(), save_path)
         plt.close()
 
     def plot_confusion_matrix(
@@ -233,7 +268,7 @@ class MetricsVisualizer:
         plt.xlabel("Predicted Diagnosis")
 
         save_path = os.path.join(self.output_dir, f"{prefix}_cm_{run_id}.png")
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        self._save(plt.gcf(), save_path)
         plt.close()
 
     def plot_loss_curve(self, history_path: str, prefix: str) -> None:
@@ -292,7 +327,7 @@ class MetricsVisualizer:
         fig.suptitle(f"{prefix.capitalize()} Training Curves: {history.run_id}")
 
         save_path = os.path.join(self.output_dir, f"{prefix}_{history.run_id}_loss.png")
-        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        self._save(fig, save_path)
         plt.close(fig)
 
     def plot_loss_distribution(self, history_dir: str, prefix: str) -> None:
@@ -342,10 +377,12 @@ class MetricsVisualizer:
         ax.legend()
 
         save_path = os.path.join(self.output_dir, f"{prefix}_loss_distribution.png")
-        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        self._save(fig, save_path)
         plt.close(fig)
 
-    def plot_loss_comparison(self, history_dirs: dict[str, str]) -> None:
+    def plot_loss_comparison(
+        self, history_dirs: dict[str, str], filename: str = "loss_comparison.png"
+    ) -> None:
         """Overlays median validation loss curves across paradigms.
 
         Directories without any history file are skipped, so the plot can be
@@ -354,6 +391,7 @@ class MetricsVisualizer:
         Args:
             history_dirs: Mapping from a display label (for example "CTL") to
                 the directory holding that paradigm's history JSON files.
+            filename: Name of the PNG file written to the output directory.
 
         Raises:
             ValueError: If none of the directories contains a history file.
@@ -388,8 +426,84 @@ class MetricsVisualizer:
         ax.set_ylabel("Validation Loss")
         ax.legend()
 
-        save_path = os.path.join(self.output_dir, "loss_comparison.png")
-        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        save_path = os.path.join(self.output_dir, filename)
+        self._save(fig, save_path)
+        plt.close(fig)
+
+    def plot_metric_comparison(
+        self,
+        results_paths: dict[str, str],
+        cohort: str,
+        filename: str,
+        production: bool = False,
+    ) -> None:
+        """Compares metric distributions across configurations side by side.
+
+        Draws one group of boxes per metric (accuracy, precision, recall,
+        f1_score, auc) with one box per configuration, each box spanning the
+        seeds of that configuration.
+
+        Args:
+            results_paths: Mapping from a display label to the results JSON of
+                one configuration on one cohort.
+            cohort: Cohort name for the title, such as "test" or "validation".
+            filename: Name of the PNG file written to the output directory.
+            production: Whether to label the metrics with their presentation
+                names (`F1-Score`, `AUC-ROC`) instead of the capitalised keys,
+                and to title the figure `Metrics Distribution` without the
+                cohort, which the file name then carries alone.
+
+        Raises:
+            ValueError: If `results_paths` is empty.
+        """
+        if not results_paths:
+            raise ValueError("No results to compare.")
+
+        metric_keys = ["accuracy", "precision", "recall", "f1_score", "auc"]
+        metric_names = {
+            key: METRIC_NAMES[key] if production else key.capitalize()
+            for key in metric_keys
+        }
+        records = []
+        for label, path in results_paths.items():
+            with open(path) as f:
+                data = json.load(f)
+            for run in data["individual_runs"]:
+                for key in metric_keys:
+                    records.append(
+                        {
+                            "Configuration": label,
+                            "Metric": metric_names[key],
+                            "Score": run[key],
+                        }
+                    )
+
+        fig, ax = plt.subplots(figsize=(14, 7))
+        sns.boxplot(
+            data=pd.DataFrame(records),
+            x="Metric",
+            y="Score",
+            hue="Configuration",
+            fliersize=2,
+            ax=ax,
+        )
+        ax.set_title(
+            "Metrics Distribution"
+            if production
+            else f"Metric Distributions across Seeds ({cohort} cohort)"
+        )
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_xlabel("Metric")
+        ax.set_ylabel("Score")
+        ax.legend(
+            title="Configuration",
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.12),
+            ncols=2,
+        )
+
+        save_path = os.path.join(self.output_dir, filename)
+        self._save(fig, save_path)
         plt.close(fig)
 
     @staticmethod

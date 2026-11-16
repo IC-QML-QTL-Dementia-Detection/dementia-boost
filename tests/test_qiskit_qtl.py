@@ -154,28 +154,6 @@ def _finite_difference_gradients(
 class TestQiskitAnsatzConstruction:
     """Validates the static shape and parameter contract of the ansatz."""
 
-    def test_wire_count_gate_count_and_parameter_counts(self) -> None:
-        """Asserts qubit count, per-layer gate counts, theta/gamma/beta
-        parameter vector sizes, and observable count match the Bhowmik et
-        al. (2025) formulation for a fixed configuration."""
-        n_qubits, n_layers = 6, 4
-        circuit, input_params, weight_params, observables = build_qiskit_ansatz(
-            n_qubits=n_qubits,
-            n_layers=n_layers,
-        )
-
-        assert circuit.num_qubits == n_qubits
-        assert len(input_params) == n_qubits
-
-        theta, gamma, beta = weight_params
-        assert len(theta) == n_layers * n_qubits
-        assert len(gamma) == n_layers * n_qubits
-        assert len(beta) == n_layers * n_qubits
-
-        assert len(observables) == n_qubits
-        for observable in observables:
-            assert observable.num_qubits == n_qubits
-
     def test_observables_are_single_qubit_pauli_z(self) -> None:
         """Asserts each observable is a weight-one Pauli-Z string, isolating
         exactly one qubit's Z expectation per observable."""
@@ -194,7 +172,7 @@ class TestQiskitAnsatzDynamicConfiguration:
     def test_parameter_counts_scale_with_qubits_and_layers(self) -> None:
         """Asserts theta/gamma/beta vector lengths and observable count
         scale linearly with `n_qubits` and `n_layers` across a grid of
-        representative configurations."""
+        representative configurations, including the paper's 6 x 4."""
         for n_qubits in (3, 6, 10):
             for n_layers in (2, 3, 4):
                 circuit, input_params, weight_params, observables = build_qiskit_ansatz(
@@ -204,7 +182,9 @@ class TestQiskitAnsatzDynamicConfiguration:
                 assert circuit.num_qubits == n_qubits
                 assert len(input_params) == n_qubits
                 assert len(observables) == n_qubits
+                assert all(op.num_qubits == n_qubits for op in observables)
 
+                assert len(weight_params) == 3
                 for vector in weight_params:
                     assert len(vector) == n_layers * n_qubits
 
@@ -312,9 +292,13 @@ class TestQiskitQuantumLayerSpsaBackward:
         """Averages many SPSA backward passes (unbiased, so the mean converges
         to the true gradient) and asserts the cosine similarity with the exact
         finite-difference gradient of the same scalar loss, for both the
-        circuit weights and the upstream inputs."""
+        circuit weights and the upstream inputs. Runs on the default Aer
+        estimator, which the parity test pins to the reference."""
         n_qubits, n_layers, batch = 2, 1, 8
-        layer = _layer(n_qubits, n_layers, seed=0)
+        torch.manual_seed(0)
+        layer = create_qiskit_quantum_layer(
+            n_qubits=n_qubits, n_layers=n_layers, seed=0
+        )
         inputs = torch.randn(batch, n_qubits, requires_grad=True)
         upstream = torch.randn(batch, n_qubits)
 

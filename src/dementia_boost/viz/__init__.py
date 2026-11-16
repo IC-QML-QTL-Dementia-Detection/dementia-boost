@@ -1,4 +1,4 @@
-"""Plotting: publication-ready figures from saved results and histories.
+"""Plotting: figures from saved results and histories.
 
 `MetricsVisualizer` draws the individual figures (ROC curves, metric
 distributions, confusion matrices, loss curves). The functions in `run_plots`

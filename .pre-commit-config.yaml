@@ -9,7 +9,7 @@ repos:
       - id: check-yaml
         exclude: \.md$
       - id: check-added-large-files
-        exclude: \.pdf$
+        exclude: \.pdf|\.png$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.13

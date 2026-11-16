@@ -4,6 +4,7 @@ This module validates:
 - ``LeNetFeatureExtractor`` intermediate layer shapes and gradient propagation.
 - ``ClassicalClassifierHead`` logit/sigmoid output contracts and Glorot init.
 - ``DementiaClassifier`` backbone freezing contracts under transfer learning.
+- ``resolve_quantum_device`` default, explicit, fallback, and injected devices.
 - The PennyLane variational ansatz's angle scaling bounds, Pauli-Z expectation
   bounds, and autograd differentiability.
 - ``PennylaneQuantumClassifierHead`` Glorot init isolation from quantum circuit weights.
@@ -30,7 +31,11 @@ from dementia_boost.models.classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
-from dementia_boost.models.quantum_cnn import PennylaneQuantumClassifierHead
+from dementia_boost.models.quantum_cnn import (
+    DEFAULT_QUANTUM_DEVICE,
+    FALLBACK_QUANTUM_DEVICE,
+    PennylaneQuantumClassifierHead,
+)
 from dementia_boost.models.quantum_cnn.pennylane_circuit import (
     _build_custom_ansatz,
     create_quantum_layer,
@@ -207,6 +212,31 @@ class TestPennylaneQuantumClassifierHeadAngleScaling:
             assert torch.all(scaled >= -math.pi / 2.0 - _ANGLE_TOLERANCE)
 
 
+class TestResolveQuantumDevice:
+    """Validates the PennyLane device resolution."""
+
+    def test_default_explicit_fallback_and_injected_devices(self) -> None:
+        """Asserts that device resolution supports the default, an explicit name,
+        the fallback for an unknown backend, and a pre-instantiated device."""
+        dev_default = resolve_quantum_device(n_qubits=4)
+        assert dev_default.name in (DEFAULT_QUANTUM_DEVICE, FALLBACK_QUANTUM_DEVICE)
+
+        dev_explicit = resolve_quantum_device(
+            n_qubits=4, quantum_device="default.qubit"
+        )
+        assert dev_explicit.name == "default.qubit"
+
+        dev_fallback = resolve_quantum_device(
+            n_qubits=4,
+            quantum_device="invalid_non_existent_device_backend",
+        )
+        assert dev_fallback.name == FALLBACK_QUANTUM_DEVICE
+
+        custom_dev = qml.device("default.qubit", wires=4)
+        dev_passed = resolve_quantum_device(n_qubits=4, quantum_device=custom_dev)
+        assert dev_passed is custom_dev
+
+
 class TestQuantumAnsatzPauliZBounds:
     """Validates that circuit measurements remain physically valid."""
 
@@ -275,7 +305,7 @@ class TestQuantumLayerInputDependence:
         across a batch of random inputs at fixed weights."""
         n_qubits = 4
         layer = create_quantum_layer(
-            n_qubits=n_qubits, n_layers=2, quantum_device="default.qubit"
+            n_qubits=n_qubits, n_layers=2, quantum_device="lightning.qubit"
         )
 
         with torch.no_grad():
@@ -292,7 +322,7 @@ class TestQuantumLayerInputDependence:
         def evaluate(seed: int) -> torch.Tensor:
             torch.manual_seed(seed)
             layer = create_quantum_layer(
-                n_qubits=n_qubits, n_layers=2, quantum_device="default.qubit"
+                n_qubits=n_qubits, n_layers=2, quantum_device="lightning.qubit"
             )
             with torch.no_grad():
                 return layer(inputs)

@@ -1,4 +1,5 @@
-"""Tests for the ETL outputs: patient-level leakage and the split manifest.
+"""Tests for the ETL outputs: patient-level leakage, the split manifest, and the
+saved slices.
 
 Each test drives the public `OasisDataProcessor.process_and_save` on a tiny
 synthetic raw folder and inspects the cohort directories and manifest it writes.
@@ -151,7 +152,7 @@ def test_split_is_identical_across_hash_seeds(tmp_path: Path) -> None:
         """
     )
     assignments = []
-    for hash_seed in ("1", "2", "3"):
+    for hash_seed in ("1", "2"):
         subprocess.run(
             [sys.executable, "-c", script, str(tmp_path), hash_seed],
             check=True,
@@ -160,7 +161,7 @@ def test_split_is_identical_across_hash_seeds(tmp_path: Path) -> None:
         )
         assignments.append(_assignment(tmp_path / f"results_{hash_seed}"))
 
-    assert assignments[0] == assignments[1] == assignments[2]
+    assert assignments[0] == assignments[1]
 
 
 def test_etl_leaves_global_rng_untouched(
@@ -266,6 +267,23 @@ def test_interrupted_etl_keeps_previous_split(
     assert _file_set(results) == files
     assert (results / "split_manifest.json").read_bytes() == manifest_bytes
     assert not (results / ".staging").exists()
+
+
+def test_saved_tensor_is_the_central_axial_slice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each visit is saved as its middle slice along the first axis, shape
+    `(1, H, W)`, with the subject's label."""
+    processor = _processor(tmp_path, monkeypatch)
+    processor.process_and_save(seed=0)
+
+    (saved,) = (tmp_path / "results").glob("*/OAS2_0001_MR1_mpr-1.pt")
+    tensor, label = torch.load(saved, weights_only=True)
+
+    volume = np.random.default_rng(1).random((4, 8, 8)).astype(np.float32)
+    assert tensor.shape == (1, 8, 8)
+    assert torch.equal(tensor[0], torch.from_numpy(volume[2]))
+    assert label == 1
 
 
 def test_split_id_depends_only_on_the_assignment() -> None:

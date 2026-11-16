@@ -3,13 +3,15 @@
 This script finds every finished Qiskit v2.x hybrid Dressed Quantum Network (DQN)
 run through its training history, performs batched inference on the validation
 and test cohorts for each configuration (building each architecture from the
-qubits and layers recorded in its spec), computes full binary classification
+qubits, layers, and embedding recorded in its spec; `--config` restricts the
+evaluation to one configuration), computes full binary classification
 metrics (Accuracy, Precision, Recall, F1-score, AUC-ROC, log loss, Confusion
 Matrix), aggregates statistical distributions, and exports one telemetry JSON per
 cohort. Validation metrics are only for model selection; test metrics are only
 reported.
 """
 
+import argparse
 import sys
 
 import torch
@@ -21,7 +23,10 @@ from dementia_boost.models.classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
-from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
+from dementia_boost.models.quantum_cnn import (
+    DEFAULT_EMBEDDING,
+    QiskitQuantumClassifierHead,
+)
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.training.checkpoint_evaluation import evaluate_paradigm
 
@@ -76,12 +81,21 @@ def build_model(spec: RunSpec) -> DementiaClassifier:
             in_features=DEFAULT_FEATURE_DIM,
             n_qubits=spec.n_qubits,
             n_layers=spec.n_layers,
+            embedding=spec.ansatz or DEFAULT_EMBEDDING,
         ),
     )
 
 
 def main() -> None:
     """Executes the batch evaluation pipeline for Qiskit hybrid QTL NIfTI models."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--config",
+        default=None,
+        metavar="CONFIG_ID",
+        help="Evaluate only this configuration (default: all of them).",
+    )
+    arguments = parser.parse_args()
     logger = setup_logger("evaluate_qiskit_qtl_nifti")
     device = get_device()
     logger.info(f"Target PyTorch Device: {device}")
@@ -92,7 +106,13 @@ def main() -> None:
     }
 
     outcome = evaluate_paradigm(
-        ResultsLayout(), Paradigm.QISKIT_QTL, build_model, loaders, device, logger
+        ResultsLayout(),
+        Paradigm.QISKIT_QTL,
+        build_model,
+        loaders,
+        device,
+        logger,
+        configuration=arguments.config,
     )
     if not outcome:
         logger.error(

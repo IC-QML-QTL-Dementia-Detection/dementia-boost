@@ -9,9 +9,7 @@ This module validates:
 - ``MetricsAnalyzer.save_history`` / ``load_history`` lossless round trip of
   ``TrainingHistory``, including epochs without validation values.
 - ``setup_logger`` dual-output configuration and singleton handler reuse.
-- ``MetricsVisualizer`` PNG artifact generation across all plotting methods.
-- ``MetricsVisualizer`` loss-curve plots tolerating sparse validation values,
-  ragged epoch counts, and empty history directories.
+- ``MetricsVisualizer`` refusing an empty history directory.
 
 Regression coverage
 -------------------
@@ -25,7 +23,7 @@ Regression coverage
 - Per-epoch training histories losing fields or ``None`` validation values
   when persisted and reloaded.
 - Duplicate log handlers accumulating across repeated `setup_logger` calls.
-- Visualization methods silently failing to write plot artifacts to disk.
+- A loss distribution drawn blank from a directory without histories.
 """
 
 import json
@@ -319,119 +317,12 @@ class TestSetupLogger:
         assert len(second_logger.handlers) == len(first_logger.handlers)
 
 
-class TestMetricsVisualizerPlotGeneration:
-    """Validates that all plotting methods emit non-empty PNG artifacts."""
-
-    def _write_mock_metrics_json(self, tmp_path: Path) -> str:
-        """Builds a small multi-run evaluation JSON file for plotting tests.
-
-        Args:
-            tmp_path: pytest-provided temporary directory.
-
-        Returns:
-            Absolute path string of the written JSON telemetry file.
-        """
-        results = [
-            MetricsAnalyzer.calculate_metrics(
-                f"seed_{i}",
-                np.array([0, 0, 1, 1]),
-                np.array([0.1 + 0.05 * i, 0.3, 0.6, 0.9 - 0.05 * i]),
-            )
-            for i in range(3)
-        ]
-        aggregated = MetricsAnalyzer.aggregate_results(results)
-        filepath = tmp_path / "mock_metrics.json"
-        MetricsAnalyzer.save_to_json(
-            results, aggregated, str(filepath), cohort="test", configuration={}
-        )
-        return str(filepath)
-
-    def test_all_plot_methods_write_nonzero_png_files(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        """Feeds mock evaluation JSON into every plotting method and asserts
-        that each expected PNG file is created on disk with non-zero size."""
-        json_path = self._write_mock_metrics_json(tmp_path)
-        output_dir = str(tmp_path / "plots")
-        visualizer = MetricsVisualizer(output_dir=output_dir)
-
-        visualizer.plot_metric_distributions(json_path, prefix="test")
-        visualizer.plot_comparative_roc(json_path, prefix="test")
-        visualizer.plot_isolated_roc(json_path, run_id="seed_0", prefix="test")
-        visualizer.plot_confusion_matrix(json_path, run_id="seed_0", prefix="test")
-
-        expected_filenames = (
-            "test_distributions.png",
-            "test_roc_curves.png",
-            "test_isolated_roc_seed_0.png",
-            "test_cm_seed_0.png",
-        )
-        for filename in expected_filenames:
-            artifact_path = Path(output_dir) / filename
-            assert artifact_path.exists()
-            assert artifact_path.stat().st_size > 0
-
-
 class TestMetricsVisualizerLossPlots:
-    """Validates the loss-curve plots against histories with awkward shapes."""
+    """Validates the loss plots refuse input they cannot draw.
 
-    def _write_histories(self, directory: Path, n_runs: int = 3) -> Path:
-        """Writes histories with sparse validation values and unequal lengths.
-
-        The first run is shorter than the others and every run only evaluates
-        on even epochs, so the plots must tolerate missing values and ragged
-        epoch counts.
-
-        Args:
-            directory: Directory receiving one JSON file per run.
-            n_runs: Number of histories to write.
-
-        Returns:
-            The directory containing the written histories.
-        """
-        directory.mkdir(parents=True)
-        for i in range(n_runs):
-            n_epochs = 4 if i == 0 else 6
-            epochs = [
-                EpochRecord(
-                    epoch=e,
-                    train_loss=0.7 - 0.05 * e + 0.01 * i,
-                    train_acc=0.5 + 0.05 * e,
-                    val_loss=0.72 - 0.04 * e if e % 2 == 0 else None,
-                    val_acc=0.5 + 0.04 * e if e % 2 == 0 else None,
-                    lr=1e-4,
-                    duration_s=1.0,
-                )
-                for e in range(1, n_epochs + 1)
-            ]
-            history = TrainingHistory(
-                spec=build_spec("pl_qtl", seed=i, lr_step_size=2),
-                extras={},
-                epochs=epochs,
-            )
-            MetricsAnalyzer.save_history(history, str(directory / f"seed_{i}.json"))
-        return directory
-
-    def test_loss_plots_write_nonzero_png_files(self, tmp_path: Path) -> None:
-        """Feeds sparse, ragged histories into all three loss plots and asserts
-        each expected PNG exists with non-zero size."""
-        qtl_dir = self._write_histories(tmp_path / "qtl")
-        ctl_dir = self._write_histories(tmp_path / "ctl")
-        output_dir = Path(tmp_path / "plots")
-        visualizer = MetricsVisualizer(output_dir=str(output_dir))
-
-        visualizer.plot_loss_curve(str(qtl_dir / "seed_1.json"), prefix="qtl")
-        visualizer.plot_loss_distribution(str(qtl_dir), prefix="qtl")
-        visualizer.plot_loss_comparison({"QTL": str(qtl_dir), "CTL": str(ctl_dir)})
-
-        seed_1_id = run_id(build_spec("pl_qtl", seed=1, lr_step_size=2))
-        for filename in (
-            f"qtl_{seed_1_id}_loss.png",
-            "qtl_loss_distribution.png",
-            "loss_comparison.png",
-        ):
-            assert (output_dir / filename).stat().st_size > 0
+    The figures themselves are drawn in `test_run_plots.py`, from histories with
+    missing validation epochs and unequal lengths.
+    """
 
     def test_loss_distribution_rejects_directory_without_histories(
         self,

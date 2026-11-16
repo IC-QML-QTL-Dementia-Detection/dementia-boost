@@ -10,6 +10,8 @@ the same mathematical formulation but executed through Qiskit Primitives.
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from qiskit.quantum_info import SparsePauliOp
 
+from .qiskit_embeddings import DEFAULT_EMBEDDING, get_embedding
+
 DEFAULT_N_QUBITS: int = 6
 DEFAULT_N_LAYERS: int = 4
 
@@ -17,6 +19,7 @@ DEFAULT_N_LAYERS: int = 4
 def build_qiskit_ansatz(
     n_qubits: int = DEFAULT_N_QUBITS,
     n_layers: int = DEFAULT_N_LAYERS,
+    embedding: str = DEFAULT_EMBEDDING,
 ) -> tuple[
     QuantumCircuit,
     ParameterVector,
@@ -25,9 +28,9 @@ def build_qiskit_ansatz(
 ]:
     """Constructs the parameterized Qiskit circuit and Pauli-Z observables.
 
-    Builds an initial Hadamard layer followed by an RZ angle embedding of the
-    classical input features, then `n_layers` repetitions of the Bhowmik et
-    al. (2025) ansatz:
+    Builds the chosen embedding of the classical input features (by default a
+    Hadamard layer followed by an RZ angle embedding, see `qiskit_embeddings`),
+    then `n_layers` repetitions of the Bhowmik et al. (2025) ansatz:
     1. Parameterized RZ rotation on each qubit: `RZ(theta[layer, i])`.
     2. Entangling ring of CNOT gates between adjacent qubits:
        `CNOT(i, (i + 1) % n_qubits)`.
@@ -46,23 +49,23 @@ def build_qiskit_ansatz(
     Args:
         n_qubits: Number of qubits in the circuit. Defaults to 6.
         n_layers: Number of ansatz layer repetitions. Defaults to 4.
+        embedding: Registry name of the embedding. Defaults to the paper's
+            angle embedding.
 
     Returns:
         A tuple containing:
             - circuit: The parameterized QuantumCircuit.
-            - input_params: ParameterVector for classical angle inputs (x).
+            - input_params: ParameterVector for the embedding's gate angles
+              (x), one per column of the embedding's angle function.
             - weight_params: List of `[theta, gamma, beta]` ParameterVectors.
             - observables: List of SparsePauliOp Pauli-Z operators, one per
               qubit.
     """
     circuit = QuantumCircuit(n_qubits)
 
-    for i in range(n_qubits):
-        circuit.h(i)
-
-    input_params = ParameterVector("x", n_qubits)
-    for i in range(n_qubits):
-        circuit.rz(input_params[i], i)
+    chosen = get_embedding(embedding)
+    input_params = ParameterVector("x", chosen.n_features(n_qubits))
+    chosen.apply(circuit, input_params)
 
     theta_params = ParameterVector("theta", n_layers * n_qubits)
     gamma_params = ParameterVector("gamma", n_layers * n_qubits)

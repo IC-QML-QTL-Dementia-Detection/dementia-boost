@@ -19,6 +19,10 @@ approximation instead of analytic parameter-shift). The perturbation signs are
 drawn from a generator seeded with the run seed. This trade-off is necessary
 to keep the full 101-seed, 100-epoch sweep computationally tractable.
 
+`--ansatz` picks the embedding in front of the variational block (`paper`, the
+default, `zz_feature_map`, `rx`, or `zz_feature_map_linear`), and `--seeds N`
+runs only the first N seeds for a quick check.
+
 Each run is described by a `RunSpec` (qubits, layers, ansatz, gradient method,
 SPSA step, and the selected baseline as `backbone_id`); checkpoints, per-epoch
 histories, and configuration are written where `ResultsLayout` puts them, and a
@@ -28,6 +32,7 @@ state-vector estimator, so a forward pass over the validation set is cheap and
 validation is evaluated every epoch (`DEFAULT_EVAL_EVERY`).
 """
 
+import argparse
 import sys
 
 import torch
@@ -46,6 +51,8 @@ from dementia_boost.models.builder import (
     load_baseline_backbone,
 )
 from dementia_boost.models.quantum_cnn import (
+    DEFAULT_EMBEDDING,
+    EMBEDDINGS,
     QiskitQuantumClassifierHead,
     resolve_qiskit_estimator,
 )
@@ -61,7 +68,7 @@ DEFAULT_LEARNING_RATE: float = 1e-4
 DEFAULT_LR_STEP_SIZE: int = 10
 DEFAULT_LR_GAMMA: float = 0.75
 DEFAULT_FEATURE_DIM: int = 2304
-DEFAULT_ANSATZ: str = "paper"
+DEFAULT_ANSATZ: str = DEFAULT_EMBEDDING
 DEFAULT_N_QUBITS: int = 6
 DEFAULT_N_LAYERS: int = 4
 DEFAULT_GRADIENT_METHOD: str = "spsa_loss_level"
@@ -97,19 +104,46 @@ def get_device(device_name: str | None = None) -> torch.device:
     return torch.device(target)
 
 
-def build_spec(seed: int, backbone: RunSpec) -> RunSpec:
+def parse_arguments() -> argparse.Namespace:
+    """Parses the command-line options of the sweep.
+
+    Returns:
+        The namespace with `ansatz` (the embedding name) and `seeds` (how many
+        of the default seeds to run, or None for all).
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--ansatz",
+        choices=sorted(EMBEDDINGS),
+        default=DEFAULT_ANSATZ,
+        help="Embedding in front of the variational block; part of the "
+        "configuration, so each embedding is its own set of runs.",
+    )
+    parser.add_argument(
+        "--seeds",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Run only the first N seeds (for a quick check). Extending later "
+        "reuses the same configuration.",
+    )
+    return parser.parse_args()
+
+
+def build_spec(seed: int, backbone: RunSpec, ansatz: str = DEFAULT_ANSATZ) -> RunSpec:
     """Builds the specification of one Qiskit QTL run on a selected baseline.
 
     Args:
         seed: Random seed of the run.
         backbone: Spec of the baseline run the head is built on.
+        ansatz: Registry name of the embedding of the quantum head.
 
     Returns:
         The Qiskit QTL spec, trained on the same split as its backbone.
     """
     return RunSpec(
         paradigm=Paradigm.QISKIT_QTL,
-        ansatz=DEFAULT_ANSATZ,
+        ansatz=ansatz,
         n_qubits=DEFAULT_N_QUBITS,
         n_layers=DEFAULT_N_LAYERS,
         lr=DEFAULT_LEARNING_RATE,
@@ -127,6 +161,8 @@ def build_spec(seed: int, backbone: RunSpec) -> RunSpec:
 
 def main() -> None:
     """Executes Qiskit QTL sweep across seeds on cached embeddings."""
+    arguments = parse_arguments()
+    seeds = DEFAULT_EXPERIMENT_SEEDS[: arguments.seeds]
     logger = setup_logger("qiskit_qtl_multiseed_nifti")
     device = get_device()
     layout = ResultsLayout()
@@ -151,8 +187,9 @@ def main() -> None:
         f"Selected Baseline Backbone: {label(backbone)} ({baseline_weights_path})"
     )
     logger.info(
-        f"Beginning Qiskit QTL sweep ({DEFAULT_N_QUBITS} qubits, {DEFAULT_N_LAYERS} "
-        f"layers) across {len(DEFAULT_EXPERIMENT_SEEDS)} seeds using SPSA gradients..."
+        f"Beginning Qiskit QTL sweep ({arguments.ansatz} embedding, "
+        f"{DEFAULT_N_QUBITS} qubits, {DEFAULT_N_LAYERS} layers) across "
+        f"{len(seeds)} seeds using SPSA gradients..."
     )
     logger.warning(
         "SPSA gradients are a stochastic approximation, not the exact "
@@ -195,12 +232,11 @@ def main() -> None:
     )
 
     logger.info(
-        "Beginning fast in-memory Qiskit QTL sweep across "
-        f"{len(DEFAULT_EXPERIMENT_SEEDS)} seeds..."
+        f"Beginning fast in-memory Qiskit QTL sweep across {len(seeds)} seeds..."
     )
 
-    for seed in DEFAULT_EXPERIMENT_SEEDS:
-        spec = build_spec(seed, backbone)
+    for seed in seeds:
+        spec = build_spec(seed, backbone, arguments.ansatz)
 
         if layout.is_done(spec):
             logger.info(
@@ -221,6 +257,7 @@ def main() -> None:
             spsa_epsilon=DEFAULT_SPSA_EPSILON,
             seed=seed,
             estimator=estimator,
+            embedding=arguments.ansatz,
         ).to(device)
         head.apply(QiskitQuantumClassifierHead.apply_glorot_init)
 
