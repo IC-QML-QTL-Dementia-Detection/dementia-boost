@@ -30,6 +30,7 @@ Regression coverage
 import math
 from collections.abc import Iterable
 
+import pytest
 import torch
 from qiskit.circuit import QuantumCircuit
 from qiskit.primitives import (
@@ -151,6 +152,20 @@ def _finite_difference_gradients(
     return input_grad, weight_grad
 
 
+def _instructions(
+    circuit: QuantumCircuit,
+) -> list[tuple[str, tuple[int, ...], tuple[str, ...]]]:
+    """Lists a circuit's gates as `(name, qubit indices, parameter names)`."""
+    return [
+        (
+            instruction.operation.name,
+            tuple(circuit.find_bit(qubit).index for qubit in instruction.qubits),
+            tuple(str(param) for param in instruction.operation.params),
+        )
+        for instruction in circuit.data
+    ]
+
+
 class TestQiskitAnsatzConstruction:
     """Validates the static shape and parameter contract of the ansatz."""
 
@@ -164,6 +179,40 @@ class TestQiskitAnsatzConstruction:
             label = observable.paulis.to_labels()[0]
             assert label.count("Z") == 1
             assert label.count("I") == n_qubits - 1
+
+    def test_paper_block_keeps_the_gate_and_weight_order(self) -> None:
+        """Asserts the registered `paper` block builds exactly the base paper's
+        gate sequence after the Hadamard and RZ embedding, with the weights in
+        the flat `[theta, gamma, beta]` order that saved checkpoints and the
+        PennyLane parity mapping rely on."""
+        n_qubits, n_layers = 3, 2
+        circuit, _, weight_params, _ = build_qiskit_ansatz(
+            n_qubits=n_qubits, n_layers=n_layers, block="paper"
+        )
+
+        expected = [("h", (q,), ()) for q in range(n_qubits)]
+        expected += [("rz", (q,), (f"x[{q}]",)) for q in range(n_qubits)]
+        for layer in range(n_layers):
+            offset = layer * n_qubits
+            expected += [
+                ("rz", (q,), (f"theta[{offset + q}]",)) for q in range(n_qubits)
+            ]
+            expected += [("cx", (q, (q + 1) % n_qubits), ()) for q in range(n_qubits)]
+            expected += [
+                ("rz", (q,), (f"gamma[{offset + q}]",)) for q in range(n_qubits)
+            ]
+            expected += [
+                ("cry", ((q + 1) % n_qubits, q), (f"beta[{offset + q}]",))
+                for q in range(n_qubits)
+            ]
+
+        assert _instructions(circuit) == expected
+        assert [vector.name for vector in weight_params] == ["theta", "gamma", "beta"]
+
+    def test_unknown_block_is_refused(self) -> None:
+        """Asserts an unregistered block name raises with the available names."""
+        with pytest.raises(ValueError, match="paper"):
+            build_qiskit_ansatz(n_qubits=2, n_layers=1, block="missing")
 
 
 class TestQiskitAnsatzDynamicConfiguration:
