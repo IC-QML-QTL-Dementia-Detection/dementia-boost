@@ -250,6 +250,84 @@ class TestQiskitAnsatzConstruction:
 
         assert _instructions(reuploaded) == _instructions(plain)
 
+    @pytest.mark.parametrize(
+        ("block", "pairs"),
+        [
+            ("hardware_efficient_linear", [(0, 1), (1, 2)]),
+            ("hardware_efficient_ring", [(0, 1), (1, 2), (2, 0)]),
+            ("hardware_efficient_full", [(0, 1), (0, 2), (1, 2)]),
+        ],
+    )
+    def test_hardware_efficient_blocks(
+        self, block: str, pairs: list[tuple[int, int]]
+    ) -> None:
+        """Asserts `RY(theta)` and `RZ(phi)` on every qubit, then CNOTs over the
+        entanglement pattern, with the weights laid out as `[theta, phi]`."""
+        n_qubits, n_layers = 3, 2
+        circuit, _, weight_params, _ = build_qiskit_ansatz(
+            n_qubits=n_qubits, n_layers=n_layers, block=block
+        )
+
+        expected = _angle_embedding_gates(n_qubits)
+        for layer in range(n_layers):
+            offset = layer * n_qubits
+            expected += [
+                ("ry", (q,), (f"theta[{offset + q}]",)) for q in range(n_qubits)
+            ]
+            expected += [("rz", (q,), (f"phi[{offset + q}]",)) for q in range(n_qubits)]
+            expected += [("cx", pair, ()) for pair in pairs]
+
+        assert _instructions(circuit) == expected
+        assert [vector.name for vector in weight_params] == ["theta", "phi"]
+
+    def test_strongly_entangling_block(self) -> None:
+        """Asserts `RZ(phi) RY(theta) RZ(omega)` on each qubit, then a CNOT ring
+        `i -> (i + r) mod n` whose range `r` is 1 in the first layer and 2 in
+        the second (PennyLane's `StronglyEntanglingLayers` rule), with the
+        weights laid out as `[phi, theta, omega]`."""
+        n_qubits, n_layers = 3, 2
+        circuit, _, weight_params, _ = build_qiskit_ansatz(
+            n_qubits=n_qubits, n_layers=n_layers, block="strongly_entangling"
+        )
+
+        expected = _angle_embedding_gates(n_qubits)
+        for layer, shift in ((0, 1), (1, 2)):
+            offset = layer * n_qubits
+            for q in range(n_qubits):
+                expected += [
+                    ("rz", (q,), (f"phi[{offset + q}]",)),
+                    ("ry", (q,), (f"theta[{offset + q}]",)),
+                    ("rz", (q,), (f"omega[{offset + q}]",)),
+                ]
+            expected += [("cx", (q, (q + shift) % n_qubits), ()) for q in range(3)]
+
+        assert _instructions(circuit) == expected
+        assert [vector.name for vector in weight_params] == ["phi", "theta", "omega"]
+
+    def test_trainable_zz_block(self) -> None:
+        """Asserts trainable `RZZ(w)` on neighbouring pairs, then `RX(alpha)` on
+        each qubit, with `n - 1` couplings and `n` rotations per layer, laid
+        out as `[w, alpha]`."""
+        n_qubits, n_layers = 3, 2
+        circuit, _, weight_params, _ = build_qiskit_ansatz(
+            n_qubits=n_qubits, n_layers=n_layers, block="trainable_zz"
+        )
+
+        expected = _angle_embedding_gates(n_qubits)
+        for layer in range(n_layers):
+            expected += [
+                ("rzz", (i, i + 1), (f"w[{layer * (n_qubits - 1) + i}]",))
+                for i in range(n_qubits - 1)
+            ]
+            expected += [
+                ("rx", (q,), (f"alpha[{layer * n_qubits + q}]",))
+                for q in range(n_qubits)
+            ]
+
+        assert _instructions(circuit) == expected
+        assert [vector.name for vector in weight_params] == ["w", "alpha"]
+        assert [len(vector) for vector in weight_params] == [4, 6]
+
     def test_unknown_block_is_refused(self) -> None:
         """Asserts an unregistered block name raises with the available names."""
         with pytest.raises(ValueError, match="paper"):

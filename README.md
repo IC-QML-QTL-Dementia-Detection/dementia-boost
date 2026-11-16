@@ -165,9 +165,11 @@ uv run scripts/training/train_qiskit_qtl_multiseed.py
 # zz_feature_map_linear; --seeds N runs only the first N seeds
 uv run scripts/training/train_qiskit_qtl_multiseed.py --ansatz zz_feature_map
 
-# Qiskit head with another variational block (paper, the default, is the only
-# one so far) and data re-uploading (the embedding repeated before every layer)
-uv run scripts/training/train_qiskit_qtl_multiseed.py --block paper --reupload
+# Qiskit head with another variational block: paper (default),
+# hardware_efficient_linear, hardware_efficient_ring, hardware_efficient_full,
+# strongly_entangling, trainable_zz; --reupload repeats the embedding before
+# every layer (data re-uploading)
+uv run scripts/training/train_qiskit_qtl_multiseed.py --block strongly_entangling --reupload
 ```
 
 Each training script writes a checkpoint and a per-epoch history (with the full run specification) per seed and skips runs that already finished. The PennyLane head implements only the `paper` embedding and block, without re-uploading (`docs/architecture.md`, section 3.2).
