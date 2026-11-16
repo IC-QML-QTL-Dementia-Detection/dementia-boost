@@ -305,7 +305,7 @@ class TestQuantumLayerInputDependence:
         across a batch of random inputs at fixed weights."""
         n_qubits = 4
         layer = create_quantum_layer(
-            n_qubits=n_qubits, n_layers=2, quantum_device="default.qubit"
+            n_qubits=n_qubits, n_layers=2, quantum_device="lightning.qubit"
         )
 
         with torch.no_grad():
@@ -322,7 +322,7 @@ class TestQuantumLayerInputDependence:
         def evaluate(seed: int) -> torch.Tensor:
             torch.manual_seed(seed)
             layer = create_quantum_layer(
-                n_qubits=n_qubits, n_layers=2, quantum_device="default.qubit"
+                n_qubits=n_qubits, n_layers=2, quantum_device="lightning.qubit"
             )
             with torch.no_grad():
                 return layer(inputs)

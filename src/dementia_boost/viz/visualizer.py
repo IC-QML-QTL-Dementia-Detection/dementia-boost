@@ -35,12 +35,14 @@ class MetricsVisualizer:
     Attributes:
         CHANCE_LEVEL_LOSS: Binary cross-entropy of a chance-level predictor on
             balanced classes, ln 2.
+        PNG_DPI: Resolution of the PNG files, in dots per inch.
         output_dir: Destination directory path where plots will be saved.
         vector_formats: Extra vector formats (`svg`, `pdf`) each figure is
             also written in, next to its PNG with the same name.
     """
 
     CHANCE_LEVEL_LOSS: float = math.log(2)
+    PNG_DPI: int = 300
     VECTOR_FORMATS: tuple[str, ...] = ("svg", "pdf")
 
     def __init__(
@@ -77,7 +79,7 @@ class MetricsVisualizer:
             fig: The figure to write.
             save_path: Path of the PNG; the vector files replace its extension.
         """
-        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        fig.savefig(save_path, dpi=self.PNG_DPI, bbox_inches="tight")
         stem = os.path.splitext(save_path)[0]
         for extension in self.vector_formats:
             fig.savefig(f"{stem}.{extension}", bbox_inches="tight")

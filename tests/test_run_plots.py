@@ -32,6 +32,13 @@ from dementia_boost.viz.visualizer import MetricsVisualizer
 _LABELS = np.array([0, 1] * 10)
 _PERFECT = np.where(_LABELS == 1, 0.9, 0.1)
 _WORSE_THAN_CHANCE = np.where(_LABELS == 1, 0.2, 0.8)
+_TEST_DPI = 50
+
+
+@pytest.fixture(autouse=True)
+def _low_dpi(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Draws the PNG files at a low resolution, which the tests do not check."""
+    monkeypatch.setattr(MetricsVisualizer, "PNG_DPI", _TEST_DPI)
 
 
 def _write_results(layout: ResultsLayout, spec_a: RunSpec, spec_b: RunSpec) -> None:

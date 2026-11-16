@@ -292,9 +292,13 @@ class TestQiskitQuantumLayerSpsaBackward:
         """Averages many SPSA backward passes (unbiased, so the mean converges
         to the true gradient) and asserts the cosine similarity with the exact
         finite-difference gradient of the same scalar loss, for both the
-        circuit weights and the upstream inputs."""
+        circuit weights and the upstream inputs. Runs on the default Aer
+        estimator, which the parity test pins to the reference."""
         n_qubits, n_layers, batch = 2, 1, 8
-        layer = _layer(n_qubits, n_layers, seed=0)
+        torch.manual_seed(0)
+        layer = create_qiskit_quantum_layer(
+            n_qubits=n_qubits, n_layers=n_layers, seed=0
+        )
         inputs = torch.randn(batch, n_qubits, requires_grad=True)
         upstream = torch.randn(batch, n_qubits)
 
