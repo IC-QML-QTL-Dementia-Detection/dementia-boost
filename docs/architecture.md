@@ -71,7 +71,7 @@ flowchart TD
 
 A run is not identified by a name, because a name says nothing about its qubits, layers, learning rate, backbone, or split, and two different configurations would collide on disk. Identity is split into three separate things:
 
-- **The specification** (`RunSpec`, a frozen dataclass): the paradigm, the ansatz, qubits and layers, the learning rates, the `StepLR` settings, epochs, batch size, the gradient method, the `backbone_id`, the `split_id`, and the `seed`. Fields that do not apply to a paradigm are `None`, and each paradigm validates that its required fields are set (a baseline has no quantum fields and no backbone, a head needs its backbone). The spec is stored in every training history, so it is the source of truth for what a run was.
+- **The specification** (`RunSpec`, a frozen dataclass): the paradigm, the embedding (the field is named `ansatz`), the variational block and re-uploading (Qiskit head only, section 3.2), qubits and layers, the learning rates, the `StepLR` settings, epochs, batch size, the gradient method, the `backbone_id`, the `split_id`, and the `seed`. Fields that do not apply to a paradigm are `None`, and each paradigm validates that its required fields are set (a baseline has no quantum fields and no backbone, a head needs its backbone). The spec is stored in every training history, so it is the source of truth for what a run was.
 - **The IDs** (opaque hashes of the spec): `config_id` hashes every field except the seed, so all seeds of one configuration share it; `run_id` hashes every field. Both are the first 12 hex characters of a SHA-256 over the canonical JSON of the spec (sorted keys, `None` fields dropped, so adding a new optional field later does not change existing IDs). The `backbone_id` of a head is the `run_id` of the baseline it was built on, which pins its checkpoint and, through it, its split. `split_id` uses the same hash helper.
 - **The label** (output only): a readable rendering such as `pl_qtl | paper | 6q x 4L | lr 0.0001 | seed 3`, for plots and logs. Nothing parses it.
 
@@ -253,6 +253,17 @@ The embedding is the `ansatz` field of the run specification, so each embedding 
 
 - **`zz_feature_map_linear`.** The same map with $E = \{(i, i+1)\}$, nearest neighbours only: 5 pairs and $n + (n-1) = 11$ angles at $n = 6$.
 
+**Variational blocks and data re-uploading (Qiskit head only).** The variational block after the embedding is chosen the same way, by the `block` field of the run specification, from the registry in `qiskit_blocks.py`. One layer $V_l$ of each block, with every weight drawn uniformly in $[-\pi, \pi]$ at initialisation:
+
+- **`paper`** (the default): the block of section 3.1, $3n$ weights per layer.
+- **`hardware_efficient_linear`, `hardware_efficient_ring`, `hardware_efficient_full`**: $V_l = \big[\prod_{(i,j) \in E} \mathrm{CNOT}_{i \to j}\big] \bigotimes_i R_z(\phi_{l,i})\, R_y(\theta_{l,i})$, with $E$ the pairs $(i, i+1)$ (linear, $n-1$ CNOTs), those plus $(n-1, 0)$ (ring, $n$ CNOTs), or every $i < j$ (full, $n(n-1)/2$ CNOTs). $2n$ weights per layer.
+- **`strongly_entangling`** (Schuld et al., 2020; PennyLane's `StronglyEntanglingLayers`): $V_l = \big[\prod_i \mathrm{CNOT}_{i \to (i + r_l) \bmod n}\big] \bigotimes_i R_z(\omega_{l,i})\, R_y(\theta_{l,i})\, R_z(\phi_{l,i})$ with range $r_l = (l \bmod (n-1)) + 1$. $3n$ weights per layer, the same count as `paper`.
+- **`trainable_zz`**: $V_l = \bigotimes_i R_x(\alpha_{l,i}) \prod_{i=0}^{n-2} R_{zz}(w_{l,i})_{i,i+1}$, the coupling of the ZZ feature map with trained instead of input-dependent angles, followed by $R_x$ rotations that mix the basis states the couplings only give phases to. $2n - 1$ weights per layer.
+
+Data re-uploading (the `reupload` field) applies the whole embedding again before every layer instead of once:
+$$|\psi(\tilde{z})\rangle = V_L\, S(\tilde{z})\, \cdots\, V_2\, S(\tilde{z})\, V_1\, S(\tilde{z})\, |0\rangle^{\otimes n},$$
+where $S$ is the embedding (with `paper`, the Hadamard layer is repeated too) and $V_l$ a layer of the block. The same input angles are reused, so the number of inputs and of circuit weights does not change. With a single upload each feature enters through one rotation, so $\langle Z_i\rangle$ is a trigonometric polynomial of degree 1 in each $\tilde{z}_j$; $L$ uploads allow degree $L$ (for `paper` and `rx`). The default values, the `paper` block and no re-uploading, are stored as `None` in the specification, so every configuration that existed before these fields keeps its `config_id`.
+
 ### 3.3 PennyLane Execution Path
 
 `resolve_quantum_device` (`pennylane_circuit.py`) picks the simulator: `lightning.qubit` by default, `default.qubit` as a fallback, or an injected device, which the heads and `builder.py` accept as `quantum_device`. Gradients are exact (adjoint). At 6 qubits the state has $2^6 = 64$ amplitudes, so CPU simulation is faster than the GPU simulator (`lightning.gpu`), whose memory transfers and kernel launches dominate at this size.
@@ -273,11 +284,23 @@ flowchart LR
 ```
 
 - **`qiskit_embeddings.py`**: The registry of embeddings (section 3.2). Each entry has a PyTorch angle function from $\tilde{z}$ to the gate angles, the number of angles, and the gates that consume them, one circuit parameter per angle. Computing the angles outside the circuit keeps every circuit parameter a plain input column (no products of run-time parameters in the simulator), and autograd differentiates the angle function exactly back to the pre-net. The head applies the angle function after the $\tanh$ scaling, so `QiskitQuantumLayer` only sees the angle columns.
-- **`qiskit_circuit.py` (`build_qiskit_ansatz`)**: Builds the `QuantumCircuit` (the chosen embedding followed by the variational block), the input and weight `ParameterVector`s, and the per-qubit Pauli-Z `SparsePauliOp` observables. Pauli strings are reversed relative to the qubit index because Qiskit orders them from the most significant qubit.
+- **`qiskit_blocks.py`**: The registry of variational blocks (section 3.2). Each entry creates its weight `ParameterVector`s, in the order of the layer's flat weight tensor, and appends one layer of gates. The default `paper` block keeps its weights laid out as `[theta, gamma, beta]`, which saved checkpoints rely on.
+- **`qiskit_circuit.py` (`build_qiskit_ansatz`)**: Builds the `QuantumCircuit` (the chosen embedding followed by `n_layers` layers of the chosen variational block, with the embedding repeated before every layer when re-uploading), the input and weight `ParameterVector`s, and the per-qubit Pauli-Z `SparsePauliOp` observables. Pauli strings are reversed relative to the qubit index because Qiskit orders them from the most significant qubit.
 - **`qiskit_runner.py`**: `QiskitExpectationRunner` owns only "circuit, observables, parameter batch in, expectation values out". Each call is one broadcast PUB with parameters shaped `(N, 1, P)` and observables shaped `(1, n_qubits)`, so every state is evolved once and all expectation values are read from it. `resolve_qiskit_estimator` is the Qiskit counterpart of `resolve_quantum_device`: it returns an injected estimator or, by default, Aer's `EstimatorV2` on the state-vector method with no noise model attached. `StatevectorEstimator` is the slower reference implementation and is injected explicitly where a reference is wanted, such as unit tests. Controlled rotations (`cry`, `crz`, `cp`) are decomposed once at construction, because qiskit-aer 0.17.2 evaluates them wrongly when their angle is bound at run time.
-- **`qiskit_layer.py`**: `QiskitQuantumLayer` holds the flat weight vector, laid out as `[theta, gamma, beta]`, and a custom `torch.autograd.Function`. The backward pass is a loss-level SPSA estimate: one Rademacher direction per sample is shared by all outputs by folding the upstream gradient into the finite difference, which costs one PUB of `2 * Batch` states. The directions come from a generator seeded with the run seed, so a seed reproduces its gradient noise. Exact parameter-shift is avoided because it needs 204 shifted circuits per sample at the default 6-qubit, 4-layer depth.
+- **`qiskit_layer.py`**: `QiskitQuantumLayer` holds the flat weight vector, in the order of the block's weight vectors (`[theta, gamma, beta]` for `paper`), and a custom `torch.autograd.Function`. The backward pass is a loss-level SPSA estimate: one Rademacher direction per sample is shared by all outputs by folding the upstream gradient into the finite difference, which costs one PUB of `2 * Batch` states. The directions come from a generator seeded with the run seed, so a seed reproduces its gradient noise. Exact parameter-shift is avoided because it needs 204 shifted circuits per sample at the default 6-qubit, 4-layer depth.
 - **`qiskit_heads.py` & `builder.py`**: Accept an optional `estimator` (and, on the head, `spsa_epsilon` and `seed`), so the backend is configuration rather than code.
 - **`train_qiskit_qtl_multiseed.py`**: Records the gradient method and SPSA step in each run's spec (they change the maths, so they are part of the configuration ID) and the estimator class as a non-hashed extra in the history.
+
+### 3.5 Trainability Diagnostic (`src/dementia_boost/analysis/`)
+
+`trainability.py` measures a circuit at initialisation, without training, so circuits can be compared before any run: weights uniform in $[-\pi, \pi]$ and scaled features uniform in $[-\pi/2, \pi/2]$, as at the start of training, simulated exactly on the default estimator. Two costs are read from the expectation values, the global $C_g = \frac{1}{n}\sum_i \langle Z_i\rangle$ and the local $C_l = \langle Z_0\rangle$, because barren-plateau results differ between global and local costs. Per circuit and qubit count it reports:
+
+- the input spread: the smallest per-qubit standard deviation of $\langle Z_i\rangle$ across inputs at fixed weights, averaged over weight draws (zero for a constant circuit);
+- the input sensitivity: the root mean square of $\partial C / \partial \tilde{z}_j$;
+- the weight-gradient scale, the root mean square of $\partial C / \partial w_k$, and its variance across random initialisations, averaged over the weights, the usual barren-plateau measure when plotted against the qubit count;
+- the number of input angles and weights, whose sum is the dimension that SPSA perturbs.
+
+Derivatives are central differences (step $10^{-4}$) on the exact simulation, every shifted circuit in one batched estimator call; CRY has no two-term parameter-shift rule, so one method serves every block. `scripts/analysis/trainability.py` runs every block with the `paper` embedding, with and without re-uploading, and every embedding with the `paper` block, at 4, 6, 8, and 10 qubits, and writes `data/results/diagnostics/trainability.json`.
 
 ---
 
@@ -400,12 +423,14 @@ dementia-boost/
 │   │   └── quantum_cnn/                   # PennyLane and Qiskit circuits, heads, embeddings, runner (3.3, 3.4)
 │   ├── training/                          # Trainer, evaluator, evaluation of every checkpoint (4, 5)
 │   ├── telemetry/                         # Metrics, histories, run listing, selection, report, logger (5)
-│   └── viz/                               # All plotting code; the viz scripts only call it (5)
+│   ├── viz/                               # All plotting code; the viz scripts only call it (5)
+│   └── analysis/                          # Diagnostics that train nothing: circuit trainability (3.5)
 ├── scripts/                               # Entry points, all run with uv run
 │   ├── etl_pipeline.py, audit_cohorts.py  # Build the split; check that no subject is in two cohorts
 │   ├── list_runs.py                       # Look up configurations and runs by hash ID
 │   ├── training/                          # One multi-seed training script per paradigm
 │   ├── metrics/                           # One evaluation script per paradigm, comparative report
-│   └── viz/                               # One plotting script per paradigm, loss and comparison figures
+│   ├── viz/                               # One plotting script per paradigm, loss and comparison figures
+│   └── analysis/                          # Circuit trainability diagnostic
 └── tests/                                 # Unit and integration tests
 ```

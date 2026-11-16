@@ -8,6 +8,7 @@ shown as it is.
 """
 
 from collections.abc import Mapping
+from typing import Any
 
 from dementia_boost.core.identity import Paradigm
 
@@ -25,6 +26,17 @@ EMBEDDING_NAMES: dict[str, str] = {
     "zz_feature_map_linear": "ZZ-Feature Map (Linear)",
 }
 
+BLOCK_NAMES: dict[str, str] = {
+    "paper": "Paper Block",
+    "hardware_efficient_linear": "HEA (Linear)",
+    "hardware_efficient_ring": "HEA (Ring)",
+    "hardware_efficient_full": "HEA (Full)",
+    "strongly_entangling": "Strongly Entangling",
+    "trainable_zz": "Trainable ZZ",
+}
+
+REUPLOAD_NAME: str = "Re-uploading"
+
 METRIC_NAMES: dict[str, str] = {
     "accuracy": "Accuracy",
     "precision": "Precision",
@@ -34,25 +46,34 @@ METRIC_NAMES: dict[str, str] = {
 }
 
 
-def production_label(paradigm: str, ansatz: str | None) -> str:
+def production_label(spec: Mapping[str, Any]) -> str:
     """Builds the short presentation name of a configuration.
 
+    The variational block and re-uploading are named only when they differ
+    from the default (the base paper's block, embedding applied once).
+
     Args:
-        paradigm: The paradigm name (a `Paradigm` value).
-        ansatz: The embedding name of a quantum head, or None for the baseline
-            and CTL.
+        spec: A serialised run specification (`RunSpec.to_dict`), with or
+            without the seed.
 
     Returns:
         For example `QTL (Qiskit), ZZ-Feature Map`, or `CTL`.
     """
-    name = PARADIGM_NAMES.get(paradigm, paradigm)
-    if ansatz is None:
-        return name
-    return f"{name}, {EMBEDDING_NAMES.get(ansatz, ansatz)}"
+    paradigm: str = spec["paradigm"]
+    parts: list[str] = [PARADIGM_NAMES.get(paradigm, paradigm)]
+    ansatz: str | None = spec.get("ansatz")
+    if ansatz is not None:
+        parts.append(EMBEDDING_NAMES.get(ansatz, ansatz))
+    block: str | None = spec.get("block")
+    if block is not None:
+        parts.append(BLOCK_NAMES.get(block, block))
+    if spec.get("reupload"):
+        parts.append(REUPLOAD_NAME)
+    return ", ".join(parts)
 
 
 def production_labels(
-    configurations: Mapping[str, tuple[str, str | None]],
+    configurations: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, str]:
     """Maps configuration IDs to presentation names, keeping them unique.
 
@@ -61,15 +82,12 @@ def production_labels(
     each, so a legend never merges two configurations.
 
     Args:
-        configurations: Mapping of `config_id` to `(paradigm, ansatz)`.
+        configurations: Mapping of `config_id` to its serialised spec.
 
     Returns:
         Mapping of `config_id` to its presentation name.
     """
-    names = {
-        config: production_label(paradigm, ansatz)
-        for config, (paradigm, ansatz) in configurations.items()
-    }
+    names = {config: production_label(spec) for config, spec in configurations.items()}
     counts = {name: list(names.values()).count(name) for name in names.values()}
     return {
         config: name if counts[name] == 1 else f"{name} [{config}]"

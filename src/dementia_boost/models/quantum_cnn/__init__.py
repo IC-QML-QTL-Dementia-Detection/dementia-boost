@@ -18,6 +18,7 @@ from .pennylane_circuit import (
     resolve_quantum_device,
 )
 from .pennylane_heads import PennylaneQuantumClassifierHead
+from .qiskit_blocks import BLOCKS, DEFAULT_BLOCK, get_block
 from .qiskit_circuit import build_qiskit_ansatz
 from .qiskit_embeddings import DEFAULT_EMBEDDING, EMBEDDINGS, get_embedding
 from .qiskit_heads import QiskitQuantumClassifierHead
@@ -25,6 +26,8 @@ from .qiskit_layer import create_qiskit_quantum_layer
 from .qiskit_runner import QiskitExpectationRunner, resolve_qiskit_estimator
 
 __all__ = [
+    "BLOCKS",
+    "DEFAULT_BLOCK",
     "DEFAULT_EMBEDDING",
     "DEFAULT_QUANTUM_DEVICE",
     "EMBEDDINGS",
@@ -35,6 +38,7 @@ __all__ = [
     "build_qiskit_ansatz",
     "create_qiskit_quantum_layer",
     "create_quantum_layer",
+    "get_block",
     "get_embedding",
     "resolve_qiskit_estimator",
     "resolve_quantum_device",

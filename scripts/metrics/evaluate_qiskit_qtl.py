@@ -3,7 +3,8 @@
 This script finds every finished Qiskit v2.x hybrid Dressed Quantum Network (DQN)
 run through its training history, performs batched inference on the validation
 and test cohorts for each configuration (building each architecture from the
-qubits, layers, and embedding recorded in its spec; `--config` restricts the
+qubits, layers, embedding, variational block, and re-uploading recorded in its
+spec; `--config` restricts the
 evaluation to one configuration), computes full binary classification
 metrics (Accuracy, Precision, Recall, F1-score, AUC-ROC, log loss, Confusion
 Matrix), aggregates statistical distributions, and exports one telemetry JSON per
@@ -24,6 +25,7 @@ from dementia_boost.models.classical_cnn import (
     LeNetFeatureExtractor,
 )
 from dementia_boost.models.quantum_cnn import (
+    DEFAULT_BLOCK,
     DEFAULT_EMBEDDING,
     QiskitQuantumClassifierHead,
 )
@@ -67,8 +69,8 @@ def build_model(spec: RunSpec) -> DementiaClassifier:
     """Builds the Qiskit QTL architecture a configuration's checkpoints fit.
 
     Args:
-        spec: Spec of one run of the configuration; its qubits and layers set the
-            size of the quantum head.
+        spec: Spec of one run of the configuration; its qubits, layers,
+            embedding, block, and re-uploading define the quantum head.
 
     Returns:
         An untrained classifier with a Qiskit quantum head.
@@ -82,6 +84,8 @@ def build_model(spec: RunSpec) -> DementiaClassifier:
             n_qubits=spec.n_qubits,
             n_layers=spec.n_layers,
             embedding=spec.ansatz or DEFAULT_EMBEDDING,
+            block=spec.block or DEFAULT_BLOCK,
+            reupload=bool(spec.reupload),
         ),
     )
 

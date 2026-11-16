@@ -19,7 +19,7 @@ The 12-month plan (`docs/qtl_research_goals_activities.md`) has six activities: 
 
 ## Code Structure
 
-The code under `src/dementia_boost` is split into layers with one responsibility each: `core` (seeds, run identity, file layout), `data` (ETL, split, loaders, feature cache), `models` (backbone and heads), `training`, `telemetry` (metrics, selection, report), and `viz` (all plotting). The scripts under `scripts/` are entry points. [docs/architecture.md](docs/architecture.md) describes each layer, the circuits and their mathematics, and the evaluation protocol.
+The code under `src/dementia_boost` is split into layers with one responsibility each: `core` (seeds, run identity, file layout), `data` (ETL, split, loaders, feature cache), `models` (backbone and heads), `training`, `telemetry` (metrics, selection, report), `viz` (all plotting), and `analysis` (diagnostics that train nothing). The scripts under `scripts/` are entry points. [docs/architecture.md](docs/architecture.md) describes each layer, the circuits and their mathematics, and the evaluation protocol.
 
 ---
 
@@ -164,9 +164,15 @@ uv run scripts/training/train_qiskit_qtl_multiseed.py
 # Qiskit head with another embedding: paper (default), rx, zz_feature_map,
 # zz_feature_map_linear; --seeds N runs only the first N seeds
 uv run scripts/training/train_qiskit_qtl_multiseed.py --ansatz zz_feature_map
+
+# Qiskit head with another variational block: paper (default),
+# hardware_efficient_linear, hardware_efficient_ring, hardware_efficient_full,
+# strongly_entangling, trainable_zz; --reupload repeats the embedding before
+# every layer (data re-uploading)
+uv run scripts/training/train_qiskit_qtl_multiseed.py --block strongly_entangling --reupload
 ```
 
-Each training script writes a checkpoint and a per-epoch history (with the full run specification) per seed and skips runs that already finished. The PennyLane head implements only the `paper` embedding (`docs/architecture.md`, section 3.2).
+Each training script writes a checkpoint and a per-epoch history (with the full run specification) per seed and skips runs that already finished. The PennyLane head implements only the `paper` embedding and block, without re-uploading (`docs/architecture.md`, section 3.2).
 
 Runs are identified by hashes of their specification: `config_id` for a configuration (all its seeds), `run_id` for one seed, so changing any hyperparameter gives a new configuration that never overwrites an old one. Everything is written under `data/results/<kind>/<paradigm>/<config_id>/` (layout in `docs/architecture.md`, section 2.1.1). To look a hash up:
 
@@ -208,6 +214,16 @@ Options of the figure scripts:
 - `--production` (comparison and loss): short presentation names, set in `src/dementia_boost/viz/display_names.py`, written as `*_production.png`.
 - `--svg`, `--pdf` (all): also write the figures as vector files next to the PNGs (the loss script only for its comparison).
 - `--exclude <config_id> ...` (comparison and loss): leave configurations out; the figures keep their names.
+
+### 5. Circuit Diagnostic (no training)
+
+```bash
+# Trainability of every embedding and variational block at random initial weights:
+# input spread and sensitivity, gradient scale and variance at 4, 6, 8, 10 qubits.
+# Writes data/results/diagnostics/trainability.json and prints a Markdown table.
+uv run scripts/analysis/trainability.py
+uv run scripts/analysis/trainability.py --qubits 4 6 --draws 10   # quicker
+```
 
 ---
 

@@ -149,7 +149,7 @@ def plot_metric_comparisons(
 
     for cohort in ("test", "val"):
         found: dict[str, tuple[str, str]] = {}
-        shown: dict[str, tuple[str, str | None]] = {}
+        shown: dict[str, dict] = {}
         for paradigm in Paradigm:
             for config in layout.configs_with_metrics(paradigm, cohort):
                 if config in exclude:
@@ -158,7 +158,7 @@ def plot_metric_comparisons(
                 with open(path) as file:
                     configuration = json.load(file)["configuration"]
                 found[config] = (configuration["label"], path)
-                shown[config] = (paradigm.value, configuration["spec"].get("ansatz"))
+                shown[config] = configuration["spec"]
         if not found:
             continue
 
@@ -219,7 +219,7 @@ def plot_losses(
     """
     logger = logger or _DEFAULT_LOGGER
     available: dict[str, str] = {}
-    shown: dict[str, tuple[str, str | None]] = {}
+    shown: dict[str, dict] = {}
     directories: dict[str, str] = {}
 
     grouped = group_by_config(load_runs(layout))
@@ -244,7 +244,7 @@ def plot_losses(
         if config in exclude:
             continue
         available[label(first, include_seed=False)] = history_dir
-        shown[config] = (paradigm.value, first.ansatz)
+        shown[config] = first.to_dict()
         directories[config] = history_dir
 
     if production:

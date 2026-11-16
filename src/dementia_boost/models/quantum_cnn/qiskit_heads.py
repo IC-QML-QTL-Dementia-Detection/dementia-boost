@@ -13,6 +13,7 @@ import torch.nn as nn
 from qiskit.primitives import BaseEstimatorV2
 from torch import Tensor, tanh
 
+from .qiskit_blocks import DEFAULT_BLOCK
 from .qiskit_circuit import DEFAULT_N_LAYERS, DEFAULT_N_QUBITS, build_qiskit_ansatz
 from .qiskit_embeddings import DEFAULT_EMBEDDING, get_embedding
 from .qiskit_layer import DEFAULT_SPSA_EPSILON, create_qiskit_quantum_layer
@@ -62,6 +63,8 @@ class QiskitQuantumClassifierHead(nn.Module):
         seed: int | None = None,
         estimator: BaseEstimatorV2 | None = None,
         embedding: str = DEFAULT_EMBEDDING,
+        block: str = DEFAULT_BLOCK,
+        reupload: bool = False,
     ) -> None:
         """Initializes the hybrid Dressed Quantum Network classification head.
 
@@ -81,6 +84,10 @@ class QiskitQuantumClassifierHead(nn.Module):
                 circuit. If None, resolves to a noiseless `StatevectorEstimator`.
             embedding: Registry name of the embedding (see
                 `qiskit_embeddings`). Defaults to the paper's angle embedding.
+            block: Registry name of the variational block (see
+                `qiskit_blocks`). Defaults to the paper's block.
+            reupload: Whether to repeat the embedding before every layer.
+                Defaults to False.
         """
         super().__init__()
 
@@ -92,7 +99,12 @@ class QiskitQuantumClassifierHead(nn.Module):
             n_layers=n_layers,
             spsa_epsilon=spsa_epsilon,
             seed=seed,
-            ansatz_builder=partial(build_qiskit_ansatz, embedding=embedding),
+            ansatz_builder=partial(
+                build_qiskit_ansatz,
+                embedding=embedding,
+                block=block,
+                reupload=reupload,
+            ),
             estimator=estimator,
         )
         self.post_net = nn.Linear(in_features=n_qubits, out_features=out_features)

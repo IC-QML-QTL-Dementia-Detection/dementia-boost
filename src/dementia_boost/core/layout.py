@@ -44,6 +44,22 @@ def config_payload(spec: RunSpec) -> dict:
     }
 
 
+def _set_fields(spec_data: dict) -> dict:
+    """Drops the `None` fields of a serialised spec.
+
+    `None` fields are not part of a spec's identity (`short_hash` drops them),
+    so a `config.json` written before an optional field existed describes the
+    same configuration as one that lists the field as `None`.
+
+    Args:
+        spec_data: A serialised spec.
+
+    Returns:
+        The fields whose value is not `None`.
+    """
+    return {key: value for key, value in spec_data.items() if value is not None}
+
+
 class ConfigCollisionError(ValueError):
     """Raised when two different specs map to the same configuration ID."""
 
@@ -232,7 +248,7 @@ class ResultsLayout:
 
         Raises:
             ConfigCollisionError: If a `config.json` already exists under this
-                ID with a different spec.
+                ID with a different spec (`None` fields are ignored).
         """
         path = self.config_path(spec)
         payload = config_payload(spec)
@@ -240,7 +256,7 @@ class ResultsLayout:
         if os.path.exists(path):
             with open(path) as handle:
                 existing = json.load(handle)
-            if existing["spec"] != payload["spec"]:
+            if _set_fields(existing["spec"]) != _set_fields(payload["spec"]):
                 raise ConfigCollisionError(
                     f"Configuration ID {payload['config_id']!r} already belongs to "
                     f"a different spec: {existing['spec']} versus {payload['spec']}."

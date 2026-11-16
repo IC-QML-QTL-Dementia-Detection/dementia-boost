@@ -8,8 +8,8 @@ angle outside the circuit keeps each circuit parameter a plain input column, so
 the circuit never multiplies run-time parameters, and autograd differentiates
 the angle function exactly back to the pre-net.
 
-The variational block that follows the embedding lives in `qiskit_circuit.py`
-and is the same for every embedding.
+The variational block that follows the embedding is chosen separately, from
+the registry in `qiskit_blocks.py`.
 """
 
 import itertools

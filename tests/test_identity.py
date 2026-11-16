@@ -185,6 +185,40 @@ class TestIdentity:
         assert config_id(_qtl()) != config_id(_qtl(quantum_lr=1e-4))
 
 
+class TestVariationalBlockAndReupload:
+    """Validates the block and re-uploading fields of the Qiskit head."""
+
+    def test_defaults_are_stored_as_none_and_keep_existing_ids(self) -> None:
+        """Naming the paper's block or turning re-uploading off describes the
+        circuit every existing run used, so it must give the same IDs."""
+        explicit = _qiskit(block="paper", reupload=False)
+        assert explicit.block is None
+        assert explicit.reupload is None
+        assert config_id(explicit) == config_id(_qiskit())
+        assert run_id(explicit) == run_id(_qiskit())
+
+    @pytest.mark.parametrize("overrides", [{"block": "other"}, {"reupload": True}])
+    def test_another_block_or_reuploading_is_another_configuration(
+        self, overrides: dict
+    ) -> None:
+        """A different block, or re-uploading, gives a new `config_id`."""
+        assert config_id(_qiskit(**overrides)) != config_id(_qiskit())
+
+    @pytest.mark.parametrize("overrides", [{"block": "other"}, {"reupload": True}])
+    @pytest.mark.parametrize("make", [_baseline, _ctl, _qtl])
+    def test_only_the_qiskit_head_accepts_them(self, make, overrides: dict) -> None:
+        """Blocks and re-uploading exist only on the Qiskit side for now."""
+        with pytest.raises(ValueError, match="must not set"):
+            make(**overrides)
+
+    def test_label_names_a_non_default_block_and_reuploading(self) -> None:
+        """The label shows the block and re-uploading only when they are set."""
+        assert label(_qiskit(block="other", reupload=True)) == (
+            "qiskit_qtl | paper | block other | reupload | 6q x 4L | lr 0.0001 | seed 3"
+        )
+        assert "block" not in label(_qiskit())
+
+
 class TestBackbone:
     """Validates the link from heads to the baseline they were built on."""
 
