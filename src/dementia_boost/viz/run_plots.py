@@ -15,7 +15,7 @@ drawn.
 import json
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from logging import Logger
 
 from dementia_boost.core.identity import Paradigm, label
@@ -26,6 +26,22 @@ from dementia_boost.viz.display_names import production_labels
 from dementia_boost.viz.visualizer import MetricsVisualizer
 
 _DEFAULT_LOGGER = logging.getLogger(__name__)
+
+
+def _check_excluded(exclude: Collection[str], available: Collection[str]) -> None:
+    """Refuses excluded configuration IDs that match no configuration.
+
+    Args:
+        exclude: The `config_id`s asked to be left out of a figure.
+        available: The `config_id`s the figure would otherwise draw.
+
+    Raises:
+        ValueError: If an excluded ID is not among the available ones, so a
+            mistyped ID does not silently draw the figure with everything.
+    """
+    unknown = sorted(set(exclude) - set(available))
+    if unknown:
+        raise ValueError(f"Excluded configuration(s) {unknown} not found.")
 
 
 def plot_paradigm(
@@ -93,12 +109,13 @@ def plot_metric_comparisons(
     logger: Logger | None = None,
     production: bool = False,
     vector_formats: Sequence[str] = (),
+    exclude: Collection[str] = (),
 ) -> dict[str, list[str]]:
     """Compares every configuration's metric distributions on each cohort.
 
     For the test and the validation cohort it writes one figure with a box per
     configuration and metric to `<root>/plots`, from the results of every
-    configuration of every paradigm that has them.
+    configuration of every paradigm that has them, except the excluded ones.
 
     Args:
         layout: The results layout to read metrics from and write plots to.
@@ -108,12 +125,26 @@ def plot_metric_comparisons(
             `metric_comparison_<cohort>_production.png`, so the figure with the
             full configuration labels is not overwritten.
         vector_formats: Vector formats (`svg`, `pdf`) to write next to each PNG.
+        exclude: `config_id`s to leave out of the figures. The figures keep
+            their usual names.
 
     Returns:
         Mapping of each cohort (`test`, `val`) to the labels of the
         configurations drawn on it. Cohorts without results are omitted.
+
+    Raises:
+        ValueError: If an excluded ID has results on neither cohort.
     """
     logger = logger or _DEFAULT_LOGGER
+    _check_excluded(
+        exclude,
+        [
+            config
+            for cohort in ("test", "val")
+            for paradigm in Paradigm
+            for config in layout.configs_with_metrics(paradigm, cohort)
+        ],
+    )
     drawn: dict[str, list[str]] = {}
 
     for cohort in ("test", "val"):
@@ -121,6 +152,8 @@ def plot_metric_comparisons(
         shown: dict[str, tuple[str, str | None]] = {}
         for paradigm in Paradigm:
             for config in layout.configs_with_metrics(paradigm, cohort):
+                if config in exclude:
+                    continue
                 path = layout.metrics_path(paradigm, config, cohort)
                 with open(path) as file:
                     configuration = json.load(file)["configuration"]
@@ -156,12 +189,14 @@ def plot_losses(
     logger: Logger | None = None,
     production: bool = False,
     vector_formats: Sequence[str] = (),
+    exclude: Collection[str] = (),
 ) -> dict[str, str]:
     """Draws the loss plots of every configuration from the saved histories.
 
     Per configuration it writes one loss curve per run and a multi-seed loss
     distribution to the configuration's plot directory, and finally the
-    cross-configuration validation-loss comparison to `<root>/plots`.
+    cross-configuration validation-loss comparison to `<root>/plots`, without
+    the excluded configurations.
 
     Args:
         layout: The results layout to read histories from and write plots to.
@@ -172,17 +207,24 @@ def plot_losses(
             the comparison with the full labels are not touched.
         vector_formats: Vector formats (`svg`, `pdf`) to write next to the
             cross-configuration comparison. The per-run plots stay PNG only.
+        exclude: `config_id`s to leave out of the comparison, which keeps its
+            usual name. Their own per-configuration plots are still drawn.
 
     Returns:
-        Mapping of each configuration's label to its history directory. Empty if
-        there are no histories.
+        Mapping of each compared configuration's label to its history
+        directory. Empty if there are no histories.
+
+    Raises:
+        ValueError: If an excluded ID has no histories.
     """
     logger = logger or _DEFAULT_LOGGER
     available: dict[str, str] = {}
     shown: dict[str, tuple[str, str | None]] = {}
     directories: dict[str, str] = {}
 
-    for config, histories in group_by_config(load_runs(layout)).items():
+    grouped = group_by_config(load_runs(layout))
+    _check_excluded(exclude, grouped)
+    for config, histories in grouped.items():
         first = histories[0].spec
         paradigm = first.paradigm
         history_dir = layout.history_dir(paradigm, config)
@@ -199,6 +241,8 @@ def plot_losses(
                     layout.history_path(history.spec), prefix=paradigm.value
                 )
             visualizer.plot_loss_distribution(history_dir, prefix=paradigm.value)
+        if config in exclude:
+            continue
         available[label(first, include_seed=False)] = history_dir
         shown[config] = (paradigm.value, first.ansatz)
         directories[config] = history_dir

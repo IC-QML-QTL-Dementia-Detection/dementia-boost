@@ -22,7 +22,11 @@ from dementia_boost.telemetry.metrics import (
     TrainingHistory,
 )
 from dementia_boost.training.checkpoint_evaluation import save_configuration_results
-from dementia_boost.viz.run_plots import plot_losses, plot_paradigm
+from dementia_boost.viz.run_plots import (
+    plot_losses,
+    plot_metric_comparisons,
+    plot_paradigm,
+)
 from dementia_boost.viz.visualizer import MetricsVisualizer
 
 _LABELS = np.array([0, 1] * 10)
@@ -168,6 +172,64 @@ class TestPlotLosses:
         with pytest.raises(ValueError, match="Unknown vector format"):
             MetricsVisualizer(str(tmp_path), vector_formats=("eps",))
 
+    def test_excluded_configuration_is_left_out_of_the_comparison(
+        self, tmp_path: Path
+    ) -> None:
+        """An excluded configuration is missing from the comparison but keeps its
+        own plots."""
+        layout = ResultsLayout(str(tmp_path))
+        kept, excluded = build_spec("pl_qtl", seed=1), build_spec("ctl", seed=1)
+        for spec in (kept, excluded):
+            self._write_history(layout, spec)
+            layout.write_config(spec)
+
+        plotted = plot_losses(layout, exclude=[config_id(excluded)])
+
+        assert list(plotted.values()) == [layout.history_dir("pl_qtl", config_id(kept))]
+        own_plots = Path(layout.plots_dir("ctl", config_id(excluded)))
+        assert (own_plots / "ctl_loss_distribution.png").stat().st_size > 0
+
+    def test_unknown_excluded_configuration_is_refused(self, tmp_path: Path) -> None:
+        """A mistyped ID fails instead of drawing the figure with everything."""
+        layout = ResultsLayout(str(tmp_path))
+        spec = build_spec("pl_qtl", seed=1)
+        self._write_history(layout, spec)
+        layout.write_config(spec)
+
+        with pytest.raises(ValueError, match="000000000000"):
+            plot_losses(layout, exclude=["000000000000"])
+
     def test_no_histories_plots_nothing(self, tmp_path: Path) -> None:
         """An empty layout gives an empty result instead of blank figures."""
         assert plot_losses(ResultsLayout(str(tmp_path))) == {}
+
+
+class TestPlotMetricComparisons:
+    """Validates the cross-configuration metric comparison."""
+
+    def test_excluded_configuration_is_left_out(self, tmp_path: Path) -> None:
+        """Only the configurations not excluded are drawn, on every cohort."""
+        layout = ResultsLayout(str(tmp_path))
+        for paradigm in ("pl_qtl", "ctl"):
+            _write_results(
+                layout,
+                build_spec(paradigm, seed=1),
+                build_spec(paradigm, seed=2),
+            )
+        excluded = config_id(build_spec("ctl", seed=1))
+
+        drawn = plot_metric_comparisons(layout, exclude=[excluded])
+
+        assert set(drawn) == {"test", "val"}
+        assert all(len(labels) == 1 for labels in drawn.values())
+        assert all("pl_qtl" in labels[0] for labels in drawn.values())
+
+    def test_unknown_excluded_configuration_is_refused(self, tmp_path: Path) -> None:
+        """A mistyped ID fails instead of drawing the figure with everything."""
+        layout = ResultsLayout(str(tmp_path))
+        _write_results(
+            layout, build_spec("pl_qtl", seed=1), build_spec("pl_qtl", seed=2)
+        )
+
+        with pytest.raises(ValueError, match="000000000000"):
+            plot_metric_comparisons(layout, exclude=["000000000000"])

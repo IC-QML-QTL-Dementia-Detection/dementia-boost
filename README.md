@@ -292,6 +292,11 @@ uv run scripts/viz/visualize_loss.py --production
 uv run scripts/viz/visualize_comparison.py --production --svg --pdf
 uv run scripts/viz/visualize_loss.py --production --svg --pdf
 uv run scripts/viz/visualize_qiskit_qtl.py --svg
+
+# Leave configurations out of the comparison figures (IDs from list_runs.py). The
+# figures keep their names, so they replace the ones with every configuration.
+uv run scripts/viz/visualize_comparison.py --production --exclude <config_id> <config_id>
+uv run scripts/viz/visualize_loss.py --production --exclude <config_id>
 ```
 
 ---

@@ -10,7 +10,8 @@ any saved history simply do not appear, so it can run while sweeps are in
 progress. With `--production` it only draws the comparison, with short
 presentation names, to `data/results/plots/loss_comparison_production.png`.
 `--svg` and `--pdf` also write the comparison in that vector format next to its
-PNG.
+PNG. `--exclude` leaves the given configurations out of the comparison (look the
+IDs up with `list_runs.py`); it keeps its name, so it replaces the full one.
 """
 
 import argparse
@@ -33,6 +34,13 @@ def main() -> None:
         help="Draw only the cross-configuration comparison, with short "
         "presentation names, to loss_comparison_production.png.",
     )
+    parser.add_argument(
+        "--exclude",
+        nargs="+",
+        default=[],
+        metavar="CONFIG_ID",
+        help="Leave these configurations out of the comparison.",
+    )
     add_vector_arguments(parser)
     arguments = parser.parse_args()
     matplotlib.use("Agg")
@@ -44,6 +52,7 @@ def main() -> None:
             logger,
             production=arguments.production,
             vector_formats=vector_formats(arguments),
+            exclude=arguments.exclude,
         )
     except (FileNotFoundError, ValueError) as error:
         logger.error(f"Failed to generate plots: {error}")

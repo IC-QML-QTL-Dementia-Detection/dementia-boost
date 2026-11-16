@@ -11,6 +11,8 @@ By default the legend shows the full configuration labels, which say exactly wha
 ran. `--production` writes a second set of figures, with short presentation names,
 for posters and papers; it does not overwrite the full-label figures. `--svg` and
 `--pdf` also write each figure in that vector format next to the PNG.
+`--exclude` leaves the given configurations out (look the IDs up with
+`list_runs.py`); the figures keep their names, so they replace the full ones.
 """
 
 import argparse
@@ -33,6 +35,13 @@ def main() -> None:
         help="Use the short presentation names (for example 'QTL (Qiskit), "
         "ZZ-Feature Map') and write metric_comparison_<cohort>_production.png.",
     )
+    parser.add_argument(
+        "--exclude",
+        nargs="+",
+        default=[],
+        metavar="CONFIG_ID",
+        help="Leave these configurations out of the figures.",
+    )
     add_vector_arguments(parser)
     arguments = parser.parse_args()
     matplotlib.use("Agg")
@@ -44,6 +53,7 @@ def main() -> None:
             logger,
             production=arguments.production,
             vector_formats=vector_formats(arguments),
+            exclude=arguments.exclude,
         )
     except (FileNotFoundError, ValueError) as error:
         logger.error(f"Failed to generate plots: {error}")
