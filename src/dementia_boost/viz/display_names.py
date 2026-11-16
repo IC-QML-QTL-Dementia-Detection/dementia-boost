@@ -28,6 +28,11 @@ EMBEDDING_NAMES: dict[str, str] = {
 
 BLOCK_NAMES: dict[str, str] = {
     "paper": "Paper Block",
+    "hardware_efficient_linear": "HEA (Linear)",
+    "hardware_efficient_ring": "HEA (Ring)",
+    "hardware_efficient_full": "HEA (Full)",
+    "strongly_entangling": "Strongly Entangling",
+    "trainable_zz": "Trainable ZZ",
 }
 
 REUPLOAD_NAME: str = "Re-uploading"

@@ -6,7 +6,12 @@ Regression coverage
   the same short name, so a presentation legend could not tell them apart.
 """
 
-from dementia_boost.viz.display_names import production_label, production_labels
+from dementia_boost.models.quantum_cnn import BLOCKS
+from dementia_boost.viz.display_names import (
+    BLOCK_NAMES,
+    production_label,
+    production_labels,
+)
 
 
 def _spec(**fields) -> dict:
@@ -31,6 +36,15 @@ class TestProductionLabel:
         """A non-default block and re-uploading appear in the name."""
         assert production_label(_spec(block="other", reupload=True)) == (
             "QTL (Qiskit), Angle Embedding, other, Re-uploading"
+        )
+
+    def test_every_registered_block_has_a_presentation_name(self) -> None:
+        """Every block in the registry has a short name, so no legend shows a
+        raw registry name."""
+        for block in BLOCKS:
+            assert block in BLOCK_NAMES
+        assert production_label(_spec(block="hardware_efficient_linear")) == (
+            "QTL (Qiskit), Angle Embedding, HEA (Linear)"
         )
 
     def test_classical_heads_have_no_quantum_part(self) -> None:
