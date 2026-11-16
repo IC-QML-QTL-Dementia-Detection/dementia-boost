@@ -1,4 +1,4 @@
-"""Publication-ready visualization generators for evaluation metrics and ROC curves.
+"""Plots of evaluation metrics, ROC curves, and training histories.
 
 This module provides `MetricsVisualizer` to generate Seaborn boxplots/stripplots,
 multi-run comparative and isolated ROC curves, and annotated confusion matrix
@@ -26,7 +26,7 @@ from dementia_boost.viz.display_names import METRIC_NAMES
 
 
 class MetricsVisualizer:
-    """Generates publication-quality charts and plots from JSON evaluation metrics.
+    """Draws charts from JSON evaluation metrics and training histories.
 
     Reads telemetry JSON files containing individual and aggregate experiment
     runs and renders metric distributions, ROC curves, confusion matrices, and

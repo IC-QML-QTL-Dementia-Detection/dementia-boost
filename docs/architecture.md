@@ -2,11 +2,7 @@
 
 ## 1. Architectural Overview
 
-The `dementia-boost` framework is designed around clean Software Engineering and MLOps principles, avoiding monolithic scripts and unstructured notebooks.
-
-It enforces strict separation of concerns across data processing, modular neural/quantum architectures, decoupled training loops, and deterministic telemetry.
-
-The system is partitioned into six main pillars:
+The code is split into six layers, each with one responsibility: data processing, model definitions, training, metrics and reporting, and plotting, on top of a core layer for seeds, run identity, and file layout.
 
 ```mermaid
 flowchart TD
@@ -20,7 +16,7 @@ flowchart TD
         ETL_NIFTI["OasisDataProcessor<br/>(3D NIfTI to 2D Slice Extraction, Deterministic Patient Split & Split Manifest)"]
         DS["OasisDataset<br/>(PyTorch Dataset Abstraction)"]
         DL["OasisDataLoader<br/>(Cohort DataLoader Factory, Manifest Check & MinMax Normalization)"]
-        CACHE["FeatureCacheManager / CachedEmbeddingDataset<br/>(In-Memory Feature Embeddings & I/O-Free Streaming)"]
+        CACHE["FeatureCacheManager / CachedEmbeddingDataset<br/>(Backbone Features Extracted Once, Kept in Memory)"]
     end
 
     subgraph Models ["Model Architectures Layer"]
@@ -46,7 +42,7 @@ flowchart TD
     end
 
     subgraph Viz ["Visualization Layer"]
-        VIS["MetricsVisualizer<br/>(Seaborn Boxplots, ROC Curves, Heatmaps, Loss Curves)"]
+        VIS["MetricsVisualizer<br/>(Boxplots, ROC Curves, Confusion Matrices, Loss Curves)"]
         RPL["run_plots<br/>(Plots per Configuration, Run Highlighted on Validation)"]
     end
 
@@ -65,7 +61,7 @@ flowchart TD
 
 ### 2.1 Core Layer (`src/dementia_boost/core/`)
 
-- **`reproducibility.py`**: Provides `set_seed(seed: int)`, which enforces deterministic execution across Python's `random`, `numpy`, PyTorch CPU/CUDA engines, and locks `torch.backends.cudnn.deterministic = True` with `benchmark = False`.
+- **`reproducibility.py`**: Provides `set_seed(seed: int)`, which seeds Python's `random`, `numpy`, and PyTorch (CPU and CUDA), and sets `torch.backends.cudnn.deterministic = True` with `benchmark = False`.
 
 - **`identity.py`**: The typed run specification `RunSpec`, the `Paradigm` enumeration, and the hash IDs and label derived from a spec (see 2.1.1).
 
@@ -97,7 +93,7 @@ Because IDs are hashes, `uv run scripts/list_runs.py` gives the lookup: one row 
 
 ### 2.2 Data Engineering Layer (`src/dementia_boost/data/`)
 
-The data pipeline eliminates patient-level data leakage across longitudinal MRI sessions. Subjects (patients) are split into three cohorts, and every visit of a subject stays in that subject's cohort:
+The data pipeline prevents patient-level leakage across longitudinal MRI sessions. Subjects (patients) are split into three cohorts, and every visit of a subject stays in that subject's cohort:
 
 - **`train`** fits the models.
 - **`val`** is evaluated every epoch for the loss curves, and is the only cohort used to choose between models (for example the backbone for transfer learning).
@@ -123,11 +119,11 @@ The components that enforce this:
 
 - **`data_loader.py`**:
   - `OasisDataLoader`: Factory creating PyTorch `DataLoader` instances over the processed NIfTI slice tensors for one cohort (`get_data_loader("train" | "val" | "test")`). Only the training loader shuffles. It verifies the layout against the manifest before returning a loader.
-  - `MinMaxNormalize`: Custom transform performing per-sample dynamic range squashing into `[0.0, 1.0]`.
+  - `MinMaxNormalize`: Per-sample min-max scaling to `[0.0, 1.0]`.
 
 - **`embedding_cache.py`**:
-  - `CachedEmbeddingDataset`: High-throughput in-memory dataset storing pre-extracted feature tensors and diagnostic labels.
-  - `FeatureCacheManager`: Static manager for one-time backbone feature extraction, disk cache serialization, and fast in-memory `DataLoader` generation for transfer learning.
+  - `CachedEmbeddingDataset`: In-memory dataset of pre-extracted feature tensors and labels.
+  - `FeatureCacheManager`: Extracts the backbone features once, caches them on disk, and builds in-memory `DataLoader`s for transfer learning.
 
 ```mermaid
 flowchart LR
@@ -163,9 +159,9 @@ flowchart LR
 
 ---
 
-## 3. Model Architecture & Hybrid Dressed Quantum Network (DQN)
+## 3. Models and the Dressed Quantum Network (DQN)
 
-The model ecosystem uses **Dependency Injection** via the `DementiaClassifier` container. A common spatial backbone (`LeNetFeatureExtractor`) can be dynamically paired with either a classical dense head or a variational quantum head.
+Models are assembled by dependency injection: `DementiaClassifier` holds a `LeNetFeatureExtractor` backbone and a head, either a classical dense head or a variational quantum head.
 
 ```mermaid
 flowchart TD
@@ -189,23 +185,22 @@ flowchart TD
         FLAT_C --> D1 --> D2 --> SIG
     end
 
-    subgraph QuantumHead ["Option B: PennylaneQuantumClassifierHead (DQN / PL QTL)"]
+    subgraph QuantumHead ["Option B: Quantum Head (PennylaneQuantumClassifierHead or QiskitQuantumClassifierHead)"]
         FLAT_Q["Flatten -> 2304"]
         PRE["Pre-Net: Linear(2304 -> n_qubits)"]
         SCALE["Angle Scaling: tanh(x) * (pi / 2)"]
 
-        subgraph VQC ["Variational Quantum Circuit (Ansatz)"]
-            HAD["Hadamard on all qubits: |0> to |+>"]
-            ENC["Angle Embedding: RZ(inputs) on all qubits"]
-            subgraph Repetitions ["Layers: 1 to n_layers (default: 4)"]
-                RZ1["RZ(weights[l, 0, i])"]
-                CNOT["Entangling Ring: CNOT(i, (i+1)%n)"]
-                RZ2["RZ(weights[l, 1, i])"]
-                CRY["Controlled-RY(weights[l, 2, target], wires=[ctrl, target])"]
+        subgraph VQC ["Variational Quantum Circuit"]
+            ENC["Embedding (section 3.2)<br/>default paper: H, then RZ(inputs) on all qubits"]
+            subgraph Repetitions ["Variational block, layers 1 to n_layers (default: 4)"]
+                RZ1["RZ(theta)"]
+                CNOT["CNOT ring: i -> (i+1) mod n"]
+                RZ2["RZ(gamma)"]
+                CRY["CRY ring: (i+1) mod n -> i, angle beta"]
                 RZ1 --> CNOT --> RZ2 --> CRY
             end
-            MEAS["Expectation Values: <PauliZ> on all qubits"]
-            HAD --> ENC --> Repetitions --> MEAS
+            MEAS["Expectation Values: <Z> on all qubits"]
+            ENC --> Repetitions --> MEAS
         end
 
         POST["Post-Net: Linear(n_qubits -> 1)"]
@@ -223,48 +218,30 @@ flowchart TD
 1. **Classical Feature Extraction**:
    $$z_{\text{raw}} = f_{\text{backbone}}(x) \in \mathbb{R}^{2304}$$
 
-2. **Pre-Net Dimensionality Reduction & Angle Mapping**:
-   $$\tilde{z} = \tanh(W_{\text{pre}} z_{\text{raw}} + b_{\text{pre}}) \cdot \frac{\pi}{2} \in \left[-\frac{\pi}{2}, \frac{\pi}{2}\right]^{n_{\text{qubits}}}$$
+2. **Pre-Net Dimensionality Reduction & Angle Mapping**, with $n$ = `n_qubits`:
+   $$\tilde{z} = \tanh(W_{\text{pre}} z_{\text{raw}} + b_{\text{pre}}) \cdot \frac{\pi}{2} \in \left[-\frac{\pi}{2}, \frac{\pi}{2}\right]^{n}$$
 
-3. **Quantum Encoding & Parameterized Evolution** (the paper's angle embedding; the other embeddings of the Qiskit head are in section 3.2):
-   $$|\psi(\tilde{z})\rangle = \bigotimes_{i=1}^{n_{\text{qubits}}} R_z(\tilde{z}_i)\, H\, |0\rangle = \bigotimes_{i=1}^{n_{\text{qubits}}} \tfrac{1}{\sqrt{2}}\left(e^{-i\tilde{z}_i/2}|0\rangle + e^{i\tilde{z}_i/2}|1\rangle\right)$$
-   $$|\phi_\theta(\tilde{z})\rangle = \prod_{l=1}^{L} \left[ U_{\text{CRY}}(\theta_{l,2}) U_{R_z}(\theta_{l,1}) U_{\text{CNOT}} U_{R_z}(\theta_{l,0}) \right] |\psi(\tilde{z})\rangle$$
+3. **Embedding**: the scaled features are loaded into a state $|\psi_e(\tilde{z})\rangle$ by the embedding $e$ (section 3.2). The default, `paper`, is the angle embedding:
+   $$|\psi_{\text{paper}}(\tilde{z})\rangle = \bigotimes_{i=1}^{n} R_z(\tilde{z}_i)\, H\, |0\rangle = \bigotimes_{i=1}^{n} \tfrac{1}{\sqrt{2}}\left(e^{-i\tilde{z}_i/2}|0\rangle + e^{i\tilde{z}_i/2}|1\rangle\right)$$
 
-4. **Quantum Measurement (POVM)**:
-   $$\langle Z_i \rangle = \langle \phi_\theta(\tilde{z}) | \sigma_z^{(i)} | \phi_\theta(\tilde{z}) \rangle \in [-1, 1]$$
+4. **Variational block**, the same for every embedding. Layer $l = 1, \dots, L$ has weights $\theta_{l,i}, \gamma_{l,i}, \beta_{l,i}$ (the three rows of `weights[l]` in PennyLane, the three vectors of the flat weight in Qiskit):
+   $$V_l = \Big[\prod_{i=0}^{n-1} \mathrm{CRY}_{(i+1) \bmod n \to i}(\beta_{l,i})\Big] \Big[\bigotimes_{i} R_z(\gamma_{l,i})\Big] \Big[\prod_{i=0}^{n-1} \mathrm{CNOT}_{i \to (i+1) \bmod n}\Big] \Big[\bigotimes_{i} R_z(\theta_{l,i})\Big], \qquad |\phi_{\theta}(\tilde{z})\rangle = V_L \cdots V_1\, |\psi_e(\tilde{z})\rangle$$
+   Each product over $i$ is applied in increasing $i$ (the CNOT and CRY rings do not commute), and $\mathrm{CRY}_{c \to t}(\beta)$ rotates qubit $t$ about $y$ by $\beta$ when qubit $c$ is $|1\rangle$. There are $3Ln$ weights (72 at $n = 6$, $L = 4$), initialised uniformly in $[-\pi, \pi]$.
 
-5. **Post-Net Classification Logit**:
+5. **Measurement**:
+   $$\langle Z_i \rangle = \langle \phi_\theta(\tilde{z}) | Z_i | \phi_\theta(\tilde{z}) \rangle \in [-1, 1]$$
+
+6. **Post-Net Classification Logit**:
    $$\hat{y}_{\text{logit}} = W_{\text{post}} \begin{bmatrix} \langle Z_1 \rangle \\ \vdots \\ \langle Z_n \rangle \end{bmatrix} + b_{\text{post}}$$
 
 > [!IMPORTANT]
 > **The Hadamard layer is not in the paper's figure.** Starting from $|0\rangle^{\otimes n}$, the gate sequence of Bhowmik et al. (2025) (RZ, CNOT, CRY) never leaves the set of states equal to $|0\rangle^{\otimes n}$ up to a global phase: RZ only adds a phase, CNOT fixes the state, and CRY never fires because its control stays in $|0\rangle$. Every $\langle Z_i\rangle$ would then be 1 for all inputs and weights, the pre-net and circuit weights would get zero gradient, and the head would only learn a bias. Preparing each qubit in $|+\rangle$ first turns the embedding angle into a relative phase, so the output depends on the inputs and the weights. Regression tests on both the PennyLane and the Qiskit circuits fail if any $\langle Z_i\rangle$ becomes constant or the gradients vanish.
 
-### 3.2 Embeddings (Feature Maps) of the Qiskit Head
+### 3.2 Embeddings (Feature Maps)
 
-The quantum circuit of the Dressed Quantum Network has two parts: an **embedding** that loads the scaled features $\tilde{z}$ into a state $|\psi_e(\tilde{z})\rangle$, and a **variational block** that is the same for every embedding. The Qiskit head can use any of the embeddings below. The choice is the `ansatz` field of the run specification, so each embedding is its own configuration with its own `config_id`; `paper` is the default and the name inside every existing configuration ID. The PennyLane head implements only `paper`.
+The embedding is the `ansatz` field of the run specification, so each embedding is its own configuration with its own `config_id`; `paper` is the default and the name inside every existing configuration ID. The PennyLane head implements only `paper`; the Qiskit head implements all of the embeddings below (see 3.4 for how).
 
-> [!NOTE]
-> The embeddings other than `paper` have been run only with the Qiskit head (loss-level SPSA gradients). The PennyLane head, with exact adjoint gradients, has only been run with `paper`. A comparison between embeddings is therefore a comparison on one framework, and a comparison between frameworks exists only for `paper`.
-
-#### Implementation
-
-Each embedding is a pair of functions in `qiskit_embeddings.py`: an angle function in PyTorch that maps $\tilde{z}$ to the gate angles, and the circuit part that applies those gates, one circuit parameter per angle. Computing the angles outside the circuit keeps every circuit parameter a plain input column (no products of run-time parameters inside the simulator), and autograd differentiates the angle function exactly back to the pre-net. `build_qiskit_ansatz` places the chosen embedding in front of the variational block, and `QiskitQuantumClassifierHead` applies the angle function after the $\tanh$ scaling. `QiskitQuantumLayer` only sees the angle columns.
-
-```bash
-# Train a Qiskit QTL head with a given embedding (default: paper); --seeds N runs the first N seeds
-uv run scripts/training/train_qiskit_qtl_multiseed.py --ansatz zz_feature_map
-
-# Evaluate only the configuration just trained (look its ID up with list_runs.py)
-uv run scripts/metrics/evaluate_qiskit_qtl.py --config <config_id>
-```
-
-#### Embeddings
-
-With $n$ qubits and the scaled inputs $\tilde{z}_i \in [-\pi/2, \pi/2]$:
-
-- **`paper` (angle embedding).** Every qubit goes to $|+\rangle$ and is then rotated about $z$ by its feature:
-  $$|\psi_{\text{paper}}(\tilde{z})\rangle = \bigotimes_{i=1}^{n} R_z(\tilde{z}_i)\, H\, |0\rangle$$
-  Each qubit sits on the equator of the Bloch sphere at azimuth $\tilde{z}_i$. The state is a product state, so the embedding creates no correlation between features. $n$ angles.
+- **`paper` (angle embedding, formula in 3.1).** Each qubit sits on the equator of the Bloch sphere at azimuth $\tilde{z}_i$. A product state, so the embedding creates no correlation between features. $n$ angles.
 
 - **`rx`.** Every qubit is rotated about $x$ from $|0\rangle$, with no Hadamard:
   $$|\psi_{\text{rx}}(\tilde{z})\rangle = \bigotimes_{i=1}^{n} R_x(\tilde{z}_i)\, |0\rangle = \bigotimes_{i=1}^{n} \left(\cos\tfrac{\tilde{z}_i}{2}|0\rangle - i \sin\tfrac{\tilde{z}_i}{2}|1\rangle\right)$$
@@ -276,31 +253,9 @@ With $n$ qubits and the scaled inputs $\tilde{z}_i \in [-\pi/2, \pi/2]$:
 
 - **`zz_feature_map_linear`.** The same map with $E = \{(i, i+1)\}$, nearest neighbours only: 5 pairs and $n + (n-1) = 11$ angles at $n = 6$.
 
-#### Variational block (the same for every embedding)
+### 3.3 PennyLane Execution Path
 
-For layer $l = 1, \dots, L$ with weights $\theta_{l,i}, \gamma_{l,i}, \beta_{l,i}$ (the three rows of `weights[l]` in PennyLane, the three vectors of the flat weight in Qiskit):
-
-$$V_l = \Big[\prod_{i=0}^{n-1} \mathrm{CRY}_{(i+1) \bmod n \to i}(\beta_{l,i})\Big] \Big[\bigotimes_{i} R_z(\gamma_{l,i})\Big] \Big[\prod_{i=0}^{n-1} \mathrm{CNOT}_{i \to (i+1) \bmod n}\Big] \Big[\bigotimes_{i} R_z(\theta_{l,i})\Big]$$
-
-Each product over $i$ is applied in increasing $i$ (the CNOT and CRY rings do not commute), and $\mathrm{CRY}_{c \to t}(\beta)$ rotates qubit $t$ about $y$ by $\beta$ when qubit $c$ is $|1\rangle$. The circuit state and the measurement are
-
-$$|\phi_{\theta}(\tilde{z})\rangle = V_L \cdots V_1\, |\psi_e(\tilde{z})\rangle, \qquad \langle Z_i\rangle = \langle\phi_{\theta}(\tilde{z})|\, Z_i\, |\phi_{\theta}(\tilde{z})\rangle,$$
-
-followed by the post-net. The weights number $3Ln$ (72 at $n = 6$, $L = 4$) and are initialised uniformly in $[-\pi, \pi]$. Every embedding is followed by the same $V_l$, so a difference between configurations comes from the embedding.
-
-#### Comparing embeddings
-
-The legends of the comparison figures show the full configuration labels by default. With `--production` (on `visualize_comparison.py` and `visualize_loss.py`) they use short names (`Angle Embedding`, `RX Embedding`, `ZZ-Feature Map`, `ZZ-Feature Map (Linear)`, `QTL (Qiskit)`, `QTL (PennyLane)`), and the files get a `_production` suffix so both versions can exist. The names are the tables in `viz/display_names.py`. Both scripts also accept `--svg` and `--pdf`, which write each comparison figure in that vector format next to its PNG for printing at large sizes, and `--exclude`, which leaves the given configurations out.
-
-After training and evaluating each configuration, `scripts/viz/visualize_comparison.py` draws the metric distributions of all configurations side by side (test and validation), `scripts/viz/visualize_loss.py` overlays their validation loss curves, and `scripts/metrics/generate_improvement_report.py --config qiskit_qtl=<config_id> --output <file>` writes a comparative report for one chosen configuration without overwriting the standard one.
-
-### 3.3 Quantum Device Resolution & Backend Management
-
-For low-qubit variational circuits ($n_{\text{qubits}} = 6$, corresponding to a statevector of $2^6 = 64$ complex amplitudes), CPU state-vector simulation (`lightning.qubit` / `default.qubit`) provides superior execution throughput compared to GPU simulators (`lightning.gpu`), eliminating host-to-device memory transfer latency and CUDA kernel launch overhead.
-
-- **`pennylane_circuit.py` (`resolve_quantum_device`)**: Resolves the PennyLane device backend, defaulting to `lightning.qubit` with deterministic fallback to `default.qubit`, while allowing manual backend specification or custom device injection.
-- **`pennylane_heads.py` & `builder.py`**: Accept explicit `quantum_device` parameters to configure the underlying QNode simulator.
-- **PL QTL scripts (`train_pl_qtl_multiseed.py`, `evaluate_pl_qtl.py`)**: Expose configurable `DEFAULT_TORCH_DEVICE` and `DEFAULT_QUANTUM_DEVICE` variables with `get_device()` manual override support.
+`resolve_quantum_device` (`pennylane_circuit.py`) picks the simulator: `lightning.qubit` by default, `default.qubit` as a fallback, or an injected device, which the heads and `builder.py` accept as `quantum_device`. Gradients are exact (adjoint). At 6 qubits the state has $2^6 = 64$ amplitudes, so CPU simulation is faster than the GPU simulator (`lightning.gpu`), whose memory transfers and kernel launches dominate at this size.
 
 ### 3.4 Qiskit Execution Path
 
@@ -317,18 +272,18 @@ flowchart LR
     HEAD --> LAYER --> FN --> RUN --> EST
 ```
 
-- **`qiskit_embeddings.py`**: The registry of embeddings (see section 3.2): for each name, the PyTorch angle function, the number of angles, and the gates that consume them.
+- **`qiskit_embeddings.py`**: The registry of embeddings (section 3.2). Each entry has a PyTorch angle function from $\tilde{z}$ to the gate angles, the number of angles, and the gates that consume them, one circuit parameter per angle. Computing the angles outside the circuit keeps every circuit parameter a plain input column (no products of run-time parameters in the simulator), and autograd differentiates the angle function exactly back to the pre-net. The head applies the angle function after the $\tanh$ scaling, so `QiskitQuantumLayer` only sees the angle columns.
 - **`qiskit_circuit.py` (`build_qiskit_ansatz`)**: Builds the `QuantumCircuit` (the chosen embedding followed by the variational block), the input and weight `ParameterVector`s, and the per-qubit Pauli-Z `SparsePauliOp` observables. Pauli strings are reversed relative to the qubit index because Qiskit orders them from the most significant qubit.
 - **`qiskit_runner.py`**: `QiskitExpectationRunner` owns only "circuit, observables, parameter batch in, expectation values out". Each call is one broadcast PUB with parameters shaped `(N, 1, P)` and observables shaped `(1, n_qubits)`, so every state is evolved once and all expectation values are read from it. `resolve_qiskit_estimator` is the Qiskit counterpart of `resolve_quantum_device`: it returns an injected estimator or, by default, Aer's `EstimatorV2` on the state-vector method with no noise model attached. `StatevectorEstimator` is the slower reference implementation and is injected explicitly where a reference is wanted, such as unit tests. Controlled rotations (`cry`, `crz`, `cp`) are decomposed once at construction, because qiskit-aer 0.17.2 evaluates them wrongly when their angle is bound at run time.
 - **`qiskit_layer.py`**: `QiskitQuantumLayer` holds the flat weight vector, laid out as `[theta, gamma, beta]`, and a custom `torch.autograd.Function`. The backward pass is a loss-level SPSA estimate: one Rademacher direction per sample is shared by all outputs by folding the upstream gradient into the finite difference, which costs one PUB of `2 * Batch` states. The directions come from a generator seeded with the run seed, so a seed reproduces its gradient noise. Exact parameter-shift is avoided because it needs 204 shifted circuits per sample at the default 6-qubit, 4-layer depth.
 - **`qiskit_heads.py` & `builder.py`**: Accept an optional `estimator` (and, on the head, `spsa_epsilon` and `seed`), so the backend is configuration rather than code.
-- **`train_qiskit_qtl_multiseed.py`**: Records the gradient method and SPSA step in each run's spec (they change the maths, so they are part of the configuration ID) and the estimator class as a non-hashed extra in the history, and validates every epoch. `--ansatz` selects the embedding and `--seeds N` runs only the first N seeds.
+- **`train_qiskit_qtl_multiseed.py`**: Records the gradient method and SPSA step in each run's spec (they change the maths, so they are part of the configuration ID) and the estimator class as a non-hashed extra in the history.
 
 ---
 
 ## 4. Transfer Learning Pipeline
 
-The project supports three training modes orchestrated through `builder.py`. Every paradigm trains on the `train` cohort and is monitored on the `val` cohort. The `test` cohort appears only in the evaluation step, and nothing is chosen with it:
+The baseline is trained first; CTL and the quantum heads are then built on its frozen backbone through `builder.py`. Every paradigm trains on the `train` cohort and is monitored on the `val` cohort. The `test` cohort appears only in the evaluation step, and nothing is chosen with it:
 
 ```mermaid
 sequenceDiagram
@@ -354,9 +309,9 @@ sequenceDiagram
     Note over Cache: Step 3: Extract & Cache Invariant Embeddings
     Base->>Cache: Load selected backbone weights & Freeze parameters
     D->>Cache: Extract train & val spatial embeddings (2304-dim)
-    Cache-->>Cache: Store contiguous in-memory tensors (Zero I/O)
+    Cache-->>Cache: Keep the features in memory
 
-    Note over CTL,QTL: Step 4: Fast In-Memory Transfer Learning
+    Note over CTL,QTL: Step 4: Train the Heads on the Cached Features
     Cache->>CTL: Stream in-memory feature batches (Seeds 0..100)
     CTL->>CTL: Initialize Dense Head (Glorot Uniform) & Train directly on embeddings
     CTL-->>Base: Assemble full DementiaClassifier and save checkpoint
@@ -401,13 +356,8 @@ flowchart LR
     end
 
     subgraph Visualization ["Visualization (dementia_boost.viz)"]
-        BOXPLOT["MetricsVisualizer.plot_metric_distributions()"]
-        ROC_AGG["MetricsVisualizer.plot_comparative_roc()"]
-        ROC_ISO["MetricsVisualizer.plot_isolated_roc()"]
-        CONF_MAT["MetricsVisualizer.plot_confusion_matrix()"]
-        LOSS_CURVE["MetricsVisualizer.plot_loss_curve()"]
-        LOSS_DIST["MetricsVisualizer.plot_loss_distribution()"]
-        LOSS_CMP["MetricsVisualizer.plot_loss_comparison()"]
+        METRIC_PLOTS["Metric plots<br/>(distributions, ROC curves, confusion matrix, comparison across configurations)"]
+        LOSS_PLOTS["Loss plots<br/>(per run, per configuration, comparison across configurations)"]
     end
 
     TRAINER --> EVAL
@@ -419,19 +369,18 @@ flowchart LR
     JSON_VAL --> REPORT
     JSON_STORE --> REPORT
     TRAINER --> LOGS
-    JSON_STORE --> BOXPLOT
-    JSON_STORE --> ROC_AGG
-    JSON_STORE --> ROC_ISO
-    JSON_STORE --> CONF_MAT
+    JSON_STORE --> METRIC_PLOTS
+    JSON_VAL --> METRIC_PLOTS
     TRAINER --> DTO_HIST --> JSON_HIST
-    JSON_HIST --> LOSS_CURVE
-    JSON_HIST --> LOSS_DIST
-    JSON_HIST --> LOSS_CMP
+    JSON_HIST --> LOSS_PLOTS
 ```
 
-Evaluation and selection follow one protocol. `evaluate_paradigm` (in `checkpoint_evaluation`) finds the finished runs of a paradigm through their histories, groups them by configuration, builds each configuration's model from its own spec, evaluates every checkpoint once on the `val` cohort and once on the `test` cohort, and writes `metrics/<paradigm>/<config_id>/val_results.json` and `test_results.json`. Each file carries a `cohort` marker and the `configuration` (ID, label, spec without the seed) it was computed for. Model selection (`select_best_validation_run`, and `select_backbone`, which resolves the best baseline to its spec) accepts only a file marked `val` and ranks by validation AUC-ROC, then F1, then lowest log loss, then run ID; it raises on anything else, so test metrics can never decide a choice. The comparative report (`scripts/metrics/generate_improvement_report.py`, built by `build_comparative_report`) takes one configuration per paradigm (the only one with results, or one named with `--config`), leads with the mean and standard deviation across seeds on test, shows the test metrics of the run selected on validation next to them, gives the same statistics on the validation cohort (the development cohort), and reports percentage changes between the means of each cohort; its `comparisons` entry has one section per cohort, `test` and `validation`. The measured results are in the README. It refuses to mix paradigms trained on different splits. No run is chosen on test metrics, and the run highlighted in the isolated ROC curve and confusion matrix plots is the one selected on validation.
+Evaluation, selection, and reporting follow one protocol: choices are made on validation, and results are reported on test first.
 
-Training histories follow the same boundary as the evaluation metrics. During training, `BaselineTrainer` only sees the train and validation loaders; its per-epoch `val_loss` and `val_acc` are validation values. It only records a `TrainingHistory` and writes it to JSON (every `history_save_every` epochs, default 10, and once more on exit, atomically through a temporary file), so the Training layer never imports plotting code. Loss curves are produced afterwards by `scripts/viz/visualize_loss.py`, which reads the history files through the results layout and writes per-seed and distribution plots to `plots/<paradigm>/<config_id>/` and the comparison across configurations to `plots/loss_comparison.png`. The plotting steps live in `dementia_boost.viz` (`run_plots`), next to `MetricsVisualizer`; the scripts under `scripts/viz` are thin callers.
+- **Evaluation.** `evaluate_paradigm` (`checkpoint_evaluation`) finds the finished runs of a paradigm through their histories, builds each configuration's model from its own spec, evaluates every checkpoint once on `val` and once on `test`, and writes `metrics/<paradigm>/<config_id>/{val,test}_results.json`. Each file carries a `cohort` marker and the `configuration` (ID, label, spec without the seed).
+- **Selection.** `select_best_validation_run` and `select_backbone` (which resolves the best baseline to its spec) accept only a file marked `val` and rank by validation AUC-ROC, then F1, then lowest log loss, then run ID; anything else raises, so test metrics never decide a choice. The run highlighted in the isolated ROC curve and confusion matrix is the one selected on validation.
+- **Report.** `build_comparative_report` (`scripts/metrics/generate_improvement_report.py`) takes one configuration per paradigm (the only one with results, or one named with `--config`) and refuses paradigms trained on different splits. It leads with the mean and standard deviation across seeds on test and the test metrics of the run selected on validation, then gives the same statistics on validation, and the percentage changes between the means of each cohort (`comparisons.test`, `comparisons.validation`). The measured results are in the README.
+- **Histories.** `BaselineTrainer` only sees the train and validation loaders, so the per-epoch `val_loss` and `val_acc` are validation values. It records a `TrainingHistory` and writes it to JSON (every `history_save_every` epochs, default 10, and on exit, atomically), and never plots. The plotting steps live in `dementia_boost.viz` (`run_plots`, `MetricsVisualizer`); the scripts under `scripts/viz` are thin callers.
 
 ---
 
@@ -443,71 +392,20 @@ dementia-boost/
 │   ├── architecture.md                    # System architecture and technical overview
 │   ├── qtl_research_goals_activities.md   # 12-month research schedule and activities
 │   └── qtl_to_boost_dementia_detection.md # Foundational paper (Bhowmik et al. 2025)
-├── src/
-│   └── dementia_boost/
-│       ├── core/                          # Reproducibility, run identity & results layout
-│       │   ├── identity.py                # Paradigm, RunSpec, hash IDs (config_id, run_id) and label
-│       │   ├── layout.py                  # ResultsLayout: where each artifact of a run lives
-│       │   └── reproducibility.py         # Deterministic seed locker
-│       ├── data/                          # Data processing & loaders
-│       │   ├── cohort_audit.py            # Read-only listing of subjects per cohort and shared subjects
-│       │   ├── data_loader.py             # Cohort DataLoader factory, manifest check & normalization transforms
-│       │   ├── data_processor.py          # NIfTI 3D/2D ETL: exclusions, staging, publishing, manifest
-│       │   ├── dataset.py                 # OasisDataset class (sorted file listing)
-│       │   ├── embedding_cache.py         # In-memory feature embedding caching & loaders
-│       │   ├── split.py                   # Deterministic stratified train / val / test subject split
-│       │   ├── split_guards.py            # Cohort files vs manifest integrity check
-│       │   ├── split_manifest.py          # split_manifest.json writer/reader and split_id
-│       │   └── subject_ids.py             # Canonical subject IDs, label mapping, override validation
-│       ├── models/                        # Neural & Quantum network architectures
-│       │   ├── builder.py                 # Factory functions for CTL and QTL models
-│       │   ├── classical_cnn/             # Classical CNN backbone and dense heads
-│       │   │   ├── classifier.py          # DementiaClassifier orchestrator
-│       │   │   ├── feature_extractor.py   # LeNetFeatureExtractor backbone
-│       │   │   └── heads.py               # ClassicalClassifierHead
-│       │   └── quantum_cnn/               # Quantum neural network components
-│       │       ├── pennylane_circuit.py   # PennyLane QNode and custom Ansatz definition
-│       │       ├── pennylane_heads.py     # PennylaneQuantumClassifierHead (DQN)
-│       │       ├── qiskit_circuit.py      # Qiskit QuantumCircuit, parameters and observables
-│       │       ├── qiskit_embeddings.py   # Registry of embeddings (angle functions and gates)
-│       │       ├── qiskit_heads.py        # QiskitQuantumClassifierHead (DQN on Qiskit)
-│       │       ├── qiskit_layer.py        # Autograd layer with loss-level SPSA gradients
-│       │       └── qiskit_runner.py       # Expectation runner and estimator resolver
-│       ├── training/                      # Training and inference lifecycle runners
-│       │   ├── checkpoint_evaluation.py   # Each checkpoint on the val and test cohorts, per-cohort result files
-│       │   ├── evaluator.py               # Weight loading and inference predictor
-│       │   └── trainer.py                 # Training loop with validation, checkpointing & history recording
-│       ├── telemetry/                     # Metrics calculation, serialization, selection & reporting
-│       │   ├── logger.py                  # Standardized dual console/file logger
-│       │   ├── metrics.py                 # MetricsAnalyzer, metric DTOs and training history DTOs
-│       │   ├── report.py                  # Comparative report across paradigms
-│       │   ├── run_listing.py             # Finds runs from their histories, groups them by configuration
-│       │   ├── run_table.py               # Lookup table and ID search behind scripts/list_runs.py
-│       │   └── selection.py               # Model selection on validation metrics only
-│       └── viz/                           # Plotting
-│           ├── run_plots.py               # Plots per configuration and loss plots, through the layout
-│           └── visualizer.py              # Publication-ready Seaborn/Matplotlib plots, incl. loss curves
-├── scripts/                               # CLI entry-points for training and evaluation
-│   ├── audit_cohorts.py                   # Read-only check that no subject is in two cohorts
-│   ├── etl_pipeline.py                    # 3D NIfTI to 2D slice ETL & patient-split orchestrator
-│   ├── list_runs.py                       # Read-only lookup of configurations and runs by hash ID
-│   ├── metrics/                           # Batch evaluation (val and test) and comparative report scripts
-│   │   ├── evaluate_baseline.py           # Multiseed evaluation of classical baseline models
-│   │   ├── evaluate_ctl.py                # Multiseed evaluation of CTL models
-│   │   ├── evaluate_pl_qtl.py             # Multiseed evaluation of PL QTL models
-│   │   ├── evaluate_qiskit_qtl.py         # Multiseed evaluation of Qiskit QTL models
-│   │   └── generate_improvement_report.py # Comparative report (test means, run selected on validation)
-│   ├── training/                          # Multi-seed training scripts (finished runs are skipped)
-│   │   ├── train_baseline.py              # Classical baseline CNN training
-│   │   ├── train_ctl_multiseed.py         # Classical Transfer Learning (CTL) training
-│   │   ├── train_pl_qtl_multiseed.py      # PennyLane Quantum Transfer Learning (PL QTL) training
-│   │   └── train_qiskit_qtl_multiseed.py  # Qiskit Quantum Transfer Learning training
-│   └── viz/                               # Plotting and visualization scripts (thin callers of dementia_boost.viz)
-│       ├── visualize_baselines.py         # Boxplots, ROC curves, confusion matrices for baseline
-│       ├── visualize_comparison.py        # Metric distributions of all configurations side by side
-│       ├── visualize_ctl.py               # Boxplots, ROC curves, confusion matrices for CTL
-│       ├── visualize_loss.py              # Loss curves from saved training histories (per paradigm and comparison)
-│       ├── visualize_pl_qtl.py            # Boxplots, ROC curves, confusion matrices for PL QTL
-│       └── visualize_qiskit_qtl.py        # Boxplots, ROC curves, confusion matrices for Qiskit QTL
-└── tests/                                 # Unit and integration test suites
+├── src/dementia_boost/
+│   ├── core/                              # Seeds, run identity (RunSpec, hash IDs), results layout (section 2.1)
+│   ├── data/                              # ETL, patient-level split, manifest, guards, loaders, feature cache (2.2)
+│   ├── models/                            # Backbone, classical and quantum heads, builder (3)
+│   │   ├── classical_cnn/                 # LeNet backbone, classical head, DementiaClassifier
+│   │   └── quantum_cnn/                   # PennyLane and Qiskit circuits, heads, embeddings, runner (3.3, 3.4)
+│   ├── training/                          # Trainer, evaluator, evaluation of every checkpoint (4, 5)
+│   ├── telemetry/                         # Metrics, histories, run listing, selection, report, logger (5)
+│   └── viz/                               # All plotting code; the viz scripts only call it (5)
+├── scripts/                               # Entry points, all run with uv run
+│   ├── etl_pipeline.py, audit_cohorts.py  # Build the split; check that no subject is in two cohorts
+│   ├── list_runs.py                       # Look up configurations and runs by hash ID
+│   ├── training/                          # One multi-seed training script per paradigm
+│   ├── metrics/                           # One evaluation script per paradigm, comparative report
+│   └── viz/                               # One plotting script per paradigm, loss and comparison figures
+└── tests/                                 # Unit and integration tests
 ```

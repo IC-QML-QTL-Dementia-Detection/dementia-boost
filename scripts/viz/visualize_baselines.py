@@ -2,7 +2,7 @@
 
 This script reads the per-configuration evaluation results written by
 `scripts/metrics/evaluate_baseline.py` and, for every baseline configuration,
-produces publication-quality charts: metric boxplots and comparative ROC curves
+draws metric boxplots and comparative ROC curves
 over all seeds, and the isolated ROC curve and confusion matrix of the run
 selected on the validation cohort (never on test). `--svg` and `--pdf` also write
 each figure in that vector format next to the PNG.

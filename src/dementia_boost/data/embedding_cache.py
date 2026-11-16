@@ -1,8 +1,8 @@
 """In-memory dataset representations and feature caching utilities.
 
 This module provides `CachedEmbeddingDataset` and `FeatureCacheManager` to
-extract, serialize, and stream pre-computed backbone embeddings for fast,
-I/O-free transfer learning training loops.
+extract the backbone embeddings once, save them, and serve them from memory to the
+transfer-learning training loops.
 """
 
 import os
@@ -63,8 +63,8 @@ class FeatureCacheManager:
     """Manager for extracting, serializing, and batching feature embeddings.
 
     Provides static utility methods to extract spatial feature maps from a
-    convolutional backbone, serialize representations to disk, and instantiate
-    high-throughput in-memory PyTorch DataLoaders.
+    convolutional backbone, serialize representations to disk, and build
+    in-memory PyTorch DataLoaders.
 
     Attributes:
         DEFAULT_BATCH_SIZE: Default batch size for cached DataLoader (64).
