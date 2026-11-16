@@ -226,7 +226,7 @@ flowchart TD
 2. **Pre-Net Dimensionality Reduction & Angle Mapping**:
    $$\tilde{z} = \tanh(W_{\text{pre}} z_{\text{raw}} + b_{\text{pre}}) \cdot \frac{\pi}{2} \in \left[-\frac{\pi}{2}, \frac{\pi}{2}\right]^{n_{\text{qubits}}}$$
 
-3. **Quantum Encoding & Parameterized Evolution** (the paper's angle embedding; the other embeddings of the Qiskit head are in [`embedding.md`](embedding.md)):
+3. **Quantum Encoding & Parameterized Evolution** (the paper's angle embedding; the other embeddings of the Qiskit head are in section 3.2):
    $$|\psi(\tilde{z})\rangle = \bigotimes_{i=1}^{n_{\text{qubits}}} R_z(\tilde{z}_i)\, H\, |0\rangle = \bigotimes_{i=1}^{n_{\text{qubits}}} \tfrac{1}{\sqrt{2}}\left(e^{-i\tilde{z}_i/2}|0\rangle + e^{i\tilde{z}_i/2}|1\rangle\right)$$
    $$|\phi_\theta(\tilde{z})\rangle = \prod_{l=1}^{L} \left[ U_{\text{CRY}}(\theta_{l,2}) U_{R_z}(\theta_{l,1}) U_{\text{CNOT}} U_{R_z}(\theta_{l,0}) \right] |\psi(\tilde{z})\rangle$$
 
@@ -239,7 +239,62 @@ flowchart TD
 > [!IMPORTANT]
 > **The Hadamard layer is not in the paper's figure.** Starting from $|0\rangle^{\otimes n}$, the gate sequence of Bhowmik et al. (2025) (RZ, CNOT, CRY) never leaves the set of states equal to $|0\rangle^{\otimes n}$ up to a global phase: RZ only adds a phase, CNOT fixes the state, and CRY never fires because its control stays in $|0\rangle$. Every $\langle Z_i\rangle$ would then be 1 for all inputs and weights, the pre-net and circuit weights would get zero gradient, and the head would only learn a bias. Preparing each qubit in $|+\rangle$ first turns the embedding angle into a relative phase, so the output depends on the inputs and the weights. Regression tests on both the PennyLane and the Qiskit circuits fail if any $\langle Z_i\rangle$ becomes constant or the gradients vanish.
 
-### 3.2 Quantum Device Resolution & Backend Management
+### 3.2 Embeddings (Feature Maps) of the Qiskit Head
+
+The quantum circuit of the Dressed Quantum Network has two parts: an **embedding** that loads the scaled features $\tilde{z}$ into a state $|\psi_e(\tilde{z})\rangle$, and a **variational block** that is the same for every embedding. The Qiskit head can use any of the embeddings below. The choice is the `ansatz` field of the run specification, so each embedding is its own configuration with its own `config_id`; `paper` is the default and the name inside every existing configuration ID. The PennyLane head implements only `paper`.
+
+> [!NOTE]
+> The embeddings other than `paper` have been run only with the Qiskit head (loss-level SPSA gradients). The PennyLane head, with exact adjoint gradients, has only been run with `paper`. A comparison between embeddings is therefore a comparison on one framework, and a comparison between frameworks exists only for `paper`.
+
+#### Implementation
+
+Each embedding is a pair of functions in `qiskit_embeddings.py`: an angle function in PyTorch that maps $\tilde{z}$ to the gate angles, and the circuit part that applies those gates, one circuit parameter per angle. Computing the angles outside the circuit keeps every circuit parameter a plain input column (no products of run-time parameters inside the simulator), and autograd differentiates the angle function exactly back to the pre-net. `build_qiskit_ansatz` places the chosen embedding in front of the variational block, and `QiskitQuantumClassifierHead` applies the angle function after the $\tanh$ scaling. `QiskitQuantumLayer` only sees the angle columns.
+
+```bash
+# Train a Qiskit QTL head with a given embedding (default: paper); --seeds N runs the first N seeds
+uv run scripts/training/train_qiskit_qtl_multiseed.py --ansatz zz_feature_map
+
+# Evaluate only the configuration just trained (look its ID up with list_runs.py)
+uv run scripts/metrics/evaluate_qiskit_qtl.py --config <config_id>
+```
+
+#### Embeddings
+
+With $n$ qubits and the scaled inputs $\tilde{z}_i \in [-\pi/2, \pi/2]$:
+
+- **`paper` (angle embedding).** Every qubit goes to $|+\rangle$ and is then rotated about $z$ by its feature:
+  $$|\psi_{\text{paper}}(\tilde{z})\rangle = \bigotimes_{i=1}^{n} R_z(\tilde{z}_i)\, H\, |0\rangle$$
+  Each qubit sits on the equator of the Bloch sphere at azimuth $\tilde{z}_i$. The state is a product state, so the embedding creates no correlation between features. $n$ angles.
+
+- **`rx`.** Every qubit is rotated about $x$ from $|0\rangle$, with no Hadamard:
+  $$|\psi_{\text{rx}}(\tilde{z})\rangle = \bigotimes_{i=1}^{n} R_x(\tilde{z}_i)\, |0\rangle = \bigotimes_{i=1}^{n} \left(\cos\tfrac{\tilde{z}_i}{2}|0\rangle - i \sin\tfrac{\tilde{z}_i}{2}|1\rangle\right)$$
+  The feature sets the polar angle of each qubit, so $\langle Z_i\rangle = \cos\tilde{z}_i$ before the variational block. Also a product state. $n$ angles.
+
+- **`zz_feature_map`.** The ZZ feature map of Havlicek et al. as implemented by Qiskit's `ZZFeatureMap` (full entanglement, 2 repetitions). One repetition applies Hadamards, a phase on every qubit, and a $ZZ$ phase on every pair, with the pair angle a product of two features:
+  $$U_{\Phi}(\tilde{z}) = \exp\Big(-i \sum_{(i,j)\in E} (\pi - \tilde{z}_i)(\pi - \tilde{z}_j)\, Z_i Z_j\Big)\, \exp\Big(-i \sum_{i} \tilde{z}_i Z_i\Big), \qquad |\psi_{\text{zz}}(\tilde{z})\rangle = \big(U_{\Phi}(\tilde{z})\, H^{\otimes n}\big)^{2} |0\rangle^{\otimes n}$$
+  with $E$ every pair $i < j$ (15 pairs at $n = 6$). In gates, $\exp(-i \tilde{z}_i Z_i) = R_z(2\tilde{z}_i)$ and $\exp(-i \phi\, Z_i Z_j) = R_{zz}(2\phi)$, so the angles are $2\tilde{z}_i$ and $2(\pi - \tilde{z}_i)(\pi - \tilde{z}_j)$: $n + n(n-1)/2 = 21$ angles. Qiskit writes the same gates as $P$ and CNOT, $P$, CNOT; they differ from $R_z$ and $R_{zz}$ only by a global phase, so every $\langle Z_i\rangle$ is identical (checked numerically against `ZZFeatureMap`: state fidelity 1). The state is entangled, and each pair of features enters through a product term. The pair angles reach about $2(3\pi/2)^2 \approx 45$ rad, so the map is a very sensitive function of the inputs.
+
+- **`zz_feature_map_linear`.** The same map with $E = \{(i, i+1)\}$, nearest neighbours only: 5 pairs and $n + (n-1) = 11$ angles at $n = 6$.
+
+#### Variational block (the same for every embedding)
+
+For layer $l = 1, \dots, L$ with weights $\theta_{l,i}, \gamma_{l,i}, \beta_{l,i}$ (the three rows of `weights[l]` in PennyLane, the three vectors of the flat weight in Qiskit):
+
+$$V_l = \Big[\prod_{i=0}^{n-1} \mathrm{CRY}_{(i+1) \bmod n \to i}(\beta_{l,i})\Big] \Big[\bigotimes_{i} R_z(\gamma_{l,i})\Big] \Big[\prod_{i=0}^{n-1} \mathrm{CNOT}_{i \to (i+1) \bmod n}\Big] \Big[\bigotimes_{i} R_z(\theta_{l,i})\Big]$$
+
+Each product over $i$ is applied in increasing $i$ (the CNOT and CRY rings do not commute), and $\mathrm{CRY}_{c \to t}(\beta)$ rotates qubit $t$ about $y$ by $\beta$ when qubit $c$ is $|1\rangle$. The circuit state and the measurement are
+
+$$|\phi_{\theta}(\tilde{z})\rangle = V_L \cdots V_1\, |\psi_e(\tilde{z})\rangle, \qquad \langle Z_i\rangle = \langle\phi_{\theta}(\tilde{z})|\, Z_i\, |\phi_{\theta}(\tilde{z})\rangle,$$
+
+followed by the post-net. The weights number $3Ln$ (72 at $n = 6$, $L = 4$) and are initialised uniformly in $[-\pi, \pi]$. Every embedding is followed by the same $V_l$, so a difference between configurations comes from the embedding.
+
+#### Comparing embeddings
+
+The legends of the comparison figures show the full configuration labels by default. With `--production` (on `visualize_comparison.py` and `visualize_loss.py`) they use short names (`Angle Embedding`, `RX Embedding`, `ZZ-Feature Map`, `ZZ-Feature Map (Linear)`, `QTL (Qiskit)`, `QTL (PennyLane)`), and the files get a `_production` suffix so both versions can exist. The names are the tables in `viz/display_names.py`. Both scripts also accept `--svg` and `--pdf`, which write each comparison figure in that vector format next to its PNG for printing at large sizes, and `--exclude`, which leaves the given configurations out.
+
+After training and evaluating each configuration, `scripts/viz/visualize_comparison.py` draws the metric distributions of all configurations side by side (test and validation), `scripts/viz/visualize_loss.py` overlays their validation loss curves, and `scripts/metrics/generate_improvement_report.py --config qiskit_qtl=<config_id> --output <file>` writes a comparative report for one chosen configuration without overwriting the standard one.
+
+### 3.3 Quantum Device Resolution & Backend Management
 
 For low-qubit variational circuits ($n_{\text{qubits}} = 6$, corresponding to a statevector of $2^6 = 64$ complex amplitudes), CPU state-vector simulation (`lightning.qubit` / `default.qubit`) provides superior execution throughput compared to GPU simulators (`lightning.gpu`), eliminating host-to-device memory transfer latency and CUDA kernel launch overhead.
 
@@ -247,7 +302,7 @@ For low-qubit variational circuits ($n_{\text{qubits}} = 6$, corresponding to a 
 - **`pennylane_heads.py` & `builder.py`**: Accept explicit `quantum_device` parameters to configure the underlying QNode simulator.
 - **PL QTL scripts (`train_pl_qtl_multiseed.py`, `evaluate_pl_qtl.py`)**: Expose configurable `DEFAULT_TORCH_DEVICE` and `DEFAULT_QUANTUM_DEVICE` variables with `get_device()` manual override support.
 
-### 3.3 Qiskit Execution Path
+### 3.4 Qiskit Execution Path
 
 `QiskitQuantumClassifierHead` is an independent, interchangeable counterpart of `PennylaneQuantumClassifierHead`. It uses the same pre-net, angle scaling, ansatz, and post-net, but runs the circuit through Qiskit Primitives V2, hand-written against `BaseEstimatorV2` with no `qiskit-machine-learning` dependency.
 
@@ -262,7 +317,7 @@ flowchart LR
     HEAD --> LAYER --> FN --> RUN --> EST
 ```
 
-- **`qiskit_embeddings.py`**: The registry of embeddings (see [`embedding.md`](embedding.md)): for each name, the PyTorch angle function, the number of angles, and the gates that consume them.
+- **`qiskit_embeddings.py`**: The registry of embeddings (see section 3.2): for each name, the PyTorch angle function, the number of angles, and the gates that consume them.
 - **`qiskit_circuit.py` (`build_qiskit_ansatz`)**: Builds the `QuantumCircuit` (the chosen embedding followed by the variational block), the input and weight `ParameterVector`s, and the per-qubit Pauli-Z `SparsePauliOp` observables. Pauli strings are reversed relative to the qubit index because Qiskit orders them from the most significant qubit.
 - **`qiskit_runner.py`**: `QiskitExpectationRunner` owns only "circuit, observables, parameter batch in, expectation values out". Each call is one broadcast PUB with parameters shaped `(N, 1, P)` and observables shaped `(1, n_qubits)`, so every state is evolved once and all expectation values are read from it. `resolve_qiskit_estimator` is the Qiskit counterpart of `resolve_quantum_device`: it returns an injected estimator or, by default, Aer's `EstimatorV2` on the state-vector method with no noise model attached. `StatevectorEstimator` is the slower reference implementation and is injected explicitly where a reference is wanted, such as unit tests. Controlled rotations (`cry`, `crz`, `cp`) are decomposed once at construction, because qiskit-aer 0.17.2 evaluates them wrongly when their angle is bound at run time.
 - **`qiskit_layer.py`**: `QiskitQuantumLayer` holds the flat weight vector, laid out as `[theta, gamma, beta]`, and a custom `torch.autograd.Function`. The backward pass is a loss-level SPSA estimate: one Rademacher direction per sample is shared by all outputs by folding the upstream gradient into the finite difference, which costs one PUB of `2 * Batch` states. The directions come from a generator seeded with the run seed, so a seed reproduces its gradient noise. Exact parameter-shift is avoided because it needs 204 shifted circuits per sample at the default 6-qubit, 4-layer depth.

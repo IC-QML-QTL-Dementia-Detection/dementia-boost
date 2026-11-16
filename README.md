@@ -117,7 +117,7 @@ The scripts of the Quickstart reproduce every number above: the split is set by 
 
 ## Embedding Comparison (Qiskit only)
 
-The embedding is the part of the circuit that loads the 6 scaled features into the qubits (`docs/embedding.md` gives the mathematics). The Dressed Quantum Network above uses the paper's angle embedding. To see whether another embedding helps, the Qiskit head was also run with an RX embedding, the ZZ feature map (full entanglement, two repetitions), and a ZZ feature map with nearest-neighbour entanglement. The variational block, the backbone, the split, and every hyperparameter are the same, so the embedding is the only difference. Each configuration has 101 seeds (0 to 100).
+The embedding is the part of the circuit that loads the 6 scaled features into the qubits (`docs/architecture.md`, section 3.2, gives the mathematics). The Dressed Quantum Network above uses the paper's angle embedding. To see whether another embedding helps, the Qiskit head was also run with an RX embedding, the ZZ feature map (full entanglement, two repetitions), and a ZZ feature map with nearest-neighbour entanglement. The variational block, the backbone, the split, and every hyperparameter are the same, so the embedding is the only difference. Each configuration has 101 seeds (0 to 100).
 
 > [!NOTE]
 > **These embeddings were run only with the Qiskit head** (loss-level SPSA gradients). The PennyLane head has only been run with the angle embedding. The comparison is therefore between embeddings on one framework, and it says nothing about how the same embeddings would behave with PennyLane's exact gradients. The values come from the comparative report written for each configuration.
@@ -211,7 +211,7 @@ uv run scripts/training/train_qiskit_qtl_multiseed.py
 uv run scripts/training/train_qiskit_qtl_multiseed.py --ansatz zz_feature_map
 ```
 
-The embeddings other than `paper` have only been run with the Qiskit head at the time of writing; the PennyLane head implements `paper` only. See [`docs/embedding.md`](docs/embedding.md) for the circuits and their mathematics.
+The embeddings other than `paper` have only been run with the Qiskit head at the time of writing; the PennyLane head implements `paper` only. See [`docs/architecture.md`](docs/architecture.md), section 3.2, for the circuits and their mathematics.
 
 Every training script writes a checkpoint and a per-epoch history (loss, accuracy, learning rate, duration, and the full run specification) for each seed, and skips a run whose checkpoint already exists. The `val_loss` and `val_acc` fields of the history are measured on the validation cohort. The training scripts do not produce plots; see the next step.
 
