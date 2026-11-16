@@ -286,10 +286,12 @@ uv run scripts/viz/visualize_comparison.py
 uv run scripts/viz/visualize_comparison.py --production
 uv run scripts/viz/visualize_loss.py --production
 
-# Both scripts can also write each comparison figure as a vector file (SVG, PDF)
-# next to the PNG, with the same name, for printing at large sizes.
+# Every visualize_* script can also write its figures as vector files (SVG, PDF)
+# next to the PNGs, with the same names, for printing at large sizes. The loss
+# script does it only for the comparison across configurations.
 uv run scripts/viz/visualize_comparison.py --production --svg --pdf
 uv run scripts/viz/visualize_loss.py --production --svg --pdf
+uv run scripts/viz/visualize_qiskit_qtl.py --svg
 ```
 
 ---

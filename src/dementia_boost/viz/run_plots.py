@@ -33,6 +33,7 @@ def plot_paradigm(
     paradigm: Paradigm | str,
     logger: Logger | None = None,
     configuration: str | None = None,
+    vector_formats: Sequence[str] = (),
 ) -> list[str]:
     """Draws the evaluation plots of every configuration of a paradigm.
 
@@ -45,6 +46,7 @@ def plot_paradigm(
         paradigm: The paradigm to plot.
         logger: Logger for progress. Defaults to a module logger.
         configuration: Restrict to one `config_id`. Defaults to all.
+        vector_formats: Vector formats (`svg`, `pdf`) to write next to each PNG.
 
     Returns:
         The `config_id`s that were plotted. Empty if there are no results.
@@ -68,7 +70,10 @@ def plot_paradigm(
         selected = select_best_validation_run(
             layout.metrics_path(paradigm, config, "val")
         )
-        visualizer = MetricsVisualizer(output_dir=layout.plots_dir(paradigm, config))
+        visualizer = MetricsVisualizer(
+            output_dir=layout.plots_dir(paradigm, config),
+            vector_formats=vector_formats,
+        )
         prefix = paradigm.value
 
         logger.info(

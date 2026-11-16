@@ -1,8 +1,8 @@
 """Command-line options shared by the visualization scripts that write vector figures.
 
-`--svg` and `--pdf` make a script write each cross-configuration figure in that
-format next to its PNG, with the same name, so a poster or paper can embed it
-without losing resolution.
+`--svg` and `--pdf` make a script write each figure it draws in that format next
+to its PNG (the loss script only for its cross-configuration comparison), with
+the same name, so a poster or paper can embed it without losing resolution.
 """
 
 import argparse

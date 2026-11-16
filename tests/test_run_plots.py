@@ -87,6 +87,20 @@ class TestPlotParadigm:
 
         assert plot_paradigm(layout, Paradigm.PL_QTL) == [config_id(spec_a)]
 
+    def test_vector_formats_are_written_next_to_each_plot(self, tmp_path: Path) -> None:
+        """Every evaluation plot gets the extra formats, with the PNG's name."""
+        layout = ResultsLayout(str(tmp_path))
+        spec_a, spec_b = build_spec("pl_qtl", seed=1), build_spec("pl_qtl", seed=2)
+        _write_results(layout, spec_a, spec_b)
+
+        plot_paradigm(layout, Paradigm.PL_QTL, vector_formats=("svg", "pdf"))
+
+        plots = Path(layout.plots_dir("pl_qtl", config_id(spec_a)))
+        stems = {path.stem for path in plots.glob("*.png")}
+        assert len(stems) == 4
+        for extension in ("svg", "pdf"):
+            assert {path.stem for path in plots.glob(f"*.{extension}")} == stems
+
     def test_nothing_to_plot_returns_nothing(self, tmp_path: Path) -> None:
         """A paradigm without results produces no plots."""
         assert plot_paradigm(ResultsLayout(str(tmp_path)), Paradigm.CTL) == []
