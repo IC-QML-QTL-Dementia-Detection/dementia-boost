@@ -69,39 +69,26 @@ class TestPlotParadigm:
         assert f"pl_qtl_cm_{run_id(spec_b)}.png" in names
         assert not any(run_id(spec_a) in name for name in names)
 
-    def test_writes_the_distribution_and_comparative_roc_plots(
-        self, tmp_path: Path
-    ) -> None:
-        """The all-seeds plots are written next to the isolated ones."""
+    def test_writes_every_plot_with_the_vector_formats(self, tmp_path: Path) -> None:
+        """The all-seeds and isolated plots are written, every one also in the
+        extra formats with the PNG's name, and the caller learns which
+        configurations got plots."""
         layout = ResultsLayout(str(tmp_path))
         spec_a, spec_b = build_spec("pl_qtl", seed=1), build_spec("pl_qtl", seed=2)
         _write_results(layout, spec_a, spec_b)
 
-        plot_paradigm(layout, Paradigm.PL_QTL)
+        plotted = plot_paradigm(layout, Paradigm.PL_QTL, vector_formats=("svg", "pdf"))
 
-        plots = Path(layout.plots_dir("pl_qtl", config_id(spec_a)))
-        for name in ("pl_qtl_distributions.png", "pl_qtl_roc_curves.png"):
-            assert (plots / name).stat().st_size > 0
-
-    def test_returns_the_configurations_it_plotted(self, tmp_path: Path) -> None:
-        """The caller learns which configurations got plots."""
-        layout = ResultsLayout(str(tmp_path))
-        spec_a, spec_b = build_spec("pl_qtl", seed=1), build_spec("pl_qtl", seed=2)
-        _write_results(layout, spec_a, spec_b)
-
-        assert plot_paradigm(layout, Paradigm.PL_QTL) == [config_id(spec_a)]
-
-    def test_vector_formats_are_written_next_to_each_plot(self, tmp_path: Path) -> None:
-        """Every evaluation plot gets the extra formats, with the PNG's name."""
-        layout = ResultsLayout(str(tmp_path))
-        spec_a, spec_b = build_spec("pl_qtl", seed=1), build_spec("pl_qtl", seed=2)
-        _write_results(layout, spec_a, spec_b)
-
-        plot_paradigm(layout, Paradigm.PL_QTL, vector_formats=("svg", "pdf"))
-
+        assert plotted == [config_id(spec_a)]
         plots = Path(layout.plots_dir("pl_qtl", config_id(spec_a)))
         stems = {path.stem for path in plots.glob("*.png")}
-        assert len(stems) == 4
+        assert stems == {
+            "pl_qtl_distributions",
+            "pl_qtl_roc_curves",
+            f"pl_qtl_isolated_roc_{run_id(spec_b)}",
+            f"pl_qtl_cm_{run_id(spec_b)}",
+        }
+        assert all(path.stat().st_size > 0 for path in plots.glob("*.png"))
         for extension in ("svg", "pdf"):
             assert {path.stem for path in plots.glob(f"*.{extension}")} == stems
 
@@ -114,12 +101,25 @@ class TestPlotLosses:
     """Validates the loss plots read from the histories on disk."""
 
     def _write_history(self, layout: ResultsLayout, spec: RunSpec) -> None:
-        """Writes a short history for a spec."""
+        """Writes a short history for a spec, validated on even epochs only.
+
+        Seed 1 stops after 4 epochs and the other seeds run 6, so the plots must
+        tolerate missing validation values and runs of unequal length.
+        """
         path = Path(layout.history_path(spec))
         path.parent.mkdir(parents=True, exist_ok=True)
+        n_epochs = 4 if spec.seed == 1 else 6
         epochs = [
-            EpochRecord(e, 0.7 - 0.05 * e, 0.5, 0.72 - 0.04 * e, 0.5, spec.lr, 1.0)
-            for e in range(1, 5)
+            EpochRecord(
+                epoch=e,
+                train_loss=0.7 - 0.05 * e,
+                train_acc=0.5,
+                val_loss=0.72 - 0.04 * e if e % 2 == 0 else None,
+                val_acc=0.5 if e % 2 == 0 else None,
+                lr=spec.lr,
+                duration_s=1.0,
+            )
+            for e in range(1, n_epochs + 1)
         ]
         MetricsAnalyzer.save_history(
             TrainingHistory(spec=spec, epochs=epochs, extras={}), str(path)
@@ -128,7 +128,9 @@ class TestPlotLosses:
     def test_plots_each_configuration_and_the_comparison(self, tmp_path: Path) -> None:
         """Per-run curves and a distribution go to the configuration's plot
         directory, and the cross-configuration comparison to the plots root. The
-        configuration file in the history directory is not read as a history."""
+        configuration file in the history directory is not read as a history.
+        Only the comparison gets the extra formats, with the PNG's name; the
+        per-run plots stay PNG."""
         layout = ResultsLayout(str(tmp_path))
         specs = [
             build_spec("pl_qtl", seed=1),
@@ -139,33 +141,17 @@ class TestPlotLosses:
             self._write_history(layout, spec)
             layout.write_config(spec)
 
-        plotted = plot_losses(layout)
+        plotted = plot_losses(layout, vector_formats=("svg", "pdf"))
 
         qtl_plots = Path(layout.plots_dir("pl_qtl", config_id(specs[0])))
         for spec in specs[:2]:
             assert (qtl_plots / f"pl_qtl_{run_id(spec)}_loss.png").stat().st_size > 0
         assert (qtl_plots / "pl_qtl_loss_distribution.png").stat().st_size > 0
-        assert (Path(layout.root) / "plots" / "loss_comparison.png").stat().st_size > 0
-        assert len(plotted) == 2
-
-    def test_vector_formats_are_written_next_to_the_comparison(
-        self, tmp_path: Path
-    ) -> None:
-        """Only the cross-configuration comparison gets the extra formats, with the
-        PNG's name; the per-run plots stay PNG."""
-        layout = ResultsLayout(str(tmp_path))
-        specs = [build_spec("pl_qtl", seed=1), build_spec("ctl", seed=1)]
-        for spec in specs:
-            self._write_history(layout, spec)
-            layout.write_config(spec)
-
-        plot_losses(layout, vector_formats=("svg", "pdf"))
-
+        assert not list(qtl_plots.glob("*.svg"))
         plots = Path(layout.root) / "plots"
         for extension in ("png", "svg", "pdf"):
             assert (plots / f"loss_comparison.{extension}").stat().st_size > 0
-        run_plots = Path(layout.plots_dir("pl_qtl", config_id(specs[0])))
-        assert not list(run_plots.glob("*.svg"))
+        assert len(plotted) == 2
 
     def test_unknown_vector_format_is_refused(self, tmp_path: Path) -> None:
         """A typo in a format fails before anything is drawn."""

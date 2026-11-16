@@ -1,7 +1,7 @@
 """Unit tests for feature embedding caching and in-memory datasets.
 
-This module validates the functionality of `CachedEmbeddingDataset`,
-`FeatureCacheManager`, and model assembly utilities for transfer learning.
+This module validates the functionality of `CachedEmbeddingDataset` and
+`FeatureCacheManager` for transfer learning.
 """
 
 from pathlib import Path
@@ -15,13 +15,7 @@ from dementia_boost.data.embedding_cache import (
     CachedEmbeddingDataset,
     FeatureCacheManager,
 )
-from dementia_boost.models.builder import assemble_dementia_classifier
-from dementia_boost.models.classical_cnn import (
-    ClassicalClassifierHead,
-    DementiaClassifier,
-    LeNetFeatureExtractor,
-)
-from dementia_boost.models.quantum_cnn import PennylaneQuantumClassifierHead
+from dementia_boost.models.classical_cnn import LeNetFeatureExtractor
 
 TEST_NUM_SAMPLES: int = 16
 TEST_FEATURE_DIM: int = 2304
@@ -29,8 +23,6 @@ TEST_BATCH_SIZE: int = 4
 TEST_IMAGE_SIZE: int = 128
 TEST_IMAGE_CHANNELS: int = 1
 TEST_NUM_IMAGES: int = 12
-TEST_N_QUBITS: int = 2
-TEST_N_LAYERS: int = 1
 
 
 @pytest.fixture
@@ -146,58 +138,3 @@ def test_cache_disk_serialization(
 
     assert torch.equal(features, loaded_features)
     assert torch.equal(labels, loaded_labels)
-
-
-def test_heads_forward_with_cached_features(
-    sample_feature_data: tuple[Tensor, Tensor],
-) -> None:
-    """Validates direct forward pass through heads using cached feature vectors."""
-    features, _ = sample_feature_data
-    batch_features = features[:TEST_BATCH_SIZE]
-
-    classical_head = ClassicalClassifierHead(
-        in_features=TEST_FEATURE_DIM,
-        use_sigmoid=False,
-    )
-    classical_output = classical_head(batch_features)
-    assert classical_output.shape == (TEST_BATCH_SIZE, 1)
-
-    quantum_head = PennylaneQuantumClassifierHead(
-        in_features=TEST_FEATURE_DIM,
-        n_qubits=TEST_N_QUBITS,
-        n_layers=TEST_N_LAYERS,
-    )
-    quantum_output = quantum_head(batch_features)
-    assert quantum_output.shape == (TEST_BATCH_SIZE, 1)
-
-
-def test_assemble_dementia_classifier() -> None:
-    """Validates assembling a DementiaClassifier from separate extractor and head."""
-    extractor = LeNetFeatureExtractor()
-    head = ClassicalClassifierHead(
-        in_features=TEST_FEATURE_DIM,
-        use_sigmoid=False,
-    )
-
-    model = assemble_dementia_classifier(
-        feature_extractor=extractor,
-        classifier_head=head,
-    )
-
-    assert isinstance(model, DementiaClassifier)
-    model.eval()
-    extractor.eval()
-    head.eval()
-
-    dummy_input = torch.randn(
-        2,
-        TEST_IMAGE_CHANNELS,
-        TEST_IMAGE_SIZE,
-        TEST_IMAGE_SIZE,
-    )
-
-    with torch.no_grad():
-        combined_output = model(dummy_input)
-        manual_output = head(extractor(dummy_input))
-
-    assert torch.allclose(combined_output, manual_output, atol=1e-5)

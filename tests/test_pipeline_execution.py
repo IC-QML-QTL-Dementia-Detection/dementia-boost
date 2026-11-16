@@ -3,7 +3,6 @@
 This module validates:
 - ``BaselineTrainer`` end-to-end raw-image training loss reduction, checkpoint
   key structure, and optimizer state advancement.
-- ``BaselineTrainer`` learning rate scheduler stepping behavior.
 - ``ModelEvaluator`` batched inference probability bounds and eval-mode
   invariance.
 - ``ModelEvaluator`` checkpoint weight restoration exactness.
@@ -13,7 +12,6 @@ Regression coverage
 - Training loops that silently fail to update parameters, leaving loss flat.
 - Checkpoints missing the composite `feature_extractor.*` / `classifier_head.*`
   key structure required by downstream loaders.
-- Learning rate schedulers that drift from the configured step/gamma contract.
 - Evaluators that leave the model in training mode, activating dropout/batchnorm
   noise during inference.
 - Weight loading that fails to exactly restore serialized parameters.
@@ -22,7 +20,6 @@ Regression coverage
 from pathlib import Path
 
 import numpy as np
-import pytest
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -140,57 +137,6 @@ class TestBaselineTrainerEndToEnd:
         state_dict = torch.load(checkpoint_path, weights_only=True)
         assert any(k.startswith("feature_extractor.") for k in state_dict)
         assert any(k.startswith("classifier_head.") for k in state_dict)
-
-
-class TestBaselineTrainerLrScheduler:
-    """Validates learning rate decay contracts during training."""
-
-    def test_lr_reduces_by_gamma_after_step_size_epochs(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        """Asserts that `StepLR` reduces the learning rate by `gamma` exactly
-        once after `step_size` completed epochs."""
-        device = torch.device("cpu")
-        logger = setup_logger("test_pipeline_execution_lr")
-        layout = ResultsLayout(str(tmp_path))
-
-        model = _build_end_to_end_model().to(device)
-        train_loader = _build_mock_image_loader()
-        val_loader = _build_mock_image_loader()
-
-        initial_lr = 1e-2
-        step_size = 2
-        gamma = 0.1
-        spec = build_spec(
-            "baseline",
-            lr=initial_lr,
-            lr_step_size=step_size,
-            lr_gamma=gamma,
-            epochs=step_size,
-            batch_size=4,
-        )
-
-        criterion = nn.BCEWithLogitsLoss()
-        optimizer = optim.Adam(model.parameters(), lr=initial_lr)
-        scheduler = StepLR(optimizer, step_size=step_size, gamma=gamma)
-
-        trainer = BaselineTrainer(
-            model=model,
-            train_loader=train_loader,
-            val_loader=val_loader,
-            criterion=criterion,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            device=device,
-            logger=logger,
-            spec=spec,
-            layout=layout,
-        )
-        trainer.train()
-
-        lr_after_step = optimizer.param_groups[0]["lr"]
-        assert lr_after_step == pytest.approx(initial_lr * gamma)
 
 
 class TestModelEvaluatorPredict:

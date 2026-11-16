@@ -2,17 +2,15 @@
 
 Regression coverage
 -------------------
-- The split depended on the per-process string hash seed, because the subject
-  set was shuffled without sorting first.
 - The split read and reseeded the global NumPy RNG.
 - Nothing checked that the cohorts were disjoint or contained both classes.
+
+The cross-process check (the split depended on the per-process string hash
+seed) runs through the ETL in `test_split_leak.py`.
 """
 
 import itertools
 import random
-import subprocess
-import sys
-import textwrap
 
 import numpy as np
 import pytest
@@ -105,29 +103,6 @@ class TestDeterminism:
 
         assert np.random.rand() == expected_numpy
         assert random.random() == expected_python
-
-    def test_identical_across_hash_seeds(self) -> None:
-        """The split is the same in processes with different PYTHONHASHSEED."""
-        script = textwrap.dedent(
-            """
-            from dementia_boost.data.split import split_subjects
-
-            labels = {f"OAS2_{i:04d}": i % 2 for i in range(1, 41)}
-            split = split_subjects(labels, 0.3, 0.2, 42)
-            print(split.train, split.val, split.test)
-            """
-        )
-        outputs = {
-            subprocess.run(
-                [sys.executable, "-c", script],
-                check=True,
-                env={"PYTHONHASHSEED": hash_seed},
-                capture_output=True,
-                text=True,
-            ).stdout
-            for hash_seed in ("1", "2", "3")
-        }
-        assert len(outputs) == 1
 
 
 class TestOverrides:
