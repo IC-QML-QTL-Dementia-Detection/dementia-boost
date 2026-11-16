@@ -198,6 +198,10 @@ uv run scripts/metrics/evaluate_qiskit_qtl.py --config <config_id>   # one confi
 uv run scripts/metrics/generate_improvement_report.py
 uv run scripts/metrics/generate_improvement_report.py --config qiskit_qtl=<config_id> --output <file>
 
+# Two configurations seed by seed: wins, Hodges-Lehmann estimate with interval,
+# Wilcoxon p-values (raw and Holm-adjusted), on test and validation
+uv run scripts/metrics/compare_configurations.py <config_id> <other_config_id>
+
 # Per configuration: metric distributions, ROC curves, confusion matrix
 uv run scripts/viz/visualize_baselines.py
 uv run scripts/viz/visualize_ctl.py
