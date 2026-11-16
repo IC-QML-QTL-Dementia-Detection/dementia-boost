@@ -249,6 +249,21 @@ class TestWriteConfig:
         with pytest.raises(ConfigCollisionError, match="same"):
             layout.write_config(dataclasses.replace(_qtl(), n_layers=3))
 
+    def test_a_config_written_before_a_new_optional_field_still_matches(
+        self, layout: ResultsLayout
+    ) -> None:
+        """A `config.json` that lacks an optional field added later describes
+        the same configuration (the field is `None`, which the hash ignores),
+        so adding seeds to an existing configuration is not refused."""
+        spec = _qtl()
+        layout.write_config(spec)
+        path = Path(layout.config_path(spec))
+        payload = json.loads(path.read_text())
+        del payload["spec"]["reupload"]
+        path.write_text(json.dumps(payload))
+
+        layout.write_config(_qtl(seed=4))
+
     def test_no_temporary_file_is_left_behind(self, layout: ResultsLayout) -> None:
         """The config is written atomically."""
         layout.write_config(_qtl())

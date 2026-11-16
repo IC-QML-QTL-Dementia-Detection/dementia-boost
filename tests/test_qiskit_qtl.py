@@ -166,6 +166,31 @@ def _instructions(
     ]
 
 
+def _angle_embedding_gates(
+    n_qubits: int,
+) -> list[tuple[str, tuple[int, ...], tuple[str, ...]]]:
+    """Lists the gates of the `paper` embedding: Hadamards, then `RZ(x_i)`."""
+    gates = [("h", (q,), ()) for q in range(n_qubits)]
+    gates += [("rz", (q,), (f"x[{q}]",)) for q in range(n_qubits)]
+    return gates
+
+
+def _paper_layer_gates(
+    n_qubits: int, layer: int
+) -> list[tuple[str, tuple[int, ...], tuple[str, ...]]]:
+    """Lists the gates of one layer of the base paper's block, written out by
+    hand: `RZ(theta)`, the CNOT ring, `RZ(gamma)`, the CRY ring."""
+    offset = layer * n_qubits
+    gates = [("rz", (q,), (f"theta[{offset + q}]",)) for q in range(n_qubits)]
+    gates += [("cx", (q, (q + 1) % n_qubits), ()) for q in range(n_qubits)]
+    gates += [("rz", (q,), (f"gamma[{offset + q}]",)) for q in range(n_qubits)]
+    gates += [
+        ("cry", ((q + 1) % n_qubits, q), (f"beta[{offset + q}]",))
+        for q in range(n_qubits)
+    ]
+    return gates
+
+
 class TestQiskitAnsatzConstruction:
     """Validates the static shape and parameter contract of the ansatz."""
 
@@ -190,24 +215,40 @@ class TestQiskitAnsatzConstruction:
             n_qubits=n_qubits, n_layers=n_layers, block="paper"
         )
 
-        expected = [("h", (q,), ()) for q in range(n_qubits)]
-        expected += [("rz", (q,), (f"x[{q}]",)) for q in range(n_qubits)]
+        expected = _angle_embedding_gates(n_qubits)
         for layer in range(n_layers):
-            offset = layer * n_qubits
-            expected += [
-                ("rz", (q,), (f"theta[{offset + q}]",)) for q in range(n_qubits)
-            ]
-            expected += [("cx", (q, (q + 1) % n_qubits), ()) for q in range(n_qubits)]
-            expected += [
-                ("rz", (q,), (f"gamma[{offset + q}]",)) for q in range(n_qubits)
-            ]
-            expected += [
-                ("cry", ((q + 1) % n_qubits, q), (f"beta[{offset + q}]",))
-                for q in range(n_qubits)
-            ]
+            expected += _paper_layer_gates(n_qubits, layer)
 
         assert _instructions(circuit) == expected
         assert [vector.name for vector in weight_params] == ["theta", "gamma", "beta"]
+
+    def test_reupload_repeats_the_embedding_before_every_layer(self) -> None:
+        """Asserts that re-uploading applies the whole embedding, Hadamard
+        included, before each layer, reusing the same input parameters, so the
+        input width and the weights stay those of the plain circuit."""
+        n_qubits, n_layers = 3, 2
+        circuit, input_params, weight_params, _ = build_qiskit_ansatz(
+            n_qubits=n_qubits, n_layers=n_layers, reupload=True
+        )
+        _, plain_inputs, plain_weights, _ = build_qiskit_ansatz(
+            n_qubits=n_qubits, n_layers=n_layers
+        )
+
+        expected = []
+        for layer in range(n_layers):
+            expected += _angle_embedding_gates(n_qubits)
+            expected += _paper_layer_gates(n_qubits, layer)
+
+        assert _instructions(circuit) == expected
+        assert len(input_params) == len(plain_inputs)
+        assert [len(v) for v in weight_params] == [len(v) for v in plain_weights]
+
+    def test_reupload_with_one_layer_is_the_plain_circuit(self) -> None:
+        """Asserts that with a single layer there is nothing to repeat."""
+        reuploaded, *_ = build_qiskit_ansatz(n_qubits=3, n_layers=1, reupload=True)
+        plain, *_ = build_qiskit_ansatz(n_qubits=3, n_layers=1)
+
+        assert _instructions(reuploaded) == _instructions(plain)
 
     def test_unknown_block_is_refused(self) -> None:
         """Asserts an unregistered block name raises with the available names."""

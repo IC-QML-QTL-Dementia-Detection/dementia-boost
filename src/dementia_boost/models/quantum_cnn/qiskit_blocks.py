@@ -12,7 +12,9 @@ from dataclasses import dataclass
 
 from qiskit.circuit import ParameterVector, QuantumCircuit
 
-DEFAULT_BLOCK: str = "paper"
+from dementia_boost.core.identity import DEFAULT_BLOCK
+
+__all__ = ["BLOCKS", "DEFAULT_BLOCK", "VariationalBlock", "get_block"]
 
 
 @dataclass(frozen=True)

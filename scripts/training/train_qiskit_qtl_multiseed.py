@@ -20,11 +20,14 @@ drawn from a generator seeded with the run seed. This trade-off is necessary
 to keep the full 101-seed, 100-epoch sweep computationally tractable.
 
 `--ansatz` picks the embedding in front of the variational block (`paper`, the
-default, `zz_feature_map`, `rx`, or `zz_feature_map_linear`), and `--seeds N`
-runs only the first N seeds for a quick check.
+default, `zz_feature_map`, `rx`, or `zz_feature_map_linear`), `--block` picks
+the variational block (`paper`, the base paper's block, by default),
+`--reupload` repeats the embedding before every layer, and `--seeds N` runs
+only the first N seeds for a quick check.
 
-Each run is described by a `RunSpec` (qubits, layers, ansatz, gradient method,
-SPSA step, and the selected baseline as `backbone_id`); checkpoints, per-epoch
+Each run is described by a `RunSpec` (qubits, layers, embedding, block,
+re-uploading, gradient method, SPSA step, and the selected baseline as
+`backbone_id`); checkpoints, per-epoch
 histories, and configuration are written where `ResultsLayout` puts them, and a
 run whose checkpoint exists is skipped. Loss plots are rendered from the
 histories by `scripts/viz/visualize_loss.py`. Circuits run on Aer's noiseless
@@ -51,6 +54,8 @@ from dementia_boost.models.builder import (
     load_baseline_backbone,
 )
 from dementia_boost.models.quantum_cnn import (
+    BLOCKS,
+    DEFAULT_BLOCK,
     DEFAULT_EMBEDDING,
     EMBEDDINGS,
     QiskitQuantumClassifierHead,
@@ -108,8 +113,9 @@ def parse_arguments() -> argparse.Namespace:
     """Parses the command-line options of the sweep.
 
     Returns:
-        The namespace with `ansatz` (the embedding name) and `seeds` (how many
-        of the default seeds to run, or None for all).
+        The namespace with `ansatz` (the embedding name), `block` (the
+        variational block name), `reupload`, and `seeds` (how many of the
+        default seeds to run, or None for all).
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -118,6 +124,18 @@ def parse_arguments() -> argparse.Namespace:
         default=DEFAULT_ANSATZ,
         help="Embedding in front of the variational block; part of the "
         "configuration, so each embedding is its own set of runs.",
+    )
+    parser.add_argument(
+        "--block",
+        choices=sorted(BLOCKS),
+        default=DEFAULT_BLOCK,
+        help="Variational block after the embedding; part of the configuration.",
+    )
+    parser.add_argument(
+        "--reupload",
+        action="store_true",
+        help="Repeat the embedding before every layer (data re-uploading); part "
+        "of the configuration.",
     )
     parser.add_argument(
         "--seeds",
@@ -130,13 +148,21 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_spec(seed: int, backbone: RunSpec, ansatz: str = DEFAULT_ANSATZ) -> RunSpec:
+def build_spec(
+    seed: int,
+    backbone: RunSpec,
+    ansatz: str = DEFAULT_ANSATZ,
+    block: str = DEFAULT_BLOCK,
+    reupload: bool = False,
+) -> RunSpec:
     """Builds the specification of one Qiskit QTL run on a selected baseline.
 
     Args:
         seed: Random seed of the run.
         backbone: Spec of the baseline run the head is built on.
         ansatz: Registry name of the embedding of the quantum head.
+        block: Registry name of the variational block of the quantum head.
+        reupload: Whether the embedding is repeated before every layer.
 
     Returns:
         The Qiskit QTL spec, trained on the same split as its backbone.
@@ -144,6 +170,8 @@ def build_spec(seed: int, backbone: RunSpec, ansatz: str = DEFAULT_ANSATZ) -> Ru
     return RunSpec(
         paradigm=Paradigm.QISKIT_QTL,
         ansatz=ansatz,
+        block=block,
+        reupload=reupload,
         n_qubits=DEFAULT_N_QUBITS,
         n_layers=DEFAULT_N_LAYERS,
         lr=DEFAULT_LEARNING_RATE,
@@ -188,6 +216,7 @@ def main() -> None:
     )
     logger.info(
         f"Beginning Qiskit QTL sweep ({arguments.ansatz} embedding, "
+        f"{arguments.block} block, re-uploading {arguments.reupload}, "
         f"{DEFAULT_N_QUBITS} qubits, {DEFAULT_N_LAYERS} layers) across "
         f"{len(seeds)} seeds using SPSA gradients..."
     )
@@ -236,7 +265,9 @@ def main() -> None:
     )
 
     for seed in seeds:
-        spec = build_spec(seed, backbone, arguments.ansatz)
+        spec = build_spec(
+            seed, backbone, arguments.ansatz, arguments.block, arguments.reupload
+        )
 
         if layout.is_done(spec):
             logger.info(
@@ -258,6 +289,8 @@ def main() -> None:
             seed=seed,
             estimator=estimator,
             embedding=arguments.ansatz,
+            block=arguments.block,
+            reupload=arguments.reupload,
         ).to(device)
         head.apply(QiskitQuantumClassifierHead.apply_glorot_init)
 

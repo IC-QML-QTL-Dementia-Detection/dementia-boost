@@ -22,6 +22,7 @@ def build_qiskit_ansatz(
     n_layers: int = DEFAULT_N_LAYERS,
     embedding: str = DEFAULT_EMBEDDING,
     block: str = DEFAULT_BLOCK,
+    reupload: bool = False,
 ) -> tuple[
     QuantumCircuit,
     ParameterVector,
@@ -33,7 +34,9 @@ def build_qiskit_ansatz(
     Builds the chosen embedding of the classical input features (by default a
     Hadamard layer followed by an RZ angle embedding, see `qiskit_embeddings`),
     then `n_layers` layers of the chosen variational block (by default the
-    Bhowmik et al. (2025) block, see `qiskit_blocks`).
+    Bhowmik et al. (2025) block, see `qiskit_blocks`). With data re-uploading
+    the whole embedding is applied again before every layer, on the same input
+    parameters, so the input width and the weights do not change.
 
     The Hadamard layer is a deliberate departure from the circuit drawn in the
     paper. Without it the state stays at `|0...0>` and every expectation value
@@ -50,6 +53,8 @@ def build_qiskit_ansatz(
             angle embedding.
         block: Registry name of the variational block. Defaults to the
             paper's block.
+        reupload: Whether to repeat the embedding before every layer.
+            Defaults to False (the embedding is applied once).
 
     Returns:
         A tuple containing:
@@ -68,11 +73,12 @@ def build_qiskit_ansatz(
 
     chosen_embedding = get_embedding(embedding)
     input_params = ParameterVector("x", chosen_embedding.n_features(n_qubits))
-    chosen_embedding.apply(circuit, input_params)
-
     chosen_block = get_block(block)
     weight_vectors = chosen_block.weight_vectors(n_qubits, n_layers)
+
     for layer in range(n_layers):
+        if layer == 0 or reupload:
+            chosen_embedding.apply(circuit, input_params)
         chosen_block.apply_layer(circuit, weight_vectors, layer)
 
     observables = []

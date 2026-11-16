@@ -31,8 +31,12 @@ class Paradigm(StrEnum):
     QISKIT_QTL = "qiskit_qtl"
 
 
+DEFAULT_BLOCK = "paper"
+
 _HEAD_FIELDS = (
     "ansatz",
+    "block",
+    "reupload",
     "n_qubits",
     "n_layers",
     "quantum_lr",
@@ -57,13 +61,15 @@ _FORBIDDEN: dict[Paradigm, tuple[str, ...]] = {
     Paradigm.BASELINE: _HEAD_FIELDS,
     Paradigm.CTL: (
         "ansatz",
+        "block",
+        "reupload",
         "n_qubits",
         "n_layers",
         "quantum_lr",
         "gradient",
         "spsa_epsilon",
     ),
-    Paradigm.PL_QTL: ("spsa_epsilon",),
+    Paradigm.PL_QTL: ("block", "reupload", "spsa_epsilon"),
     Paradigm.QISKIT_QTL: (),
 }
 _FLOAT_FIELDS = ("lr", "lr_gamma", "quantum_lr", "spsa_epsilon")
@@ -102,9 +108,16 @@ class RunSpec:
         batch_size: Training batch size.
         split_id: ID of the data split the run was trained on.
         seed: Random seed of the run.
-        ansatz: Name of the variational circuit (quantum heads only).
+        ansatz: Name of the embedding (quantum heads only). The field predates
+            the variational block registry, hence its name.
+        block: Name of the variational block, or `None` for the base paper's
+            block (Qiskit head only). `DEFAULT_BLOCK` is stored as `None`, so
+            one circuit has one ID.
+        reupload: `True` to repeat the embedding before every layer, or
+            `None` to apply it once (Qiskit head only). `False` is stored as
+            `None`.
         n_qubits: Number of qubits (quantum heads only).
-        n_layers: Number of ansatz layers (quantum heads only).
+        n_layers: Number of variational block layers (quantum heads only).
         quantum_lr: Learning rate of the circuit weights, or `None` to share `lr`
             (quantum heads only).
         gradient: Gradient method, for example "adjoint" or "spsa" (quantum heads
@@ -122,6 +135,8 @@ class RunSpec:
     split_id: str
     seed: int
     ansatz: str | None = None
+    block: str | None = None
+    reupload: bool | None = None
     n_qubits: int | None = None
     n_layers: int | None = None
     quantum_lr: float | None = None
@@ -130,13 +145,22 @@ class RunSpec:
     backbone_id: str | None = None
 
     def __post_init__(self) -> None:
-        """Normalises the paradigm and float fields, then validates the spec.
+        """Normalises the paradigm, the defaults, and the float fields, then
+        validates the spec.
+
+        The base paper's block and "no re-uploading" are stored as `None`, the
+        circuit every run used before these fields existed, so naming them
+        explicitly keeps the existing IDs.
 
         Raises:
             ValueError: If a field the paradigm needs is `None`, or a field it
                 does not use is set.
         """
         object.__setattr__(self, "paradigm", Paradigm(self.paradigm))
+        if self.block == DEFAULT_BLOCK:
+            object.__setattr__(self, "block", None)
+        if self.reupload is False:
+            object.__setattr__(self, "reupload", None)
         for name in _FLOAT_FIELDS:
             value = getattr(self, name)
             if value is not None:
@@ -234,6 +258,10 @@ def label(spec: RunSpec, include_seed: bool = True) -> str:
     parts = [spec.paradigm.value]
     if spec.ansatz is not None:
         parts.append(spec.ansatz)
+    if spec.block is not None:
+        parts.append(f"block {spec.block}")
+    if spec.reupload:
+        parts.append("reupload")
     if spec.n_qubits is not None:
         parts.append(f"{spec.n_qubits}q x {spec.n_layers}L")
     parts.append(f"lr {spec.lr:g}")

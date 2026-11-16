@@ -164,9 +164,13 @@ uv run scripts/training/train_qiskit_qtl_multiseed.py
 # Qiskit head with another embedding: paper (default), rx, zz_feature_map,
 # zz_feature_map_linear; --seeds N runs only the first N seeds
 uv run scripts/training/train_qiskit_qtl_multiseed.py --ansatz zz_feature_map
+
+# Qiskit head with another variational block (paper, the default, is the only
+# one so far) and data re-uploading (the embedding repeated before every layer)
+uv run scripts/training/train_qiskit_qtl_multiseed.py --block paper --reupload
 ```
 
-Each training script writes a checkpoint and a per-epoch history (with the full run specification) per seed and skips runs that already finished. The PennyLane head implements only the `paper` embedding (`docs/architecture.md`, section 3.2).
+Each training script writes a checkpoint and a per-epoch history (with the full run specification) per seed and skips runs that already finished. The PennyLane head implements only the `paper` embedding and block, without re-uploading (`docs/architecture.md`, section 3.2).
 
 Runs are identified by hashes of their specification: `config_id` for a configuration (all its seeds), `run_id` for one seed, so changing any hyperparameter gives a new configuration that never overwrites an old one. Everything is written under `data/results/<kind>/<paradigm>/<config_id>/` (layout in `docs/architecture.md`, section 2.1.1). To look a hash up:
 

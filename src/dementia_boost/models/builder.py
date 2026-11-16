@@ -11,6 +11,7 @@ import torch.nn as nn
 from qiskit.primitives import BaseEstimatorV2
 
 from dementia_boost.models.quantum_cnn import (
+    DEFAULT_BLOCK,
     DEFAULT_EMBEDDING,
     PennylaneQuantumClassifierHead,
     QiskitQuantumClassifierHead,
@@ -154,6 +155,8 @@ def build_qiskit_qtl_model(
     n_layers: int = QiskitQuantumClassifierHead.DEFAULT_N_LAYERS,
     estimator: BaseEstimatorV2 | None = None,
     embedding: str = DEFAULT_EMBEDDING,
+    block: str = DEFAULT_BLOCK,
+    reupload: bool = False,
 ) -> nn.Module:
     """Builds a Qiskit-based Quantum Transfer Learning (QTL) hybrid model.
 
@@ -174,6 +177,10 @@ def build_qiskit_qtl_model(
             circuit. If None, resolves to a noiseless `StatevectorEstimator`.
         embedding: Registry name of the embedding of the quantum head.
             Defaults to the paper's angle embedding.
+        block: Registry name of the variational block of the quantum head.
+            Defaults to the paper's block.
+        reupload: Whether the quantum head repeats the embedding before every
+            layer. Defaults to False.
 
     Returns:
         The prepared hybrid PyTorch module with frozen backbone and initialized
@@ -200,6 +207,8 @@ def build_qiskit_qtl_model(
         n_layers=n_layers,
         estimator=estimator,
         embedding=embedding,
+        block=block,
+        reupload=reupload,
     )
 
     model.classifier_head.apply(QiskitQuantumClassifierHead.apply_glorot_init)

@@ -4,6 +4,8 @@ This module validates:
 - ``load_baseline_backbone`` weight restoration and parameter freezing.
 - ``build_ctl_model`` and ``build_pl_qtl_model`` structural
   contracts (frozen backbone, freshly initialized head, device placement).
+- ``build_qiskit_qtl_model`` passing the embedding, variational block, and
+  re-uploading choice through to the circuit builder.
 - ``assemble_dementia_classifier`` numerical equivalence against manually
   composed backbone and head forward passes.
 
@@ -20,12 +22,14 @@ Regression coverage
 
 from pathlib import Path
 
+import pytest
 import torch
 
 from dementia_boost.models.builder import (
     assemble_dementia_classifier,
     build_ctl_model,
     build_pl_qtl_model,
+    build_qiskit_qtl_model,
     load_baseline_backbone,
 )
 from dementia_boost.models.classical_cnn import (
@@ -33,7 +37,11 @@ from dementia_boost.models.classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
-from dementia_boost.models.quantum_cnn import PennylaneQuantumClassifierHead
+from dementia_boost.models.quantum_cnn import (
+    PennylaneQuantumClassifierHead,
+    build_qiskit_ansatz,
+    qiskit_heads,
+)
 
 _TEST_QUBITS: int = 2
 _TEST_LAYERS: int = 1
@@ -130,6 +138,41 @@ class TestBuildQuantumTlModel:
 
         for param in model.classifier_head.parameters():
             assert param.requires_grad is True
+
+
+class TestBuildQiskitQtlModel:
+    """Validates that the Qiskit factory builds the configured circuit."""
+
+    def test_embedding_block_and_reupload_reach_the_circuit_builder(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Asserts that the options given to `build_qiskit_qtl_model` are the
+        ones the circuit is built with, so the evaluation, which rebuilds a
+        model from its spec, evaluates the circuit that was trained."""
+        calls: list[dict] = []
+
+        def recording_builder(**kwargs):
+            calls.append(kwargs)
+            return build_qiskit_ansatz(**kwargs)
+
+        monkeypatch.setattr(qiskit_heads, "build_qiskit_ansatz", recording_builder)
+
+        build_qiskit_qtl_model(
+            _write_mock_baseline_checkpoint(tmp_path),
+            torch.device("cpu"),
+            n_qubits=_TEST_QUBITS,
+            n_layers=_TEST_LAYERS,
+            embedding="rx",
+            block="paper",
+            reupload=True,
+        )
+
+        assert len(calls) == 1
+        assert calls[0]["embedding"] == "rx"
+        assert calls[0]["block"] == "paper"
+        assert calls[0]["reupload"] is True
 
 
 class TestAssembleDementiaClassifier:
