@@ -144,6 +144,26 @@ class TestOasisDataLoaderBatching:
         imgs, _ = next(iter(loader))
         assert imgs.shape[0] == 4
 
+    def test_subject_ids_follow_the_order_the_loader_reads(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_layout
+    ) -> None:
+        """The subject of each slice is listed in the order the evaluation
+        loader yields the slices: same length, and each slice's label is its
+        subject's label (subject number modulo 2 in the fixture)."""
+        make_layout(tmp_path)
+        monkeypatch.setattr(OasisDataLoader, "RESULTS_PATH", str(tmp_path))
+        loader_manager = OasisDataLoader(batch_size=3)
+
+        labels = [
+            int(label)
+            for _, batch in loader_manager.get_data_loader("test")
+            for label in batch
+        ]
+        subjects = loader_manager.get_subject_ids("test")
+
+        assert len(subjects) == len(labels)
+        assert [int(subject[-4:]) % 2 for subject in subjects] == labels
+
     def test_missing_train_directory_raises_file_not_found(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

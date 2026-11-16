@@ -3,7 +3,8 @@
 Every checkpoint is evaluated once per cohort. Validation metrics feed model
 selection; test metrics are only reported. The two are written to separate files
 per configuration, each carrying the configuration it was computed for, so a
-consumer can never confuse cohorts or mix configurations.
+consumer can never confuse cohorts or mix configurations, and, when given, the
+subject of each slice, so metrics can also be computed per patient.
 """
 
 import os
@@ -79,6 +80,7 @@ def save_configuration_results(
     layout: ResultsLayout,
     spec: RunSpec,
     results_by_cohort: Mapping[str, list[EvaluationResult]],
+    subjects: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, str]:
     """Aggregates and saves one configuration's results, a file per cohort.
 
@@ -87,13 +89,27 @@ def save_configuration_results(
         spec: The spec of any run of the configuration.
         results_by_cohort: Output of `evaluate_checkpoints` for that
             configuration's runs.
+        subjects: Optional mapping of cohort name to the subject of each of its
+            slices, in the order of the labels, stored with the results.
 
     Returns:
         Mapping of cohort name to the path written.
+
+    Raises:
+        ValueError: If a cohort's subject list does not have one entry per
+            evaluated slice.
     """
     configuration = config_payload(spec)
     paths: dict[str, str] = {}
     for cohort, results in results_by_cohort.items():
+        cohort_subjects = subjects[cohort] if subjects is not None else None
+        if cohort_subjects is not None and any(
+            len(result.y_true) != len(cohort_subjects) for result in results
+        ):
+            raise ValueError(
+                f"{len(cohort_subjects)} subjects given for the {cohort} cohort, "
+                "which does not match its number of evaluated slices."
+            )
         path = layout.metrics_path(spec.paradigm, configuration["config_id"], cohort)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         MetricsAnalyzer.save_to_json(
@@ -102,6 +118,7 @@ def save_configuration_results(
             path,
             cohort=cohort,
             configuration=configuration,
+            subject_ids=cohort_subjects,
         )
         paths[cohort] = path
     return paths
@@ -115,6 +132,7 @@ def evaluate_paradigm(
     device: torch.device,
     logger: Logger,
     configuration: str | None = None,
+    subjects: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, dict[str, list[EvaluationResult]]]:
     """Evaluates every finished run of a paradigm, configuration by configuration.
 
@@ -131,6 +149,8 @@ def evaluate_paradigm(
         device: Device to run inference on.
         logger: Logger for progress and summaries.
         configuration: Restrict to one `config_id`. Defaults to all.
+        subjects: Optional mapping of cohort name to the subject of each slice
+            its loader yields, stored in every results file.
 
     Returns:
         Mapping of `config_id` to the per-cohort results written for it.
@@ -154,7 +174,7 @@ def evaluate_paradigm(
         evaluator = ModelEvaluator(model=build_model(finished[0]), device=device)
         checkpoints = [(run_id(s), layout.checkpoint_path(s)) for s in finished]
         results = evaluate_checkpoints(evaluator, checkpoints, loaders)
-        paths = save_configuration_results(layout, finished[0], results)
+        paths = save_configuration_results(layout, finished[0], results, subjects)
 
         logger.info(f"Results saved to {paths}")
         log_cohort_summaries(logger, results)

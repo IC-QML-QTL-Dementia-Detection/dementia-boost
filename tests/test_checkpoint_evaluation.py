@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 import torch.nn as nn
 from conftest import build_spec
@@ -119,6 +120,43 @@ def test_results_are_saved_per_cohort_with_the_configuration(
         assert payload["configuration"] == config_payload(spec)
         assert len(payload["individual_runs"]) == 3
         assert set(payload["aggregated_statistics"]) >= {"auc", "accuracy"}
+
+
+def test_results_carry_the_subject_of_each_slice(tmp_path: Path) -> None:
+    """Given the subjects in slice order, each cohort's file stores them once,
+    so metrics can be computed per patient; without them the field is null."""
+    layout = ResultsLayout(str(tmp_path / "results"))
+    spec = build_spec("baseline", seed=1)
+    evaluator = ModelEvaluator(_model(), torch.device("cpu"))
+    loaders = {"val": _loader(1), "test": _loader(2)}
+    results = evaluate_checkpoints(evaluator, _checkpoints(tmp_path, n=1), loaders)
+    subjects = {
+        cohort: [f"OAS2_{i // 2:04d}" for i in range(len(results[cohort][0].y_true))]
+        for cohort in loaders
+    }
+
+    with_subjects = save_configuration_results(layout, spec, results, subjects)
+    payload = json.loads(Path(with_subjects["test"]).read_text())
+    assert payload["subject_ids"] == subjects["test"]
+
+    without = save_configuration_results(layout, spec, results)
+    assert json.loads(Path(without["val"]).read_text())["subject_ids"] is None
+
+
+def test_subjects_that_do_not_match_the_slices_are_refused(tmp_path: Path) -> None:
+    """A subject list of another length than the labels belongs to other data."""
+    layout = ResultsLayout(str(tmp_path / "results"))
+    evaluator = ModelEvaluator(_model(), torch.device("cpu"))
+    loaders = {"val": _loader(1), "test": _loader(2)}
+    results = evaluate_checkpoints(evaluator, _checkpoints(tmp_path, n=1), loaders)
+
+    with pytest.raises(ValueError, match="slices"):
+        save_configuration_results(
+            layout,
+            build_spec("baseline", seed=1),
+            results,
+            {"val": ["OAS2_0001"], "test": ["OAS2_0001"]},
+        )
 
 
 class TestEvaluateParadigm:

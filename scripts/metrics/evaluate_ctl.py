@@ -66,7 +66,13 @@ def main() -> None:
     }
 
     outcome = evaluate_paradigm(
-        ResultsLayout(), Paradigm.CTL, build_model, loaders, device, logger
+        ResultsLayout(),
+        Paradigm.CTL,
+        build_model,
+        loaders,
+        device,
+        logger,
+        subjects={cohort: loader_manager.get_subject_ids(cohort) for cohort in loaders},
     )
     if not outcome:
         logger.error("No finished CTL runs found. Run train_ctl_multiseed.py first.")

@@ -94,7 +94,13 @@ def main() -> None:
     }
 
     outcome = evaluate_paradigm(
-        ResultsLayout(), Paradigm.PL_QTL, build_model, loaders, device, logger
+        ResultsLayout(),
+        Paradigm.PL_QTL,
+        build_model,
+        loaders,
+        device,
+        logger,
+        subjects={cohort: loader_manager.get_subject_ids(cohort) for cohort in loaders},
     )
     if not outcome:
         logger.error(
