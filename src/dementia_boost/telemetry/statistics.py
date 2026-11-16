@@ -14,6 +14,10 @@ from the same files as the report and regenerated with every evaluation.
   `seeds_of_runs`; `share_initial_weights` says whether one seed gave both
   configurations the same initial weights, which is what makes the pairing
   informative.
+- `bootstrap_patients`: metrics per patient (the mean probability of each
+  patient's slices) and a class-stratified bootstrap over the patients, for one
+  configuration or the paired difference of two. Unlike the seed spread, it
+  measures how the numbers would move with other patients of the same kind.
 """
 
 import math
@@ -21,12 +25,14 @@ from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 import numpy as np
-from scipy.stats import norm, wilcoxon
+from scipy.stats import norm, rankdata, wilcoxon
 
 from dementia_boost.core.identity import RunSpec, run_id
 
 SEED_SEARCH_LIMIT: int = 10_000
 CONFIDENCE: float = 0.95
+DEFAULT_RESAMPLES: int = 2_000
+THRESHOLD: float = 0.5
 
 # The stored accuracy of an all-majority run and `majority_class_accuracy` are
 # the same ratio computed two ways; they may differ in the last bit.
@@ -280,6 +286,221 @@ def compare_paired(
         ),
         "metrics": compared,
     }
+
+
+def patient_probabilities(
+    payload: Mapping[str, Any],
+) -> tuple[list[str], np.ndarray, np.ndarray]:
+    """Turns the slice predictions of every run into one prediction per patient.
+
+    A patient's probability is the mean of the probabilities of its slices; its
+    label is the label of its slices, which is constant per subject.
+
+    Args:
+        payload: A results payload with `subject_ids` and `individual_runs`.
+
+    Returns:
+        The patients (sorted Subject IDs), their labels of shape `(n_patients,)`,
+        and the probabilities of shape `(n_runs, n_patients)`.
+
+    Raises:
+        ValueError: If the payload has no subject IDs (it was evaluated before
+            they were recorded), the runs were scored on different labels, or a
+            patient's slices carry two labels.
+    """
+    subjects = payload.get("subject_ids")
+    if subjects is None:
+        raise ValueError(
+            "These results have no subject IDs; re-run the evaluation script so "
+            "they are recorded."
+        )
+    runs = payload["individual_runs"]
+    labels = np.asarray(runs[0]["y_true"])
+    if any(not np.array_equal(run["y_true"], labels) for run in runs):
+        raise ValueError("The runs were scored on different labels.")
+
+    patients = sorted(set(subjects))
+    column = np.array([patients.index(subject) for subject in subjects])
+    membership = np.eye(len(patients))[column]
+    patient_labels = np.empty(len(patients), dtype=int)
+    for index, patient in enumerate(patients):
+        found = set(labels[column == index].tolist())
+        if len(found) != 1:
+            raise ValueError(f"Patient {patient} has slices with labels {found}.")
+        patient_labels[index] = found.pop()
+
+    probabilities = np.array([run["y_prob"] for run in runs], dtype=float)
+    means = probabilities @ membership / membership.sum(axis=0)
+    return patients, patient_labels, means
+
+
+def stratified_resamples(labels: np.ndarray, n_resamples: int, seed: int) -> np.ndarray:
+    """Draws patients with replacement, separately within each class.
+
+    Every resample keeps the class counts of the cohort, so both classes are
+    always present and AUC-ROC is always defined.
+
+    Args:
+        labels: Patient labels of shape `(n_patients,)`.
+        n_resamples: Number of resamples.
+        seed: Seed of the generator.
+
+    Returns:
+        Patient indices of shape `(n_resamples, n_patients)`: the negative
+        patients first, then the positive ones.
+
+    Raises:
+        ValueError: If a class has no patient.
+    """
+    negative = np.flatnonzero(labels == 0)
+    positive = np.flatnonzero(labels == 1)
+    if len(negative) == 0 or len(positive) == 0:
+        raise ValueError("Both classes need at least one patient to resample.")
+    generator = np.random.default_rng(seed)
+    return np.concatenate(
+        [
+            generator.choice(negative, (n_resamples, len(negative))),
+            generator.choice(positive, (n_resamples, len(positive))),
+        ],
+        axis=1,
+    )
+
+
+def _metrics_of_runs(
+    labels: np.ndarray, probabilities: np.ndarray, metrics: Sequence[str]
+) -> dict[str, np.ndarray]:
+    """Computes classification metrics for many runs at once.
+
+    The same definitions as `MetricsAnalyzer.calculate_metrics`: positive when
+    the probability is at least `THRESHOLD`, a ratio with a zero denominator is
+    0, and AUC-ROC is the Mann-Whitney statistic with average ranks for ties.
+
+    Args:
+        labels: Labels of shape `(n,)`, both classes present.
+        probabilities: Probabilities of shape `(n_runs, n)`.
+        metrics: Names among accuracy, precision, recall, f1_score, and auc.
+
+    Returns:
+        Mapping of metric name to its value per run, shape `(n_runs,)`.
+    """
+    positive = labels == 1
+    predicted = probabilities >= THRESHOLD
+    true_positive = (predicted & positive).sum(axis=1)
+    false_positive = (predicted & ~positive).sum(axis=1)
+    false_negative = (~predicted & positive).sum(axis=1)
+    true_negative = (~predicted & ~positive).sum(axis=1)
+
+    def ratio(numerator: np.ndarray, denominator: np.ndarray) -> np.ndarray:
+        """Divides, giving 0 where the denominator is 0."""
+        return np.divide(
+            numerator,
+            denominator,
+            out=np.zeros(len(numerator)),
+            where=denominator > 0,
+        )
+
+    n_positive = int(positive.sum())
+    n_negative = len(labels) - n_positive
+    ranks = rankdata(probabilities, axis=1)
+    values = {
+        "accuracy": (true_positive + true_negative) / len(labels),
+        "precision": ratio(true_positive, true_positive + false_positive),
+        "recall": ratio(true_positive, true_positive + false_negative),
+        "f1_score": ratio(
+            2 * true_positive, 2 * true_positive + false_positive + false_negative
+        ),
+        "auc": (ranks[:, positive].sum(axis=1) - n_positive * (n_positive + 1) / 2)
+        / (n_positive * n_negative),
+    }
+    return {metric: values[metric] for metric in metrics}
+
+
+def _interval(values: np.ndarray) -> tuple[float, float]:
+    """Returns the central `CONFIDENCE` percentile interval of the values."""
+    tail = (1.0 - CONFIDENCE) / 2.0 * 100.0
+    low, high = np.percentile(values, [tail, 100.0 - tail])
+    return float(low), float(high)
+
+
+def bootstrap_patients(
+    payload: Mapping[str, Any],
+    metrics: Sequence[str],
+    n_resamples: int = DEFAULT_RESAMPLES,
+    seed: int = 0,
+    other: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Measures patient-level metrics and their spread over patients.
+
+    For every run the slice probabilities are averaged per patient, the metric
+    is computed over the patients, and the runs are averaged: the seed-mean
+    patient-level metric. The patients are then resampled with replacement
+    within each class, and the same seed-mean is computed on every resample.
+    With `other`, both configurations are scored on the same resamples, which
+    gives an interval for their difference.
+
+    Args:
+        payload: Results payload of the configuration, with `subject_ids`.
+        metrics: Names of the metrics to compute.
+        n_resamples: Number of bootstrap resamples.
+        seed: Seed of the resampling, so intervals are reproducible.
+        other: Optional results payload of a second configuration, scored on
+            the same patients.
+
+    Returns:
+        `patients` and `resamples` (the counts), `first` (per metric, `value`
+        on all patients and the `CONFIDENCE` `interval` over resamples) and,
+        with `other`, `second` and `difference` (`first - second`) in the same
+        form.
+
+    Raises:
+        ValueError: If a payload has no subject IDs, or the two payloads were
+            scored on different patients or labels.
+    """
+    patients, labels, probabilities = patient_probabilities(payload)
+    resamples = stratified_resamples(labels, n_resamples, seed)
+    sides = {"first": probabilities}
+    if other is not None:
+        other_patients, other_labels, other_probabilities = patient_probabilities(other)
+        if other_patients != patients or not np.array_equal(other_labels, labels):
+            raise ValueError(
+                "The two configurations were scored on different patients."
+            )
+        sides["second"] = other_probabilities
+
+    summary: dict[str, Any] = {"patients": len(patients), "resamples": n_resamples}
+    distributions: dict[str, dict[str, np.ndarray]] = {}
+    for side, side_probabilities in sides.items():
+        point = _metrics_of_runs(labels, side_probabilities, metrics)
+        distributions[side] = {
+            metric: np.array(
+                [
+                    _metrics_of_runs(
+                        labels[row], side_probabilities[:, row], (metric,)
+                    )[metric].mean()
+                    for row in resamples
+                ]
+            )
+            for metric in metrics
+        }
+        summary[side] = {
+            metric: {
+                "value": float(point[metric].mean()),
+                "interval": _interval(distributions[side][metric]),
+            }
+            for metric in metrics
+        }
+    if other is not None:
+        summary["difference"] = {
+            metric: {
+                "value": summary["first"][metric]["value"]
+                - summary["second"][metric]["value"],
+                "interval": _interval(
+                    distributions["first"][metric] - distributions["second"][metric]
+                ),
+            }
+            for metric in metrics
+        }
+    return summary
 
 
 def _runs_by_seed(payload: Mapping[str, Any]) -> dict[int, Mapping[str, Any]]:

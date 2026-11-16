@@ -199,8 +199,10 @@ uv run scripts/metrics/generate_improvement_report.py
 uv run scripts/metrics/generate_improvement_report.py --config qiskit_qtl=<config_id> --output <file>
 
 # Two configurations seed by seed: wins, Hodges-Lehmann estimate with interval,
-# Wilcoxon p-values (raw and Holm-adjusted), on test and validation
+# Wilcoxon p-values (raw and Holm-adjusted), on test and validation;
+# --patients adds per-patient metrics with a bootstrap interval over the patients
 uv run scripts/metrics/compare_configurations.py <config_id> <other_config_id>
+uv run scripts/metrics/compare_configurations.py <config_id> <other_config_id> --patients
 
 # Per configuration: metric distributions, ROC curves, confusion matrix
 uv run scripts/viz/visualize_baselines.py
