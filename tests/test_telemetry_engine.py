@@ -40,6 +40,7 @@ from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.metrics import (
     EpochRecord,
     EvaluationResult,
+    GroupRecord,
     MetricsAnalyzer,
     TrainingHistory,
 )
@@ -241,8 +242,8 @@ class TestTrainingHistorySerialization:
 
     def test_history_round_trip_is_lossless(self, tmp_path: Path) -> None:
         """Saves a history mixing evaluated and skipped epochs, reloads it, and
-        asserts equality, so ``None`` validation values, the spec, and the
-        extras survive the trip."""
+        asserts equality, so ``None`` validation values, the per-group
+        records, the spec, and the extras survive the trip."""
         history = self._history()
         filepath = tmp_path / "history.json"
 
@@ -258,7 +259,19 @@ class TestTrainingHistorySerialization:
             ),
             extras={"estimator": "EstimatorV2"},
             epochs=[
-                EpochRecord(1, 0.69, 0.51, 0.70, 0.50, 1e-4, 1.5),
+                EpochRecord(
+                    1,
+                    0.69,
+                    0.51,
+                    0.70,
+                    0.50,
+                    1e-4,
+                    1.5,
+                    groups={
+                        "pre_net": GroupRecord(1e-4, 2e-4, 5e-4, 0.3),
+                        "circuit": GroupRecord(1e-2, 0.01, 0.02, 0.8),
+                    },
+                ),
                 EpochRecord(2, 0.65, 0.58, None, None, 1e-4, 1.4),
             ],
         )

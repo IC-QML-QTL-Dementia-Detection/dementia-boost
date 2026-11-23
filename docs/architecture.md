@@ -28,6 +28,7 @@ flowchart TD
     end
 
     subgraph Training ["Training & Inference Layer"]
+        OPT["build_optimizer / ParameterGroupMonitor<br/>(Named Adam Groups, Circuit Learning Rate, Per-Group Displacement & Gradient Norm)"]
         TR["BaselineTrainer<br/>(Epoch Loops, Loss, Validation, Checkpointing, History Recording)"]
         EV["ModelEvaluator<br/>(Inference, Probabilities, Ground Truths)"]
         CEV["checkpoint_evaluation<br/>(Each Checkpoint on Validation and Test Cohorts)"]
@@ -295,7 +296,7 @@ flowchart LR
 - **`qiskit_runner.py`**: `QiskitExpectationRunner` owns only "circuit, observables, parameter batch in, expectation values out". Each call is one broadcast PUB with parameters shaped `(N, 1, P)` and observables shaped `(1, n_qubits)`, so every state is evolved once and all expectation values are read from it. `resolve_qiskit_estimator` returns an injected estimator or, by default, Aer's `EstimatorV2` on the state-vector method with no noise model attached. `StatevectorEstimator` is the slower reference implementation and is injected explicitly where a reference is wanted, such as unit tests. Controlled rotations (`cry`, `crz`, `cp`) are decomposed once at construction, because qiskit-aer 0.17.2 evaluates them wrongly when their angle is bound at run time.
 - **`qiskit_layer.py`**: `QiskitQuantumLayer` holds the flat weight vector, in the order of the block's weight vectors (`[theta, gamma, beta]` for `paper`), and a custom `torch.autograd.Function`. The backward pass is a loss-level SPSA estimate: one Rademacher direction per sample is shared by all outputs by folding the upstream gradient into the finite difference, which costs one PUB of `2 * Batch` states. The directions come from a generator seeded with the run seed, so a seed reproduces its gradient noise. Exact parameter-shift is avoided because it needs 204 shifted circuits per sample at the default 6-qubit, 4-layer depth.
 - **`qiskit_heads.py` & `builder.py`**: Accept an optional `estimator` (and, on the head, `spsa_epsilon` and `seed`), so the backend is configuration rather than code.
-- **`train_qiskit_qtl_multiseed.py`**: Records the gradient method and SPSA step in each run's spec (they change the maths, so they are part of the configuration ID) and the estimator class as a non-hashed extra in the history.
+- **`train_qiskit_qtl_multiseed.py`**: Takes `--quantum_lr` for the circuit weights (section 4.1). Records the gradient method and SPSA step in each run's spec (they change the maths, so they are part of the configuration ID) and the estimator class as a non-hashed extra in the history.
 
 ### 3.4 Trainability Diagnostic (`src/dementia_boost/analysis/`)
 
@@ -351,6 +352,29 @@ sequenceDiagram
 
     Note over Eval: Step 5: Evaluate CTL and QTL checkpoints on val and test, then report
 ```
+
+### 4.1 Optimizer, Learning Rates, and Per-Group Instrumentation
+
+Every paradigm trains with Adam and one `StepLR`, both built from the run specification by `training/optimization.py` (`build_optimizer`, `build_scheduler`). The optimizer has named parameter groups: the quantum head names three (`parameter_groups` on `QiskitQuantumClassifierHead`), any other model is one group, `model`.
+
+| Group | Parameters (6 qubits, 4 layers) | Learning rate |
+| :-- | :-- | :-- |
+| `pre_net` | `Linear(2304 -> 6)`, 13,830 | `lr` |
+| `circuit` | the flat circuit weight, 72, initialised in $[-\pi, \pi]$ | `quantum_lr`, or `lr` when unset |
+| `post_net` | `Linear(6 -> 1)`, 7 | `lr` |
+| `model` (baseline, CTL) | every trainable parameter | `lr` |
+
+Adam moves each weight by about the learning rate per step at most, whatever the scale of its gradient, and less when the gradient is noisy (the circuit's SPSA estimate). At the default `lr = 1e-4`, 11 steps per epoch, and `StepLR` with $\gamma = 0.75$ every 10 epochs, a weight can therefore move by at most about $11 \cdot 10 \cdot 10^{-4} \sum_{k \ge 0} 0.75^k \approx 0.044$ rad over 100 epochs, small next to the $[-\pi, \pi]$ range of the initial circuit weights. A separate `quantum_lr` is the way to let the circuit move further while the classical layers keep the paper's rate. The one `StepLR` decays every group by the same factor, each from its own base rate. Adam keeps its state per parameter, so with `quantum_lr` unset the three groups train exactly as one group did, and existing configuration IDs keep their meaning; an explicit `quantum_lr` is part of the configuration ID even when it equals `lr`.
+
+The trainer checks every group's rate against the specification (`quantum_lr` for `circuit`, `lr` for the others) and refuses a specification with a `quantum_lr` but no circuit group, so an ID never names a rate that did not run.
+
+Every epoch of a history records, per group (`EpochRecord.groups`, a `GroupRecord` each):
+
+- `lr`: the group's learning rate during the epoch;
+- `displacement_rms` and `displacement_max`: the root mean square and the largest absolute value of the change of the group's weights since the start of training, at the end of the epoch (radians for the circuit);
+- `grad_norm_mean`: the L2 norm of the group's gradient as the optimizer received it, averaged over the epoch's steps (for the circuit, the SPSA estimate).
+
+`ParameterGroupMonitor` (`training/instrumentation.py`) copies the weights when training starts and reads the gradients after every backward pass. The cost is one copy of the trainable weights and one norm per group and step. The measurements show whether the circuit weights leave their initialisation at a given rate, and for a classical head, a group whose gradient stays at zero is a layer that no longer learns (for example a ReLU layer whose units are all off).
 
 ---
 
@@ -411,7 +435,7 @@ Evaluation, selection, and reporting follow one protocol: choices are made on va
 - **Report.** `build_comparative_report` (`scripts/metrics/generate_improvement_report.py`) takes one configuration per paradigm (the only one with results, or one named with `--config`) and refuses paradigms trained on different splits. It leads with the mean and standard deviation across seeds on test and the test metrics of the run selected on validation, then gives the same statistics on validation, and the percentage changes between the means of each cohort (`comparisons.test`, `comparisons.validation`). `chance_reference` gives, per cohort, the accuracy of always answering the majority class and, per paradigm, the runs that predict a single class (only negative, only positive), have recall 0, or score at or below the majority-class accuracy, read from each run's confusion matrix (`telemetry/statistics.py`). It also counts the runs whose output is the same for every slice (`constant_output`, probabilities spread by at most 1e-6), which tells a head that stopped responding to its input apart from one whose outputs vary but all fall on one side of the threshold. The measured results are in the README.
 - **Paired comparison.** `compare_paired` (`scripts/metrics/compare_configurations.py`) compares two configurations of one split seed by seed. A run's seed is recovered by hashing the stored spec with candidate seeds until its `run_id` matches. Per metric it gives wins, losses, and ties of `first - second`, the median difference, the Hodges-Lehmann estimate (the median of the Walsh averages) with a 95% interval, and the Wilcoxon signed-rank p-value, raw and Holm-adjusted over the metrics. It also says whether one seed gave both configurations the same initial weights, which holds for heads of the same shape (same paradigm, qubits, layers, and block, or same classical head and width; the embedding has no weights). The test measures seed noise only: every run is scored on the same patients.
 - **Patient-level comparison.** `bootstrap_patients` (the same script with `--patients`) averages each run's slice probabilities per patient (using the stored `subject_ids`), computes the seed-mean metric over the patients, and resamples the patients with replacement within each class (2,000 resamples, seeded), giving a 95% percentile interval for each configuration and, on the same resamples, for their difference. This adds the noise of which patients were drawn, which the seed spread cannot see. Results files without subject IDs are refused; re-running the evaluation records them.
-- **Histories.** `BaselineTrainer` only sees the train and validation loaders, so the per-epoch `val_loss` and `val_acc` are validation values. It records a `TrainingHistory` and writes it to JSON (every `history_save_every` epochs, default 10, and on exit, atomically), and never plots. The plotting steps live in `dementia_boost.viz` (`run_plots`, `MetricsVisualizer`); the scripts under `scripts/viz` are thin callers. The per-configuration figures name the configuration by its presentation name (`viz/display_names.py`) and, for the evaluation figures, the cohort drawn.
+- **Histories.** `BaselineTrainer` only sees the train and validation loaders, so the per-epoch `val_loss` and `val_acc` are validation values; `lr` is the rate of the first optimizer group, and `groups` holds the per-group rate, displacement, and gradient norm (section 4.1). It records a `TrainingHistory` and writes it to JSON (every `history_save_every` epochs, default 10, and on exit, atomically), and never plots. The plotting steps live in `dementia_boost.viz` (`run_plots`, `MetricsVisualizer`); the scripts under `scripts/viz` are thin callers. The per-configuration figures name the configuration by its presentation name (`viz/display_names.py`) and, for the evaluation figures, the cohort drawn.
 
 ---
 
@@ -429,7 +453,7 @@ dementia-boost/
 │   ├── models/                            # Backbone, classical and quantum heads, builder (3)
 │   │   ├── classical_cnn/                 # LeNet backbone, classical head registry, DementiaClassifier
 │   │   └── quantum_cnn/                   # Qiskit embeddings, blocks, circuit, layer, head, runner (3.2, 3.3)
-│   ├── training/                          # Trainer, evaluator, evaluation of every checkpoint (4, 5)
+│   ├── training/                          # Trainer, optimizer and instrumentation, evaluator, evaluation of every checkpoint (4, 5)
 │   ├── telemetry/                         # Metrics, histories, run listing, selection, report, logger (5)
 │   ├── viz/                               # All plotting code; the viz scripts only call it (5)
 │   └── analysis/                          # Diagnostics that train nothing: circuit trainability (3.4)

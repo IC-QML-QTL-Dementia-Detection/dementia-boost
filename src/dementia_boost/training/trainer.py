@@ -34,6 +34,12 @@ from dementia_boost.telemetry.metrics import (
     MetricsAnalyzer,
     TrainingHistory,
 )
+from dementia_boost.training.instrumentation import ParameterGroupMonitor
+from dementia_boost.training.optimization import (
+    CIRCUIT_GROUP,
+    group_learning_rate,
+    group_names,
+)
 
 
 class BaselineTrainer:
@@ -163,7 +169,10 @@ class BaselineTrainer:
 
         Returns:
             The completed TrainingHistory. Each epoch's `duration_s` covers the
-            optimization pass only, excluding the optional evaluation.
+            optimization pass only, excluding the optional evaluation, and its
+            `groups` hold, per optimizer group, the learning rate, the
+            displacement of the weights from where they were when `train`
+            started, and the mean gradient norm over the epoch's steps.
 
         Raises:
             ConfigCollisionError: If a different spec already owns this
@@ -178,13 +187,15 @@ class BaselineTrainer:
         history = TrainingHistory(spec=self.spec, epochs=[], extras=self.extras)
         saved_epochs = 0
         last_evaluation: tuple[float, float] | None = None
+        monitor = ParameterGroupMonitor(self.optimizer)
 
         try:
             for epoch in range(1, epochs + 1):
                 epoch_start = time.perf_counter()
-                epoch_loss, epoch_acc = self._train_one_epoch()
+                epoch_loss, epoch_acc = self._train_one_epoch(monitor)
 
-                epoch_lr = float(self.scheduler.get_last_lr()[0])
+                group_lrs = [float(lr) for lr in self.scheduler.get_last_lr()]
+                groups = monitor.summarize(group_lrs)
                 self.scheduler.step()
                 epoch_duration = time.perf_counter() - epoch_start
 
@@ -205,8 +216,9 @@ class BaselineTrainer:
                         train_acc=epoch_acc,
                         val_loss=val_loss,
                         val_acc=val_acc,
-                        lr=epoch_lr,
+                        lr=group_lrs[0],
                         duration_s=epoch_duration,
+                        groups=groups,
                     )
                 )
 
@@ -227,8 +239,11 @@ class BaselineTrainer:
 
         return history
 
-    def _train_one_epoch(self) -> tuple[float, float]:
+    def _train_one_epoch(self, monitor: ParameterGroupMonitor) -> tuple[float, float]:
         """Runs one optimization pass over the training loader.
+
+        Args:
+            monitor: Records every step's gradient norm per optimizer group.
 
         Returns:
             A `(loss, accuracy)` tuple averaged over all training samples.
@@ -248,6 +263,7 @@ class BaselineTrainer:
             loss = self.criterion(outputs, labels)
 
             loss.backward()
+            monitor.record_gradients()
             self.optimizer.step()
 
             running_loss += loss.item() * images.size(0)
@@ -262,16 +278,29 @@ class BaselineTrainer:
         """Checks that the spec describes the optimizer, loader, and scheduler.
 
         The IDs are hashes of the spec, so a spec that says one thing while the
-        run does another would name a configuration that never ran.
+        run does another would name a configuration that never ran. Every
+        optimizer group is checked: the circuit group against `quantum_lr` (or
+        `lr` when it is unset), every other group against `lr`; a `quantum_lr`
+        with no circuit group to apply it to is refused too.
 
         Raises:
             ValueError: Naming every field of the spec that disagrees.
         """
         mismatches: list[str] = []
 
-        actual_lr = float(self.scheduler.get_last_lr()[0])
-        if not math.isclose(self.spec.lr, actual_lr):
-            mismatches.append(f"lr: spec {self.spec.lr}, optimizer {actual_lr}")
+        names = group_names(self.optimizer)
+        for name, actual_lr in zip(names, self.scheduler.get_last_lr(), strict=True):
+            field = "quantum_lr" if name == CIRCUIT_GROUP else "lr"
+            expected_lr = group_learning_rate(name, self.spec)
+            if not math.isclose(expected_lr, float(actual_lr)):
+                mismatches.append(
+                    f"{field}: spec {expected_lr}, optimizer group {name} {actual_lr}"
+                )
+        if self.spec.quantum_lr is not None and CIRCUIT_GROUP not in names:
+            mismatches.append(
+                f"quantum_lr: spec {self.spec.quantum_lr}, but the optimizer has "
+                f"no {CIRCUIT_GROUP} group"
+            )
         if self.spec.batch_size != self.train_loader.batch_size:
             mismatches.append(
                 f"batch_size: spec {self.spec.batch_size}, "
