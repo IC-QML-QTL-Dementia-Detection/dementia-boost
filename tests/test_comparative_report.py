@@ -32,8 +32,9 @@ def _payload(
     Args:
         cohort: Cohort marker of the payload.
         runs: Mapping of run ID to its metrics; missing metrics default to 0.5,
-            `log_loss` to 0.7, the labels to `_LABELS`, and the confusion
-            matrix to a run that predicts both classes.
+            `log_loss` to 0.7, the labels to `_LABELS`, the probabilities to
+            values that vary, and the confusion matrix to a run that predicts
+            both classes.
         split_id: Split the configuration was trained on.
         config: Configuration ID the results belong to.
 
@@ -46,6 +47,7 @@ def _payload(
             "run_id": run_id,
             "log_loss": 0.7,
             "y_true": _LABELS,
+            "y_prob": [0.2, 0.6, 0.3, 0.4, 0.7],
             "confusion_matrix": [[2, 1], [1, 1]],
             **{name: 0.5 for name in _METRICS},
             **metrics,
@@ -124,17 +126,21 @@ class TestChanceReference:
 
     def test_counts_and_majority_class_per_cohort_test_first(self) -> None:
         """Each cohort reports the majority-class accuracy of its labels and,
-        per paradigm, the runs that predict a single class; test comes first."""
+        per paradigm, the runs that predict a single class and those whose
+        output is constant; test comes first."""
         all_negative = {"confusion_matrix": [[3, 0], [2, 0]], "accuracy": 0.6}
+        constant = {**all_negative, "y_prob": [0.3] * len(_LABELS)}
         val = {"a": {}, "b": all_negative}
-        test = {"a": all_negative, "b": all_negative}
+        test = {"a": all_negative, "b": constant}
 
         reference = _report(ctl=_paradigm(val, test))["chance_reference"]
 
         assert list(reference) == ["test", "validation"]
         assert reference["test"]["majority_class_accuracy"] == pytest.approx(0.6)
         assert reference["test"]["collapsed_runs"]["ctl"]["only_negative"] == 2
+        assert reference["test"]["collapsed_runs"]["ctl"]["constant_output"] == 1
         assert reference["validation"]["collapsed_runs"]["ctl"]["only_negative"] == 1
+        assert reference["validation"]["collapsed_runs"]["ctl"]["constant_output"] == 0
 
     def test_paradigms_scored_on_different_labels_are_refused(self) -> None:
         """All paradigms of one cohort must be scored on the same slices."""
