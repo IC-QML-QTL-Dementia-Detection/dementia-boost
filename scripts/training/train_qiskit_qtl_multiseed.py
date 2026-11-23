@@ -19,11 +19,13 @@ to keep the full 101-seed, 100-epoch sweep computationally tractable.
 `--ansatz` picks the embedding in front of the variational block (`paper`, the
 default, `zz_feature_map`, `rx`, or `zz_feature_map_linear`), `--block` picks
 the variational block (`paper`, the base paper's block, by default),
-`--reupload` repeats the embedding before every layer, and `--seeds N` runs
-only the first N seeds for a quick check.
+`--reupload` repeats the embedding before every layer, `--quantum_lr X` trains
+the circuit weights at their own learning rate (the classical layers keep the
+default rate), and `--seeds N` runs only the first N seeds for a quick check.
 
 Each run is described by a `RunSpec` (qubits, layers, embedding, block,
-re-uploading, gradient method, SPSA step, and the selected baseline as
+re-uploading, circuit learning rate, gradient method, SPSA step, and the
+selected baseline as
 `backbone_id`); checkpoints, per-epoch
 histories, and configuration are written where `ResultsLayout` puts them, and a
 run whose checkpoint exists is skipped. Loss plots are rendered from the
@@ -37,8 +39,6 @@ import sys
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR
 
 from dementia_boost.core.identity import Paradigm, RunSpec, label, run_id
 from dementia_boost.core.layout import ResultsLayout
@@ -61,6 +61,7 @@ from dementia_boost.models.quantum_cnn import (
 from dementia_boost.models.quantum_cnn.qiskit_layer import DEFAULT_SPSA_EPSILON
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.selection import select_backbone
+from dementia_boost.training.optimization import build_optimizer, build_scheduler
 from dementia_boost.training.trainer import BaselineTrainer
 
 DEFAULT_EXPERIMENT_SEEDS: range = range(0, 101)
@@ -111,8 +112,9 @@ def parse_arguments() -> argparse.Namespace:
 
     Returns:
         The namespace with `ansatz` (the embedding name), `block` (the
-        variational block name), `reupload`, and `seeds` (how many of the
-        default seeds to run, or None for all).
+        variational block name), `reupload`, `quantum_lr` (the circuit
+        learning rate, or None to share the classical rate), and `seeds` (how
+        many of the default seeds to run, or None for all).
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -135,6 +137,16 @@ def parse_arguments() -> argparse.Namespace:
         "of the configuration.",
     )
     parser.add_argument(
+        "--quantum_lr",
+        type=_positive_float,
+        default=None,
+        metavar="X",
+        help="Learning rate of the circuit weights (default: the classical "
+        f"rate, {DEFAULT_LEARNING_RATE:g}); part of the configuration, and an "
+        "explicit value is a different configuration from the default even "
+        "when equal to it.",
+    )
+    parser.add_argument(
         "--seeds",
         type=int,
         default=None,
@@ -145,12 +157,31 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _positive_float(text: str) -> float:
+    """Parses a strictly positive float for the command line.
+
+    Args:
+        text: The argument as typed.
+
+    Returns:
+        The float.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value is not a positive number.
+    """
+    value = float(text)
+    if not value > 0:
+        raise argparse.ArgumentTypeError(f"expected a positive number, got {text}")
+    return value
+
+
 def build_spec(
     seed: int,
     backbone: RunSpec,
     ansatz: str = DEFAULT_ANSATZ,
     block: str = DEFAULT_BLOCK,
     reupload: bool = False,
+    quantum_lr: float | None = None,
 ) -> RunSpec:
     """Builds the specification of one Qiskit QTL run on a selected baseline.
 
@@ -160,6 +191,8 @@ def build_spec(
         ansatz: Registry name of the embedding of the quantum head.
         block: Registry name of the variational block of the quantum head.
         reupload: Whether the embedding is repeated before every layer.
+        quantum_lr: Learning rate of the circuit weights, or None to share the
+            classical rate.
 
     Returns:
         The Qiskit QTL spec, trained on the same split as its backbone.
@@ -171,6 +204,7 @@ def build_spec(
         reupload=reupload,
         n_qubits=DEFAULT_N_QUBITS,
         n_layers=DEFAULT_N_LAYERS,
+        quantum_lr=quantum_lr,
         lr=DEFAULT_LEARNING_RATE,
         lr_step_size=DEFAULT_LR_STEP_SIZE,
         lr_gamma=DEFAULT_LR_GAMMA,
@@ -214,7 +248,8 @@ def main() -> None:
     logger.info(
         f"Beginning Qiskit QTL sweep ({arguments.ansatz} embedding, "
         f"{arguments.block} block, re-uploading {arguments.reupload}, "
-        f"{DEFAULT_N_QUBITS} qubits, {DEFAULT_N_LAYERS} layers) across "
+        f"{DEFAULT_N_QUBITS} qubits, {DEFAULT_N_LAYERS} layers, circuit learning "
+        f"rate {arguments.quantum_lr or DEFAULT_LEARNING_RATE:g}) across "
         f"{len(seeds)} seeds using SPSA gradients..."
     )
     logger.warning(
@@ -263,7 +298,12 @@ def main() -> None:
 
     for seed in seeds:
         spec = build_spec(
-            seed, backbone, arguments.ansatz, arguments.block, arguments.reupload
+            seed,
+            backbone,
+            arguments.ansatz,
+            arguments.block,
+            arguments.reupload,
+            arguments.quantum_lr,
         )
 
         if layout.is_done(spec):
@@ -296,9 +336,9 @@ def main() -> None:
             classifier_head=head,
         )
 
-        optimizer = optim.Adam(head.parameters(), lr=spec.lr)
+        optimizer = build_optimizer(head, spec)
         criterion = nn.BCEWithLogitsLoss()
-        scheduler = StepLR(optimizer, step_size=spec.lr_step_size, gamma=spec.lr_gamma)
+        scheduler = build_scheduler(optimizer, spec)
 
         trainer = BaselineTrainer(
             model=head,

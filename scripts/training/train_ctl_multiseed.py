@@ -21,8 +21,6 @@ import sys
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR
 
 from dementia_boost.core.identity import (
     DEFAULT_CLASSICAL_HEAD,
@@ -48,6 +46,7 @@ from dementia_boost.models.classical_cnn import (
 )
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.selection import select_backbone
+from dementia_boost.training.optimization import build_optimizer, build_scheduler
 from dementia_boost.training.trainer import BaselineTrainer
 
 DEFAULT_EXPERIMENT_SEEDS: range = range(0, 101)
@@ -242,9 +241,9 @@ def main() -> None:
             classifier_head=head,
         )
 
-        optimizer = optim.Adam(head.parameters(), lr=spec.lr)
+        optimizer = build_optimizer(head, spec)
         criterion = nn.BCEWithLogitsLoss()
-        scheduler = StepLR(optimizer, step_size=spec.lr_step_size, gamma=spec.lr_gamma)
+        scheduler = build_scheduler(optimizer, spec)
 
         trainer = BaselineTrainer(
             model=head,

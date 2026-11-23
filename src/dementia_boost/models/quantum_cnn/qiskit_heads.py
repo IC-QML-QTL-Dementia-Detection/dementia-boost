@@ -128,6 +128,22 @@ class QiskitQuantumClassifierHead(nn.Module):
 
         return x
 
+    def parameter_groups(self) -> dict[str, list[nn.Parameter]]:
+        """Splits the trainable parameters into the classical and circuit parts.
+
+        The optimizer gives each group its own learning rate, so the circuit
+        weights can train at a rate apart from the classical layers.
+
+        Returns:
+            The parameters of `pre_net`, of the circuit (`qnn`, under the name
+            `circuit`), and of `post_net`, in that order.
+        """
+        return {
+            "pre_net": list(self.pre_net.parameters()),
+            "circuit": list(self.qnn.parameters()),
+            "post_net": list(self.post_net.parameters()),
+        }
+
     @staticmethod
     def apply_glorot_init(module: nn.Module) -> None:
         """Applies Glorot Uniform initialization to classical linear layers.

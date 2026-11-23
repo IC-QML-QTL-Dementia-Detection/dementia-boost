@@ -34,6 +34,11 @@ from dementia_boost.telemetry.metrics import (
     MetricsAnalyzer,
     TrainingHistory,
 )
+from dementia_boost.training.optimization import (
+    CIRCUIT_GROUP,
+    MODEL_GROUP,
+    group_learning_rate,
+)
 
 
 class BaselineTrainer:
@@ -258,20 +263,41 @@ class BaselineTrainer:
 
         return running_loss / total_samples, correct_preds / total_samples
 
+    def _group_names(self) -> list[str]:
+        """Returns the name of every optimizer group, in order.
+
+        Returns:
+            Each group's `name` entry, or `MODEL_GROUP` for a group without one.
+        """
+        return [group.get("name", MODEL_GROUP) for group in self.optimizer.param_groups]
+
     def _check_spec_matches_setup(self) -> None:
         """Checks that the spec describes the optimizer, loader, and scheduler.
 
         The IDs are hashes of the spec, so a spec that says one thing while the
-        run does another would name a configuration that never ran.
+        run does another would name a configuration that never ran. Every
+        optimizer group is checked: the circuit group against `quantum_lr` (or
+        `lr` when it is unset), every other group against `lr`; a `quantum_lr`
+        with no circuit group to apply it to is refused too.
 
         Raises:
             ValueError: Naming every field of the spec that disagrees.
         """
         mismatches: list[str] = []
 
-        actual_lr = float(self.scheduler.get_last_lr()[0])
-        if not math.isclose(self.spec.lr, actual_lr):
-            mismatches.append(f"lr: spec {self.spec.lr}, optimizer {actual_lr}")
+        names = self._group_names()
+        for name, actual_lr in zip(names, self.scheduler.get_last_lr(), strict=True):
+            field = "quantum_lr" if name == CIRCUIT_GROUP else "lr"
+            expected_lr = group_learning_rate(name, self.spec)
+            if not math.isclose(expected_lr, float(actual_lr)):
+                mismatches.append(
+                    f"{field}: spec {expected_lr}, optimizer group {name} {actual_lr}"
+                )
+        if self.spec.quantum_lr is not None and CIRCUIT_GROUP not in names:
+            mismatches.append(
+                f"quantum_lr: spec {self.spec.quantum_lr}, but the optimizer has "
+                f"no {CIRCUIT_GROUP} group"
+            )
         if self.spec.batch_size != self.train_loader.batch_size:
             mismatches.append(
                 f"batch_size: spec {self.spec.batch_size}, "

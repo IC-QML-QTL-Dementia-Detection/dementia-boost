@@ -34,6 +34,7 @@ from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.metrics import MetricsAnalyzer, TrainingHistory
 from dementia_boost.training.evaluator import ModelEvaluator
+from dementia_boost.training.optimization import build_optimizer
 from dementia_boost.training.trainer import BaselineTrainer
 
 NUM_MOCK_SAMPLES: int = 8
@@ -433,6 +434,44 @@ def test_spec_that_disagrees_with_what_runs_is_rejected(
     with pytest.raises(ValueError, match=field):
         _build_history_trainer(
             tmp_path, nn.BCEWithLogitsLoss(), eval_every=1, spec=spec
+        )
+
+
+@pytest.mark.parametrize(
+    ("optimizer_quantum_lr", "spec_quantum_lr"),
+    [(1e-2, None), (1e-2, 5e-2), (None, 1e-2)],
+)
+def test_spec_that_disagrees_with_the_circuit_rate_is_rejected(
+    tmp_path: Path,
+    optimizer_quantum_lr: float | None,
+    spec_quantum_lr: float | None,
+) -> None:
+    """Validates that the circuit group's learning rate is checked against
+    `quantum_lr` (or `lr` when it is unset): a spec that names another circuit
+    rate, or a separate rate the optimizer never applied, is refused."""
+    head = QiskitQuantumClassifierHead(
+        in_features=4, n_qubits=TEST_QTL_QUBITS, n_layers=TEST_QTL_LAYERS, seed=0
+    )
+    optimizer = build_optimizer(
+        head, _spec(Paradigm.QISKIT_QTL, quantum_lr=optimizer_quantum_lr)
+    )
+    loader = DataLoader(
+        TensorDataset(torch.randn(8, 4), torch.tensor([0, 1] * 4)),
+        batch_size=BATCH_SIZE,
+    )
+
+    with pytest.raises(ValueError, match="quantum_lr"):
+        BaselineTrainer(
+            model=head,
+            train_loader=loader,
+            val_loader=loader,
+            criterion=nn.BCEWithLogitsLoss(),
+            optimizer=optimizer,
+            scheduler=StepLR(optimizer, step_size=STEP_SIZE, gamma=GAMMA),
+            device=torch.device("cpu"),
+            logger=setup_logger("test_trainer_quantum_lr"),
+            spec=_spec(Paradigm.QISKIT_QTL, quantum_lr=spec_quantum_lr),
+            layout=ResultsLayout(str(tmp_path)),
         )
 
 

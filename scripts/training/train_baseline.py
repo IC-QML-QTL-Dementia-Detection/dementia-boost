@@ -12,8 +12,6 @@ checkpoint exists is skipped. Loss plots are rendered from the histories by
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR
 
 from dementia_boost.core.identity import Paradigm, RunSpec, label
 from dementia_boost.core.layout import ResultsLayout
@@ -26,6 +24,7 @@ from dementia_boost.models.classical_cnn import (
     LeNetFeatureExtractor,
 )
 from dementia_boost.telemetry.logger import setup_logger
+from dementia_boost.training.optimization import build_optimizer, build_scheduler
 from dementia_boost.training.trainer import BaselineTrainer
 
 DEFAULT_EXPERIMENT_SEEDS: range = range(1, 101)
@@ -109,8 +108,8 @@ def main() -> None:
         ).to(device)
 
         criterion = nn.BCEWithLogitsLoss()
-        optimizer = optim.Adam(model.parameters(), lr=spec.lr)
-        scheduler = StepLR(optimizer, step_size=spec.lr_step_size, gamma=spec.lr_gamma)
+        optimizer = build_optimizer(model, spec)
+        scheduler = build_scheduler(optimizer, spec)
 
         trainer = BaselineTrainer(
             model=model,
