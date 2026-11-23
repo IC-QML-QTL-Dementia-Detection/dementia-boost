@@ -34,7 +34,12 @@ from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.metrics import MetricsAnalyzer, TrainingHistory
 from dementia_boost.training.evaluator import ModelEvaluator
-from dementia_boost.training.optimization import build_optimizer
+from dementia_boost.training.optimization import (
+    CIRCUIT_GROUP,
+    MODEL_GROUP,
+    build_optimizer,
+    build_scheduler,
+)
 from dementia_boost.training.trainer import BaselineTrainer
 
 NUM_MOCK_SAMPLES: int = 8
@@ -43,6 +48,7 @@ IMAGE_SIZE: int = 128
 BATCH_SIZE: int = 4
 FEATURE_DIM: int = 2304
 LEARNING_RATE: float = 1e-3
+QUANTUM_LEARNING_RATE: float = 5e-2
 STEP_SIZE: int = 5
 GAMMA: float = 0.5
 TEST_QTL_QUBITS: int = 2
@@ -147,7 +153,9 @@ def test_baseline_trainer_with_cached_embeddings_and_save_model(
 def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
     tmp_path: Path,
 ) -> None:
-    """Validates training a quantum head on cached embeddings and saving model."""
+    """Validates training a quantum head on cached embeddings and saving model,
+    with the circuit weights in their own group at `quantum_lr` and every
+    group recorded in the history."""
     device = torch.device("cpu")
     layout = ResultsLayout(str(tmp_path))
     spec = _spec(
@@ -155,6 +163,7 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
         n_qubits=TEST_QTL_QUBITS,
         n_layers=TEST_QTL_LAYERS,
         epochs=1,
+        quantum_lr=QUANTUM_LEARNING_RATE,
     )
 
     extractor = LeNetFeatureExtractor().to(device)
@@ -173,14 +182,14 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
         feature_extractor=extractor, classifier_head=qtl_head
     )
 
-    optimizer = optim.Adam(qtl_head.parameters(), lr=LEARNING_RATE)
+    optimizer = build_optimizer(qtl_head, spec)
     trainer = BaselineTrainer(
         model=qtl_head,
         train_loader=train_loader,
         val_loader=val_loader,
         criterion=nn.BCEWithLogitsLoss(),
         optimizer=optimizer,
-        scheduler=StepLR(optimizer, step_size=STEP_SIZE, gamma=GAMMA),
+        scheduler=build_scheduler(optimizer, spec),
         device=device,
         logger=setup_logger("test_trainer_qtl"),
         spec=spec,
@@ -188,7 +197,14 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
         save_model=full_model,
     )
 
-    trainer.train()
+    history = trainer.train()
+
+    (groups,) = [r.groups for r in history.epochs]
+    assert groups is not None
+    assert list(groups) == ["pre_net", CIRCUIT_GROUP, "post_net"]
+    assert groups[CIRCUIT_GROUP].lr == QUANTUM_LEARNING_RATE
+    assert groups["pre_net"].lr == LEARNING_RATE
+    assert groups[CIRCUIT_GROUP].displacement_max > 0
 
     saved_checkpoint_path = Path(layout.checkpoint_path(spec))
     assert saved_checkpoint_path.exists()
@@ -267,14 +283,33 @@ def _build_history_trainer(
 
 def test_train_returns_history_matching_schedule_and_disk(tmp_path: Path) -> None:
     """Validates epoch count, finite losses, the StepLR learning rate used in
-    each epoch, validation only on `eval_every` boundaries, and that the JSON
-    on disk equals the returned history."""
+    each epoch, validation only on `eval_every` boundaries, the per-group
+    record of every epoch (rate, gradient norm, and displacement from the
+    weights at the start of training), and that the JSON on disk equals the
+    returned history."""
     trainer, history_path = _build_history_trainer(
         tmp_path, nn.BCEWithLogitsLoss(), eval_every=2
+    )
+    initial = torch.cat(
+        [p.detach().flatten().clone() for p in trainer.model.parameters()]
     )
 
     history = trainer.train()
 
+    final = torch.cat([p.detach().flatten() for p in trainer.model.parameters()])
+    assert all(
+        r.groups is not None and list(r.groups) == [MODEL_GROUP] for r in history.epochs
+    )
+    groups = [r.groups[MODEL_GROUP] for r in history.epochs if r.groups is not None]
+    assert [g.lr for g in groups] == [r.lr for r in history.epochs]
+    assert all(math.isfinite(value) for g in groups for value in vars(g).values())
+    assert all(g.grad_norm_mean > 0 for g in groups)
+    assert groups[-1].displacement_rms == pytest.approx(
+        (final - initial).pow(2).mean().sqrt().item()
+    )
+    assert groups[-1].displacement_max == pytest.approx(
+        (final - initial).abs().max().item()
+    )
     assert [r.epoch for r in history.epochs] == [1, 2, 3, 4]
     assert all(math.isfinite(r.train_loss) for r in history.epochs)
     assert [r.lr for r in history.epochs] == pytest.approx(

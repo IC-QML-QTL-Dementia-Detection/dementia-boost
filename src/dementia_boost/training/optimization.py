@@ -90,3 +90,15 @@ def build_scheduler(optimizer: Optimizer, spec: RunSpec) -> StepLR:
         epochs.
     """
     return StepLR(optimizer, step_size=spec.lr_step_size, gamma=spec.lr_gamma)
+
+
+def group_names(optimizer: Optimizer) -> list[str]:
+    """Returns the name of every optimizer group, in order.
+
+    Args:
+        optimizer: Any optimizer, built by `build_optimizer` or not.
+
+    Returns:
+        Each group's `name` entry, or `MODEL_GROUP` for a group without one.
+    """
+    return [group.get("name", MODEL_GROUP) for group in optimizer.param_groups]

@@ -34,10 +34,11 @@ from dementia_boost.telemetry.metrics import (
     MetricsAnalyzer,
     TrainingHistory,
 )
+from dementia_boost.training.instrumentation import ParameterGroupMonitor
 from dementia_boost.training.optimization import (
     CIRCUIT_GROUP,
-    MODEL_GROUP,
     group_learning_rate,
+    group_names,
 )
 
 
@@ -168,7 +169,10 @@ class BaselineTrainer:
 
         Returns:
             The completed TrainingHistory. Each epoch's `duration_s` covers the
-            optimization pass only, excluding the optional evaluation.
+            optimization pass only, excluding the optional evaluation, and its
+            `groups` hold, per optimizer group, the learning rate, the
+            displacement of the weights from where they were when `train`
+            started, and the mean gradient norm over the epoch's steps.
 
         Raises:
             ConfigCollisionError: If a different spec already owns this
@@ -183,13 +187,15 @@ class BaselineTrainer:
         history = TrainingHistory(spec=self.spec, epochs=[], extras=self.extras)
         saved_epochs = 0
         last_evaluation: tuple[float, float] | None = None
+        monitor = ParameterGroupMonitor(self.optimizer)
 
         try:
             for epoch in range(1, epochs + 1):
                 epoch_start = time.perf_counter()
-                epoch_loss, epoch_acc = self._train_one_epoch()
+                epoch_loss, epoch_acc = self._train_one_epoch(monitor)
 
-                epoch_lr = float(self.scheduler.get_last_lr()[0])
+                group_lrs = [float(lr) for lr in self.scheduler.get_last_lr()]
+                groups = monitor.summarize(group_lrs)
                 self.scheduler.step()
                 epoch_duration = time.perf_counter() - epoch_start
 
@@ -210,8 +216,9 @@ class BaselineTrainer:
                         train_acc=epoch_acc,
                         val_loss=val_loss,
                         val_acc=val_acc,
-                        lr=epoch_lr,
+                        lr=group_lrs[0],
                         duration_s=epoch_duration,
+                        groups=groups,
                     )
                 )
 
@@ -232,8 +239,11 @@ class BaselineTrainer:
 
         return history
 
-    def _train_one_epoch(self) -> tuple[float, float]:
+    def _train_one_epoch(self, monitor: ParameterGroupMonitor) -> tuple[float, float]:
         """Runs one optimization pass over the training loader.
+
+        Args:
+            monitor: Records every step's gradient norm per optimizer group.
 
         Returns:
             A `(loss, accuracy)` tuple averaged over all training samples.
@@ -253,6 +263,7 @@ class BaselineTrainer:
             loss = self.criterion(outputs, labels)
 
             loss.backward()
+            monitor.record_gradients()
             self.optimizer.step()
 
             running_loss += loss.item() * images.size(0)
@@ -262,14 +273,6 @@ class BaselineTrainer:
             total_samples += labels.size(0)
 
         return running_loss / total_samples, correct_preds / total_samples
-
-    def _group_names(self) -> list[str]:
-        """Returns the name of every optimizer group, in order.
-
-        Returns:
-            Each group's `name` entry, or `MODEL_GROUP` for a group without one.
-        """
-        return [group.get("name", MODEL_GROUP) for group in self.optimizer.param_groups]
 
     def _check_spec_matches_setup(self) -> None:
         """Checks that the spec describes the optimizer, loader, and scheduler.
@@ -285,7 +288,7 @@ class BaselineTrainer:
         """
         mismatches: list[str] = []
 
-        names = self._group_names()
+        names = group_names(self.optimizer)
         for name, actual_lr in zip(names, self.scheduler.get_last_lr(), strict=True):
             field = "quantum_lr" if name == CIRCUIT_GROUP else "lr"
             expected_lr = group_learning_rate(name, self.spec)

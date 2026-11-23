@@ -1,9 +1,10 @@
 """Classification metric computation, multi-run aggregation, and JSON serialization.
 
 This module provides data transfer objects (`EvaluationResult`, `AggregateMetrics`,
-`EpochRecord`, `TrainingHistory`) and the `MetricsAnalyzer` class to calculate
-standard binary classification metrics (Accuracy, Precision, Recall, F1, AUC,
-Confusion Matrix) and serialize summaries and training histories to disk.
+`GroupRecord`, `EpochRecord`, `TrainingHistory`) and the `MetricsAnalyzer` class
+to calculate standard binary classification metrics (Accuracy, Precision,
+Recall, F1, AUC, Confusion Matrix) and serialize summaries and training
+histories to disk.
 """
 
 import json
@@ -75,6 +76,28 @@ class AggregateMetrics:
 
 
 @dataclass
+class GroupRecord:
+    """Data transfer object storing one optimizer group's measurements in an epoch.
+
+    Attributes:
+        lr: Learning rate of the group during the epoch.
+        displacement_rms: Root mean square, over the group's weights, of their
+            change since the start of training, measured at the end of the
+            epoch (radians for the circuit weights).
+        displacement_max: Largest absolute change of one of the group's
+            weights since the start of training, at the end of the epoch.
+        grad_norm_mean: Mean over the epoch's optimization steps of the L2
+            norm of the group's gradient, as the optimizer received it (for the
+            circuit, the SPSA estimate).
+    """
+
+    lr: float
+    displacement_rms: float
+    displacement_max: float
+    grad_norm_mean: float
+
+
+@dataclass
 class EpochRecord:
     """Data transfer object storing the measurements of a single training epoch.
 
@@ -86,8 +109,11 @@ class EpochRecord:
             not evaluated.
         val_acc: Accuracy on the evaluation loader, or None if the epoch was
             not evaluated.
-        lr: Learning rate used during the epoch.
+        lr: Learning rate of the first optimizer group during the epoch (the
+            classical rate).
         duration_s: Wall-clock duration of the epoch in seconds.
+        groups: Measurements per named optimizer group, in the optimizer's
+            order, or None when they were not recorded.
     """
 
     epoch: int
@@ -97,6 +123,27 @@ class EpochRecord:
     val_acc: float | None
     lr: float
     duration_s: float
+    groups: dict[str, GroupRecord] | None = None
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "EpochRecord":
+        """Rebuilds a record from its `dataclasses.asdict` form.
+
+        Args:
+            payload: The record as stored in a history file.
+
+        Returns:
+            The record, with its group measurements as `GroupRecord`s.
+        """
+        groups = payload.get("groups")
+        return cls(
+            **{
+                **payload,
+                "groups": None
+                if groups is None
+                else {name: GroupRecord(**group) for name, group in groups.items()},
+            }
+        )
 
 
 @dataclass
@@ -285,7 +332,7 @@ class MetricsAnalyzer:
 
         history = TrainingHistory(
             spec=identity.RunSpec.from_dict(payload["spec"]),
-            epochs=[EpochRecord(**record) for record in payload["epochs"]],
+            epochs=[EpochRecord.from_dict(record) for record in payload["epochs"]],
             extras=payload["extras"],
         )
         if payload["run_id"] != history.run_id:
