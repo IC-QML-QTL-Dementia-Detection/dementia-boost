@@ -11,6 +11,8 @@ from collections.abc import Callable
 from torch import Tensor, load
 from torch.utils.data import Dataset
 
+from dementia_boost.data.cohort_audit import subject_of
+
 
 class OasisDataset(Dataset):
     """PyTorch Dataset for loading pre-processed serialized tensor files.
@@ -39,6 +41,14 @@ class OasisDataset(Dataset):
         self.directory_path = directory_path
         self.file_list = sorted(glob.glob(os.path.join(directory_path, "*.pt")))
         self.transform = transform
+
+    def subject_ids(self) -> list[str]:
+        """Lists the subject of every sample, in sample order.
+
+        Returns:
+            One Subject ID per `.pt` file, for example `OAS2_0001`.
+        """
+        return [subject_of(os.path.basename(path)) for path in self.file_list]
 
     def __len__(self) -> int:
         """Returns the total number of samples in the dataset.

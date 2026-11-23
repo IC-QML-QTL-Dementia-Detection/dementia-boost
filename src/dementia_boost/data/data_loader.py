@@ -88,6 +88,27 @@ class OasisDataLoader:
             pin_memory=use_pin_memory,
         )
 
+    def get_subject_ids(self, cohort: str) -> list[str]:
+        """Lists the subject of every slice of a cohort, in loading order.
+
+        The validation and test loaders do not shuffle, so this is the order of
+        the labels and probabilities an evaluation produces.
+
+        Args:
+            cohort: One of "train", "val", or "test".
+
+        Returns:
+            One Subject ID per slice.
+
+        Raises:
+            ValueError: If `cohort` is not one of the three cohort names.
+        """
+        if cohort not in COHORT_NAMES:
+            raise ValueError(
+                f"Unknown cohort {cohort!r}; expected one of {COHORT_NAMES}"
+            )
+        return OasisDataset(os.path.join(self.RESULTS_PATH, cohort)).subject_ids()
+
     def _get_nifti_transform(self) -> transforms.Compose:
         """Defines the transformation pipeline for raw NIfTI float tensors.
 

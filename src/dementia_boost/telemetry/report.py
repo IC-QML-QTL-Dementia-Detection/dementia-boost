@@ -5,7 +5,8 @@ seeds of a paradigm, measured on the test cohort. Next to them it shows the test
 metrics of the run that was selected on the validation cohort. The same
 statistics are also given for the validation cohort, which is the development
 cohort: it selects the backbone and monitors training. No run is chosen on test
-metrics.
+metrics. For each cohort the report also gives the accuracy of always answering
+the majority class and, per paradigm, how many runs predicted a single class.
 """
 
 from collections.abc import Mapping
@@ -14,6 +15,10 @@ from typing import Any
 from dementia_boost.core.identity import Paradigm
 from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.telemetry.selection import select_best_run
+from dementia_boost.telemetry.statistics import (
+    count_collapsed_runs,
+    majority_class_accuracy,
+)
 
 REPORT_METRICS = ("accuracy", "precision", "recall", "f1_score", "auc")
 SELECTION_RULE = "validation AUC-ROC, then F1-score, then lowest log loss"
@@ -101,14 +106,15 @@ def build_comparative_report(
         `paradigms` (per paradigm: `mean` and `std` across seeds, and on `test`
         also `selected_on_validation`, the test value of the selected run) and
         `delta_pct_of_means` (percentage change of the means, for every pair
-        with both paradigms present).
+        with both paradigms present). `chance_reference` has, per cohort, the
+        majority-class accuracy and each paradigm's count of collapsed runs.
 
     Raises:
         ValueError: If there are no paradigms, validation and test cover
             different paradigms or describe different configurations of one
             paradigm, a payload is marked with the wrong cohort, the paradigms
-            were trained on different splits, or a run selected on validation
-            is absent from the test results.
+            were trained on different splits or scored on different labels, or
+            a run selected on validation is absent from the test results.
     """
     if not test_results:
         raise ValueError("No paradigms to report.")
@@ -154,6 +160,34 @@ def build_comparative_report(
         "comparisons": {
             "test": _compare_cohort(test_results, selected_metrics),
             "validation": _compare_cohort(val_results),
+        },
+        "chance_reference": {
+            "test": _chance_reference(test_results),
+            "validation": _chance_reference(val_results),
+        },
+    }
+
+
+def _chance_reference(results: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """Compares each paradigm with a model that has no skill, on one cohort.
+
+    Args:
+        results: Mapping of paradigm name to its results payload on one cohort.
+
+    Returns:
+        `majority_class_accuracy` of the cohort and, per paradigm,
+        `collapsed_runs` (see `count_collapsed_runs`).
+
+    Raises:
+        ValueError: If the paradigms were scored on different labels.
+    """
+    runs = [run for payload in results.values() for run in payload["individual_runs"]]
+    majority = majority_class_accuracy(runs)
+    return {
+        "majority_class_accuracy": majority,
+        "collapsed_runs": {
+            name: count_collapsed_runs(payload["individual_runs"], majority)
+            for name, payload in results.items()
         },
     }
 

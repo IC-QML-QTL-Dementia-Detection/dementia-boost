@@ -117,6 +117,7 @@ def main() -> None:
         device,
         logger,
         configuration=arguments.config,
+        subjects={cohort: loader_manager.get_subject_ids(cohort) for cohort in loaders},
     )
     if not outcome:
         logger.error(

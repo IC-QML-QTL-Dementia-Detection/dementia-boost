@@ -219,9 +219,11 @@ class TestMetricsAnalyzerSaveToJson:
         assert set(payload.keys()) == {
             "cohort",
             "configuration",
+            "subject_ids",
             "aggregated_statistics",
             "individual_runs",
         }
+        assert payload["subject_ids"] is None
         assert payload["cohort"] == "val"
         assert payload["configuration"] == configuration
         assert payload["individual_runs"][0]["run_id"] == "run_json"
