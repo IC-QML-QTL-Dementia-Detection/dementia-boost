@@ -337,4 +337,6 @@ class TestMetricsVisualizerLossPlots:
         visualizer = MetricsVisualizer(output_dir=str(tmp_path / "plots"))
 
         with pytest.raises(ValueError, match="No training histories"):
-            visualizer.plot_loss_distribution(str(empty_dir), prefix="qtl")
+            visualizer.plot_loss_distribution(
+                str(empty_dir), prefix="qiskit_qtl", name="QTL (Qiskit)"
+            )

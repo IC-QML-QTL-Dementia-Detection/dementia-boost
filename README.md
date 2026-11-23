@@ -150,7 +150,7 @@ uv run scripts/audit_cohorts.py
 The split is set by the constants at the top of `scripts/etl_pipeline.py`: the seed, the test ratio (0.3), the validation ratio (0.2 of the non-test subjects), and `MANUAL_TRAIN_IDS` / `MANUAL_TEST_IDS`, which pin canonical subject IDs such as `OAS2_0001` to a cohort (an unknown ID, a visit ID, or an ID in both lists is rejected). The ETL is safe to rerun: it writes into a staging directory first, the same arguments reproduce the same files, and unusable subjects are listed with a reason in the manifest. The data loader refuses cohorts that do not match the manifest.
 
 > [!IMPORTANT]
-> **Evaluation protocol.** Models are trained on `train` and monitored on `val`, and every choice (such as the backbone of the transfer-learning heads) reads validation metrics only. The `test` cohort is never used to train or to choose; it is evaluated once per checkpoint and only reported.
+> **Evaluation protocol.** Models are trained on `train` and monitored on `val`, and every choice (the backbone of the transfer-learning heads, the run highlighted in the isolated ROC curve and the confusion matrix) reads validation metrics only. The `test` cohort is never used to train or to choose; it is evaluated once per checkpoint and only reported.
 
 ### 3. Training
 

@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from conftest import build_spec
+from matplotlib.figure import Figure
 
 from dementia_boost.core.identity import Paradigm, RunSpec, config_id, run_id
 from dementia_boost.core.layout import ResultsLayout
@@ -55,6 +56,26 @@ def _write_results(layout: ResultsLayout, spec_a: RunSpec, spec_b: RunSpec) -> N
         ],
     }
     save_configuration_results(layout, spec_a, results)
+
+
+def _capture_titles(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Records the title of every figure the visualizer saves, without drawing.
+
+    Args:
+        monkeypatch: The test's monkeypatch fixture.
+
+    Returns:
+        A list that fills with the titles (the figure title, else the title of
+        the first axes) as the figures are saved.
+    """
+    titles: list[str] = []
+
+    def record(_self: MetricsVisualizer, fig: Figure, _path: str) -> None:
+        suptitle = fig.get_suptitle()
+        titles.append(suptitle or fig.axes[0].get_title())
+
+    monkeypatch.setattr(MetricsVisualizer, "_save", record)
+    return titles
 
 
 class TestPlotParadigm:
@@ -102,6 +123,25 @@ class TestPlotParadigm:
         assert all(path.stat().st_size > 0 for path in plots.glob("*.png"))
         for extension in ("svg", "pdf"):
             assert {path.stem for path in plots.glob(f"*.{extension}")} == stems
+
+    def test_titles_name_the_configuration_and_the_cohort(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every title names the configuration by its presentation name and the
+        cohort drawn; the titles used to say only `Qiskit_qtl`, so a reader could
+        not tell which cohort a figure showed."""
+        titles = _capture_titles(monkeypatch)
+        layout = ResultsLayout(str(tmp_path))
+        _write_results(
+            layout, build_spec("qiskit_qtl", seed=1), build_spec("qiskit_qtl", seed=2)
+        )
+
+        plot_paradigm(layout, Paradigm.QISKIT_QTL)
+
+        assert len(titles) == 4
+        for title in titles:
+            assert title.startswith("QTL (Qiskit), Angle Embedding ")
+            assert title.endswith("(test cohort)")
 
     def test_nothing_to_plot_returns_nothing(self, tmp_path: Path) -> None:
         """A paradigm without results produces no plots."""
@@ -164,6 +204,23 @@ class TestPlotLosses:
         for extension in ("png", "svg", "pdf"):
             assert (plots / f"loss_comparison.{extension}").stat().st_size > 0
         assert len(plotted) == 2
+
+    def test_titles_name_the_configuration(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The per-run and distribution titles name the configuration by its
+        presentation name instead of the capitalised paradigm (`Ctl`)."""
+        titles = _capture_titles(monkeypatch)
+        layout = ResultsLayout(str(tmp_path))
+        spec = build_spec("ctl", seed=1)
+        self._write_history(layout, spec)
+        layout.write_config(spec)
+
+        plot_losses(layout)
+
+        per_configuration = titles[:-1]
+        assert len(per_configuration) == 2
+        assert all(title.startswith("CTL ") for title in per_configuration)
 
     def test_unknown_vector_format_is_refused(self, tmp_path: Path) -> None:
         """A typo in a format fails before anything is drawn."""

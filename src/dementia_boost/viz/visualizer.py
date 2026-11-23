@@ -84,7 +84,9 @@ class MetricsVisualizer:
         for extension in self.vector_formats:
             fig.savefig(f"{stem}.{extension}", bbox_inches="tight")
 
-    def plot_metric_distributions(self, json_filepath: str, prefix: str) -> None:
+    def plot_metric_distributions(
+        self, json_filepath: str, prefix: str, name: str, cohort: str
+    ) -> None:
         """Generates boxplots with jittered Seaborn stripplots across all runs.
 
         Visualizes distributions for accuracy, precision, recall, f1_score, and
@@ -92,7 +94,9 @@ class MetricsVisualizer:
 
         Args:
             json_filepath: Path to the JSON file containing evaluation results.
-            prefix: Prefix string used in the output filename and plot title.
+            prefix: Prefix of the output filename.
+            name: Name of the configuration in the title.
+            cohort: Cohort the results come from, named in the title.
         """
         with open(json_filepath) as f:
             data = json.load(f)
@@ -141,7 +145,7 @@ class MetricsVisualizer:
             ax=ax,
         )
 
-        ax.set_title(f"{prefix.capitalize()} Model Metrics Distribution across Seeds")
+        ax.set_title(f"{name} Metrics Distribution across Seeds ({cohort} cohort)")
         ax.set_ylim(-0.05, 1.05)
         ax.set_xlabel("Metric")
         ax.set_ylabel("Score")
@@ -150,7 +154,9 @@ class MetricsVisualizer:
         self._save(fig, save_path)
         plt.close(fig)
 
-    def plot_comparative_roc(self, json_filepath: str, prefix: str) -> None:
+    def plot_comparative_roc(
+        self, json_filepath: str, prefix: str, name: str, cohort: str
+    ) -> None:
         """Plots comparative ROC curves for all runs on a single figure.
 
         Extracts ground truth (`y_true`) and predicted probabilities (`y_prob`)
@@ -159,7 +165,9 @@ class MetricsVisualizer:
 
         Args:
             json_filepath: Path to the JSON file containing evaluation results.
-            prefix: Prefix string used in the output filename and plot title.
+            prefix: Prefix of the output filename.
+            name: Name of the configuration in the title.
+            cohort: Cohort the results come from, named in the title.
         """
         with open(json_filepath) as f:
             data = json.load(f)
@@ -178,7 +186,7 @@ class MetricsVisualizer:
                 label=f"{run['run_id']} (AUC = {auc_score:.2f})",
             )
 
-        plt.title(f"{prefix.capitalize()} ROC Curves Across Seeds")
+        plt.title(f"{name} ROC Curves across Seeds ({cohort} cohort)")
         plt.xlabel("False Positive Rate")
         plt.ylabel("True Positive Rate")
         plt.legend(
@@ -192,13 +200,17 @@ class MetricsVisualizer:
         self._save(plt.gcf(), save_path)
         plt.close()
 
-    def plot_isolated_roc(self, json_filepath: str, run_id: str, prefix: str) -> None:
+    def plot_isolated_roc(
+        self, json_filepath: str, run_id: str, prefix: str, name: str, cohort: str
+    ) -> None:
         """Generates a standalone ROC curve for a specific model run.
 
         Args:
             json_filepath: Path to the JSON file containing evaluation results.
             run_id: Unique identifier for the specific run to plot.
-            prefix: Prefix string used in the output filename and plot title.
+            prefix: Prefix of the output filename.
+            name: Name of the configuration in the title.
+            cohort: Cohort the results come from, named in the title.
 
         Raises:
             ValueError: If `run_id` is not found in the JSON file.
@@ -221,7 +233,7 @@ class MetricsVisualizer:
             label=f"{run_id} (AUC={auc_score:.4f})",
         )
 
-        plt.title(f"{prefix.capitalize()} ROC Curve: {run_id}")
+        plt.title(f"{name} ROC Curve: {run_id} ({cohort} cohort)")
         plt.xlabel("False Positive Rate")
         plt.ylabel("True Positive Rate")
         plt.legend(loc="lower right")
@@ -235,13 +247,17 @@ class MetricsVisualizer:
         json_filepath: str,
         run_id: str,
         prefix: str,
+        name: str,
+        cohort: str,
     ) -> None:
         """Renders an annotated heatmap of the confusion matrix for a run.
 
         Args:
             json_filepath: Path to the JSON file containing evaluation results.
             run_id: Unique identifier for the specific run to plot.
-            prefix: Prefix string used in the output filename and plot title.
+            prefix: Prefix of the output filename.
+            name: Name of the configuration in the title.
+            cohort: Cohort the results come from, named in the title.
 
         Raises:
             ValueError: If `run_id` is not found in the JSON file.
@@ -263,7 +279,7 @@ class MetricsVisualizer:
             yticklabels=["Non-Demented", "Demented"],
         )
 
-        plt.title(f"{prefix.capitalize()} Confusion Matrix: {run_id}")
+        plt.title(f"{name} Confusion Matrix: {run_id} ({cohort} cohort)")
         plt.ylabel("Actual Diagnosis")
         plt.xlabel("Predicted Diagnosis")
 
@@ -271,7 +287,7 @@ class MetricsVisualizer:
         self._save(plt.gcf(), save_path)
         plt.close()
 
-    def plot_loss_curve(self, history_path: str, prefix: str) -> None:
+    def plot_loss_curve(self, history_path: str, prefix: str, name: str) -> None:
         """Plots loss and accuracy against epoch for a single training run.
 
         Draws train and validation series on two panels. Validation points
@@ -282,7 +298,8 @@ class MetricsVisualizer:
         Args:
             history_path: Path to a JSON file written by
                 `MetricsAnalyzer.save_history`.
-            prefix: Prefix string used in the output filename and plot title.
+            prefix: Prefix of the output filename.
+            name: Name of the configuration in the title.
         """
         history = MetricsAnalyzer.load_history(history_path)
         records = history.epochs
@@ -324,13 +341,13 @@ class MetricsVisualizer:
         for ax in axes:
             ax.legend()
 
-        fig.suptitle(f"{prefix.capitalize()} Training Curves: {history.run_id}")
+        fig.suptitle(f"{name} Training Curves: {history.run_id}")
 
         save_path = os.path.join(self.output_dir, f"{prefix}_{history.run_id}_loss.png")
         self._save(fig, save_path)
         plt.close(fig)
 
-    def plot_loss_distribution(self, history_dir: str, prefix: str) -> None:
+    def plot_loss_distribution(self, history_dir: str, prefix: str, name: str) -> None:
         """Plots the loss across every seed of one sweep.
 
         Aggregates all `*.json` histories in `history_dir`. For train and
@@ -340,7 +357,8 @@ class MetricsVisualizer:
 
         Args:
             history_dir: Directory holding one history JSON file per seed.
-            prefix: Prefix string used in the output filename and plot title.
+            prefix: Prefix of the output filename.
+            name: Name of the configuration in the title.
 
         Raises:
             ValueError: If `history_dir` contains no history files.
@@ -369,9 +387,7 @@ class MetricsVisualizer:
             linestyle=":",
             label="Chance level (ln 2)",
         )
-        ax.set_title(
-            f"{prefix.capitalize()} Loss Across {len(histories)} Seeds (median and IQR)"
-        )
+        ax.set_title(f"{name} Loss across {len(histories)} Seeds (median and IQR)")
         ax.set_xlabel("Epoch")
         ax.set_ylabel("Loss")
         ax.legend()
@@ -421,7 +437,7 @@ class MetricsVisualizer:
             linestyle=":",
             label="Chance level (ln 2)",
         )
-        ax.set_title("Validation Loss Across Paradigms (median and IQR)")
+        ax.set_title("Validation Loss across Configurations (median and IQR)")
         ax.set_xlabel("Epoch")
         ax.set_ylabel("Validation Loss")
         ax.legend()
