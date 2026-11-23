@@ -71,7 +71,7 @@ The report also gives the percentage changes against CTL. Relative changes of sm
 - **CTL is steadier, not better**: accuracy standard deviation falls to 0.031, the mean barely moves (+2.3%), recall falls (0.356), and 17 of 101 runs predict only Nondemented on test.
 - **QTL is more stable; the large gain does not reproduce**: against CTL, the quantum head has the same accuracy spread (0.032 against 0.031) but half the AUC-ROC spread (0.020 against 0.045), a smaller recall spread (0.124 against 0.217), and 2 of 101 runs predicting a single class against 17. Precision rises (+22.8% over the baseline) and accuracy slightly (+5.2%), but recall stays below the baseline and AUC-ROC barely above CTL's. Part of the effect may come from the 6-dimensional bottleneck rather than the circuit; a classical head with the same bottleneck has not been run.
 - **Gradients**: the quantum head trains with loss-level SPSA gradient estimates, because exact parameter-shift needs about 204 circuits per sample at 6 qubits and 4 layers. An earlier version of the head ran on PennyLane with exact gradients; its means matched the Qiskit head's, so PennyLane was dropped and Qiskit, which the hardware and noise studies need anyway, is the only framework.
-- **Training had not converged at epoch 100**: the quantum head's validation loss is still falling, possibly because of the learning rate (1e-4, decayed every 10 epochs), which has not been studied yet.
+- **Training had not converged at epoch 100**: the quantum head's validation loss is still falling, possibly because of the learning rate (1e-4, decayed every 10 epochs), which has not been studied yet. The circuit weights can now be trained at a rate of their own, and the histories record how far each group of weights moves, so this can be measured.
 
 ### Deviations from the Base Paper
 
@@ -170,13 +170,19 @@ uv run scripts/training/train_qiskit_qtl_multiseed.py --ansatz zz_feature_map
 # every layer (data re-uploading)
 uv run scripts/training/train_qiskit_qtl_multiseed.py --block strongly_entangling --reupload
 
+# Qiskit head with the circuit weights at their own learning rate (the pre-net
+# and post-net keep 1e-4; one StepLR decays both rates by the same factor)
+uv run scripts/training/train_qiskit_qtl_multiseed.py --quantum_lr 1e-2
+
 # Classical control: the quantum head's classical layers without the circuit
 # (Linear 2304 -> 6, tanh x pi/2, Linear 6 -> 1, no dropout), on seeds 0 to 99;
 # --hidden_features N sets the hidden width of either classical head
 uv run scripts/training/train_ctl_multiseed.py --head tanh_bottleneck --seeds 100
 ```
 
-Each training script writes a checkpoint and a per-epoch history (with the full run specification) per seed and skips runs that already finished.
+Each training script writes a checkpoint and a per-epoch history (with the full run specification) per seed and skips runs that already finished. Besides the losses, accuracies, learning rate, and duration, every epoch of a history records under `groups`, for each optimizer parameter group (`pre_net`, `circuit`, and `post_net` for the quantum head, `model` for the others), its learning rate, how far its weights have moved from their initial values (root mean square and maximum), and the mean gradient norm over the epoch's steps (`docs/architecture.md`, section 4.1).
+
+Leaving `--quantum_lr` out trains every weight at the classical rate, exactly as before the option existed; an explicit value, even 1e-4, is a separate configuration with its own `config_id`.
 
 Runs are identified by hashes of their specification: `config_id` for a configuration (all its seeds), `run_id` for one seed, so changing any hyperparameter gives a new configuration that never overwrites an old one. Everything is written under `data/results/<kind>/<paradigm>/<config_id>/` (layout in `docs/architecture.md`, section 2.1.1). To look a hash up:
 
