@@ -6,9 +6,11 @@ Regression coverage
   the same short name, so a presentation legend could not tell them apart.
 """
 
+from dementia_boost.models.classical_cnn import CLASSICAL_HEADS
 from dementia_boost.models.quantum_cnn import BLOCKS
 from dementia_boost.viz.display_names import (
     BLOCK_NAMES,
+    CLASSICAL_HEAD_NAMES,
     production_label,
     production_labels,
 )
@@ -50,6 +52,14 @@ class TestProductionLabel:
     def test_classical_heads_have_no_quantum_part(self) -> None:
         """Baseline and CTL specs carry no embedding."""
         assert production_label({"paradigm": "ctl", "ansatz": None}) == "CTL"
+
+    def test_classical_head_and_width_are_named_when_set(self) -> None:
+        """The control head and an explicit width appear in the name, so the two
+        CTL configurations are told apart in a legend."""
+        for head in CLASSICAL_HEADS:
+            assert head in CLASSICAL_HEAD_NAMES
+        spec = {"paradigm": "ctl", "head": "tanh_bottleneck", "hidden_features": 8}
+        assert production_label(spec) == "CTL, Tanh Bottleneck, Width 8"
 
 
 def test_configurations_differing_in_reuploading_get_distinct_names() -> None:

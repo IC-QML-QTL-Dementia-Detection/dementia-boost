@@ -35,6 +35,7 @@ from dementia_boost.models.classical_cnn import (
     ClassicalClassifierHead,
     DementiaClassifier,
     LeNetFeatureExtractor,
+    TanhBottleneckHead,
 )
 from dementia_boost.models.quantum_cnn import (
     QiskitQuantumClassifierHead,
@@ -107,6 +108,17 @@ class TestBuildClassicalTlModel:
         for param in model.classifier_head.parameters():
             assert param.requires_grad is True
             assert param.device.type == device.type
+
+    def test_named_head_replaces_the_paper_head(self, tmp_path: Path) -> None:
+        """A registered head other than the paper's is attached instead of it."""
+        checkpoint_path = _write_mock_baseline_checkpoint(tmp_path)
+
+        model = build_ctl_model(
+            checkpoint_path, torch.device("cpu"), head="tanh_bottleneck"
+        )
+
+        assert isinstance(model.classifier_head, TanhBottleneckHead)
+        assert all(p.requires_grad for p in model.classifier_head.parameters())
 
 
 class TestBuildQuantumTlModel:

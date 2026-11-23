@@ -169,6 +169,11 @@ uv run scripts/training/train_qiskit_qtl_multiseed.py --ansatz zz_feature_map
 # strongly_entangling, trainable_zz; --reupload repeats the embedding before
 # every layer (data re-uploading)
 uv run scripts/training/train_qiskit_qtl_multiseed.py --block strongly_entangling --reupload
+
+# Classical control: the quantum head's classical layers without the circuit
+# (Linear 2304 -> 6, tanh x pi/2, Linear 6 -> 1, no dropout), on seeds 0 to 99;
+# --hidden_features N sets the hidden width of either classical head
+uv run scripts/training/train_ctl_multiseed.py --head tanh_bottleneck --seeds 100
 ```
 
 Each training script writes a checkpoint and a per-epoch history (with the full run specification) per seed and skips runs that already finished.

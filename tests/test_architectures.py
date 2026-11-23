@@ -3,6 +3,8 @@
 This module validates:
 - ``LeNetFeatureExtractor`` intermediate layer shapes and gradient propagation.
 - ``ClassicalClassifierHead`` logit/sigmoid output contracts and Glorot init.
+- The registry of classical heads, the circuit-free control head, and the head
+  rebuilt from a run's spec.
 - ``DementiaClassifier`` backbone freezing contracts under transfer learning.
 - The quantum head's angle scaling bounds.
 
@@ -17,17 +19,25 @@ Regression coverage
   learning, corrupting pre-trained spatial representations.
 - Angle embedding inputs escaping the [-pi/2, pi/2] domain under extreme
   activations, invalidating the physical rotation semantics.
+- The CTL evaluation built the paper's head whatever the spec said, so a
+  checkpoint of another head would not load.
 """
 
 import math
 
+import pytest
 import torch
 import torch.nn as nn
 
 from dementia_boost.models.classical_cnn import (
+    CLASSICAL_HEADS,
     ClassicalClassifierHead,
     DementiaClassifier,
     LeNetFeatureExtractor,
+    TanhBottleneckHead,
+    build_classical_head,
+    classical_head_for,
+    stored_hidden_features,
 )
 from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
 
@@ -135,6 +145,81 @@ class TestClassicalClassifierHead:
         for layer, weight_before in zip(linear_layers, weights_before, strict=True):
             assert not torch.equal(layer.weight, weight_before)
             assert torch.all(layer.bias == 0.0)
+
+
+class TestClassicalHeadRegistry:
+    """Validates the registered classical heads and their link to the spec."""
+
+    _IN_FEATURES: int = 2304
+    _BATCH_SIZE: int = 4
+
+    def test_paper_head_is_the_ctl_head(self) -> None:
+        """`paper` builds the base paper's head: 2304 -> 5, dropout, ReLU, 5 -> 1."""
+        head = build_classical_head("paper")
+        assert isinstance(head, ClassicalClassifierHead)
+        layers = [type(layer) for layer in head.classifier]
+        assert layers == [nn.Flatten, nn.Linear, nn.Dropout, nn.ReLU, nn.Linear]
+        assert head.classifier[1].out_features == 5
+
+    def test_tanh_bottleneck_is_the_quantum_head_without_the_circuit(self) -> None:
+        """`tanh_bottleneck` has the quantum head's classical layers (2304 -> 6,
+        tanh times pi/2, 6 -> 1), no dropout, and one logit per sample."""
+        head = build_classical_head("tanh_bottleneck")
+        assert isinstance(head, TanhBottleneckHead)
+        assert head.pre_net.in_features == self._IN_FEATURES
+        assert head.pre_net.out_features == QiskitQuantumClassifierHead.DEFAULT_N_QUBITS
+        assert head.post_net.in_features == head.pre_net.out_features
+        assert head.ANGLE_SCALING_FACTOR == (
+            QiskitQuantumClassifierHead.ANGLE_SCALING_FACTOR
+        )
+        assert not any(isinstance(module, nn.Dropout) for module in head.modules())
+
+        x = torch.randn(self._BATCH_SIZE, 64, 6, 6) * 1e4
+        hidden = head.bottleneck(x)
+        assert torch.all(torch.abs(hidden) <= math.pi / 2 + _ANGLE_TOLERANCE)
+        assert head(x).shape == (self._BATCH_SIZE, 1)
+
+    @pytest.mark.parametrize("name", sorted(CLASSICAL_HEADS))
+    def test_width_is_configurable(self, name: str) -> None:
+        """Every registered head takes its hidden width from `hidden_features`."""
+        head = build_classical_head(name, hidden_features=8)
+        widths = [m.out_features for m in head.modules() if isinstance(m, nn.Linear)]
+        assert widths == [8, 1]
+
+    def test_unknown_head_is_refused(self) -> None:
+        """A mistyped name fails and lists the registered heads."""
+        with pytest.raises(ValueError, match="tanh_bottleneck"):
+            build_classical_head("tanh")
+
+    @pytest.mark.parametrize(
+        ("head", "hidden_features"),
+        [(None, None), ("tanh_bottleneck", None), ("tanh_bottleneck", 8)],
+    )
+    def test_checkpoint_loads_into_the_head_rebuilt_from_its_spec(
+        self, make_spec, head: str | None, hidden_features: int | None
+    ) -> None:
+        """The evaluation rebuilds the head from the stored spec; the weights of
+        a trained head load into it with every key and shape matching. Before,
+        the evaluation always built the paper's head."""
+        spec = make_spec("ctl", head=head, hidden_features=hidden_features)
+        trained = build_classical_head(head or "paper", hidden_features=hidden_features)
+
+        rebuilt = classical_head_for(spec)
+
+        assert type(rebuilt) is type(trained)
+        rebuilt.load_state_dict(trained.state_dict(), strict=True)
+
+    def test_default_width_is_stored_as_none(self) -> None:
+        """Asking for a head's own width stores `None`, so one head has one ID."""
+        default = TanhBottleneckHead.DEFAULT_HIDDEN_FEATURES
+        assert stored_hidden_features("tanh_bottleneck", default) is None
+        assert stored_hidden_features("tanh_bottleneck", None) is None
+        assert stored_hidden_features("paper", default) == default
+
+    def test_only_a_ctl_spec_has_a_classical_head(self, make_spec) -> None:
+        """A quantum spec is refused."""
+        with pytest.raises(ValueError, match="ctl"):
+            classical_head_for(make_spec("qiskit_qtl"))
 
 
 class TestDementiaClassifierFreezingContract:

@@ -154,8 +154,8 @@ def share_initial_weights(first: RunSpec, second: RunSpec) -> bool:
 
     The weights are drawn in a fixed order, so the same seed gives the same
     draws when the heads have the same parameters: same paradigm, qubits,
-    layers, and variational block. The embedding and the learning rates do not
-    change the shapes.
+    layers, and variational block, or the same classical head and width. The
+    embedding and the learning rates do not change the shapes.
 
     Args:
         first: Spec of a run of the first configuration.
@@ -164,7 +164,7 @@ def share_initial_weights(first: RunSpec, second: RunSpec) -> bool:
     Returns:
         True if seed `s` starts both configurations from the same weights.
     """
-    fields = ("paradigm", "n_qubits", "n_layers", "block")
+    fields = ("paradigm", "n_qubits", "n_layers", "block", "head", "hidden_features")
     return all(getattr(first, name) == getattr(second, name) for name in fields)
 
 

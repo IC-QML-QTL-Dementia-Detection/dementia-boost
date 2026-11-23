@@ -70,7 +70,7 @@ flowchart TD
 
 A run is not identified by a name, because a name says nothing about its qubits, layers, learning rate, backbone, or split, and two different configurations would collide on disk. Identity is split into three separate things:
 
-- **The specification** (`RunSpec`, a frozen dataclass): the paradigm, the embedding (the field is named `ansatz`), the variational block and re-uploading (section 3.2), qubits and layers, the learning rates, the `StepLR` settings, epochs, batch size, the gradient method, the `backbone_id`, the `split_id`, and the `seed`. Fields that do not apply to a paradigm are `None`, and each paradigm validates that its required fields are set (a baseline has no quantum fields and no backbone, a head needs its backbone). The spec is stored in every training history, so it is the source of truth for what a run was.
+- **The specification** (`RunSpec`, a frozen dataclass): the paradigm, the embedding (the field is named `ansatz`), the variational block and re-uploading (section 3.2), the classical head and its width (section 3), qubits and layers, the learning rates, the `StepLR` settings, epochs, batch size, the gradient method, the `backbone_id`, the `split_id`, and the `seed`. Fields that do not apply to a paradigm are `None`, and each paradigm validates that its required fields are set (a baseline has no quantum fields and no backbone, a head needs its backbone). The spec is stored in every training history, so it is the source of truth for what a run was.
 - **The IDs** (opaque hashes of the spec): `config_id` hashes every field except the seed, so all seeds of one configuration share it; `run_id` hashes every field. Both are the first 12 hex characters of a SHA-256 over the canonical JSON of the spec (sorted keys, `None` fields dropped, so adding a new optional field later does not change existing IDs). The `backbone_id` of a head is the `run_id` of the baseline it was built on, which pins its checkpoint and, through it, its split. `split_id` uses the same hash helper.
 - **The label** (output only): a readable rendering such as `qiskit_qtl | paper | 6q x 4L | lr 0.0001 | seed 3`, for plots and logs. Nothing parses it.
 
@@ -176,12 +176,20 @@ flowchart TD
 
     INPUT --> C1 --> C2 --> C3 --> C4 --> FMAP
 
-    subgraph ClassicalHead ["Option A: ClassicalClassifierHead (CTL)"]
+    subgraph ClassicalHead ["Option A: ClassicalClassifierHead (CTL, head paper)"]
         FLAT_C["Flatten -> 2304"]
         D1["Linear(2304 -> 5) + Dropout(0.5) + ReLU"]
         D2["Linear(5 -> 1)"]
         SIG["Optional Sigmoid / Logit"]
         FLAT_C --> D1 --> D2 --> SIG
+    end
+
+    subgraph ControlHead ["Option A': TanhBottleneckHead (CTL, head tanh_bottleneck)"]
+        FLAT_T["Flatten -> 2304"]
+        PRE_T["Linear(2304 -> 6)"]
+        SCALE_T["tanh(x) * (pi / 2), no dropout"]
+        POST_T["Linear(6 -> 1)"]
+        FLAT_T --> PRE_T --> SCALE_T --> POST_T
     end
 
     subgraph QuantumHead ["Option B: Quantum Head (QiskitQuantumClassifierHead)"]
@@ -209,8 +217,11 @@ flowchart TD
     end
 
     FMAP -.-> ClassicalHead
+    FMAP -.-> ControlHead
     FMAP -.-> QuantumHead
 ```
+
+**Classical heads.** The classical transfer-learning head is chosen by the `head` field of the run specification, from the registry in `classical_cnn/heads.py` (`CLASSICAL_HEADS`). `paper` (the default, stored as `None`) is the base paper's head. `tanh_bottleneck` is a control that is not in the paper: the quantum head with the circuit removed, so its post-net reads the six scaled pre-net values instead of the six expectation values. Against the paper's head it changes the width (5 to 6), the activation (ReLU to bounded `tanh`), and drops the dropout; against the quantum head it changes only the circuit. Comparing the three tells whether a difference between the quantum head and the paper's head comes from the circuit or from the classical layers around it. `hidden_features` sets the hidden width of either head (`None` is the head's own default, 5 or 6). Both fields apply to CTL specs only; `classical_head_for` builds the head a spec describes, for training and for evaluation.
 
 ### 3.1 Mathematical Formulation of the Dressed Quantum Network (DQN)
 
@@ -398,7 +409,7 @@ Evaluation, selection, and reporting follow one protocol: choices are made on va
 - **Evaluation.** `evaluate_paradigm` (`checkpoint_evaluation`) finds the finished runs of a paradigm through their histories, builds each configuration's model from its own spec, evaluates every checkpoint once on `val` and once on `test`, and writes `metrics/<paradigm>/<config_id>/{val,test}_results.json`. Each file carries a `cohort` marker, the `configuration` (ID, label, spec without the seed), and `subject_ids`, the subject of each slice in the order of every run's labels and probabilities (from the sorted file list the unshuffled `val` and `test` loaders read), so metrics can also be computed per patient.
 - **Selection.** `select_best_validation_run` and `select_backbone` (which resolves the best baseline to its spec) accept only a file marked `val` and rank by validation AUC-ROC, then F1, then lowest log loss, then run ID; anything else raises, so test metrics never decide a choice. The run highlighted in the isolated ROC curve and confusion matrix is the one selected on validation.
 - **Report.** `build_comparative_report` (`scripts/metrics/generate_improvement_report.py`) takes one configuration per paradigm (the only one with results, or one named with `--config`) and refuses paradigms trained on different splits. It leads with the mean and standard deviation across seeds on test and the test metrics of the run selected on validation, then gives the same statistics on validation, and the percentage changes between the means of each cohort (`comparisons.test`, `comparisons.validation`). `chance_reference` gives, per cohort, the accuracy of always answering the majority class and, per paradigm, the runs that predict a single class (only negative, only positive), have recall 0, or score at or below the majority-class accuracy, read from each run's confusion matrix (`telemetry/statistics.py`). It also counts the runs whose output is the same for every slice (`constant_output`, probabilities spread by at most 1e-6), which tells a head that stopped responding to its input apart from one whose outputs vary but all fall on one side of the threshold. The measured results are in the README.
-- **Paired comparison.** `compare_paired` (`scripts/metrics/compare_configurations.py`) compares two configurations of one split seed by seed. A run's seed is recovered by hashing the stored spec with candidate seeds until its `run_id` matches. Per metric it gives wins, losses, and ties of `first - second`, the median difference, the Hodges-Lehmann estimate (the median of the Walsh averages) with a 95% interval, and the Wilcoxon signed-rank p-value, raw and Holm-adjusted over the metrics. It also says whether one seed gave both configurations the same initial weights, which holds for heads of the same shape (same paradigm, qubits, layers, and block; the embedding has no weights). The test measures seed noise only: every run is scored on the same patients.
+- **Paired comparison.** `compare_paired` (`scripts/metrics/compare_configurations.py`) compares two configurations of one split seed by seed. A run's seed is recovered by hashing the stored spec with candidate seeds until its `run_id` matches. Per metric it gives wins, losses, and ties of `first - second`, the median difference, the Hodges-Lehmann estimate (the median of the Walsh averages) with a 95% interval, and the Wilcoxon signed-rank p-value, raw and Holm-adjusted over the metrics. It also says whether one seed gave both configurations the same initial weights, which holds for heads of the same shape (same paradigm, qubits, layers, and block, or same classical head and width; the embedding has no weights). The test measures seed noise only: every run is scored on the same patients.
 - **Patient-level comparison.** `bootstrap_patients` (the same script with `--patients`) averages each run's slice probabilities per patient (using the stored `subject_ids`), computes the seed-mean metric over the patients, and resamples the patients with replacement within each class (2,000 resamples, seeded), giving a 95% percentile interval for each configuration and, on the same resamples, for their difference. This adds the noise of which patients were drawn, which the seed spread cannot see. Results files without subject IDs are refused; re-running the evaluation records them.
 - **Histories.** `BaselineTrainer` only sees the train and validation loaders, so the per-epoch `val_loss` and `val_acc` are validation values. It records a `TrainingHistory` and writes it to JSON (every `history_save_every` epochs, default 10, and on exit, atomically), and never plots. The plotting steps live in `dementia_boost.viz` (`run_plots`, `MetricsVisualizer`); the scripts under `scripts/viz` are thin callers. The per-configuration figures name the configuration by its presentation name (`viz/display_names.py`) and, for the evaluation figures, the cohort drawn.
 
@@ -416,7 +427,7 @@ dementia-boost/
 │   ├── core/                              # Seeds, run identity (RunSpec, hash IDs), results layout (section 2.1)
 │   ├── data/                              # ETL, patient-level split, manifest, guards, loaders, feature cache (2.2)
 │   ├── models/                            # Backbone, classical and quantum heads, builder (3)
-│   │   ├── classical_cnn/                 # LeNet backbone, classical head, DementiaClassifier
+│   │   ├── classical_cnn/                 # LeNet backbone, classical head registry, DementiaClassifier
 │   │   └── quantum_cnn/                   # Qiskit embeddings, blocks, circuit, layer, head, runner (3.2, 3.3)
 │   ├── training/                          # Trainer, evaluator, evaluation of every checkpoint (4, 5)
 │   ├── telemetry/                         # Metrics, histories, run listing, selection, report, logger (5)

@@ -210,6 +210,50 @@ class TestVariationalBlockAndReupload:
         assert "block" not in label(_qtl())
 
 
+class TestClassicalHead:
+    """Validates the head and width fields of the classical transfer head."""
+
+    def test_server_ctl_configuration_keeps_its_id(self) -> None:
+        """The paper's head, named or not, is the head every stored CTL run
+        used; its ID is the one the full-dataset results carry."""
+        fields = {
+            "lr": 1e-4,
+            "backbone_id": "9bd3dd1a4c35",
+            "split_id": "a67d86da5bb4",
+        }
+        assert config_id(_ctl(**fields)) == "049ab9e330f5"
+        assert config_id(_ctl(head="paper", **fields)) == "049ab9e330f5"
+
+    def test_default_head_is_stored_as_none(self) -> None:
+        """Naming the paper's head stores `None`, so one head has one ID."""
+        assert _ctl(head="paper").head is None
+
+    @pytest.mark.parametrize(
+        "overrides", [{"head": "tanh_bottleneck"}, {"hidden_features": 8}]
+    )
+    def test_another_head_or_width_is_another_configuration(
+        self, overrides: dict
+    ) -> None:
+        """A different head, or an explicit width, gives a new `config_id`."""
+        assert config_id(_ctl(**overrides)) != config_id(_ctl())
+
+    @pytest.mark.parametrize(
+        "overrides", [{"head": "tanh_bottleneck"}, {"hidden_features": 6}]
+    )
+    @pytest.mark.parametrize("make", [_baseline, _qtl])
+    def test_other_paradigms_reject_them(self, make, overrides: dict) -> None:
+        """The head and its width belong to the classical transfer head only."""
+        with pytest.raises(ValueError, match="must not set"):
+            make(**overrides)
+
+    def test_label_names_a_non_default_head_and_width(self) -> None:
+        """The label shows the head and the width only when they are set."""
+        assert label(_ctl(head="tanh_bottleneck", hidden_features=6)) == (
+            "ctl | head tanh_bottleneck | width 6 | lr 0.0001 | seed 5"
+        )
+        assert "head" not in label(_ctl())
+
+
 class TestBackbone:
     """Validates the link from heads to the baseline they were built on."""
 

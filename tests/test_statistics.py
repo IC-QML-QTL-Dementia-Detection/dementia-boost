@@ -428,3 +428,15 @@ class TestPairingAssumption:
             build_spec("qiskit_qtl"),
             build_spec("qiskit_qtl", block="trainable_zz"),
         )
+
+    @pytest.mark.parametrize(
+        "overrides", [{"head": "tanh_bottleneck"}, {"hidden_features": 8}]
+    )
+    def test_another_classical_head_or_width_starts_elsewhere(
+        self, overrides: dict
+    ) -> None:
+        """The paper's head and the bottleneck control, or two widths, have
+        weights of other shapes, so one seed does not start them alike."""
+        assert not share_initial_weights(
+            build_spec("ctl"), build_spec("ctl", **overrides)
+        )
