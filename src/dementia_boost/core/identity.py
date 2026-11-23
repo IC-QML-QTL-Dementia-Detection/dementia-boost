@@ -27,7 +27,6 @@ class Paradigm(StrEnum):
 
     BASELINE = "baseline"
     CTL = "ctl"
-    PL_QTL = "pl_qtl"
     QISKIT_QTL = "qiskit_qtl"
 
 
@@ -47,7 +46,6 @@ _HEAD_FIELDS = (
 _REQUIRED: dict[Paradigm, tuple[str, ...]] = {
     Paradigm.BASELINE: (),
     Paradigm.CTL: ("backbone_id",),
-    Paradigm.PL_QTL: ("ansatz", "n_qubits", "n_layers", "gradient", "backbone_id"),
     Paradigm.QISKIT_QTL: (
         "ansatz",
         "n_qubits",
@@ -69,7 +67,6 @@ _FORBIDDEN: dict[Paradigm, tuple[str, ...]] = {
         "gradient",
         "spsa_epsilon",
     ),
-    Paradigm.PL_QTL: ("block", "reupload", "spsa_epsilon"),
     Paradigm.QISKIT_QTL: (),
 }
 _FLOAT_FIELDS = ("lr", "lr_gamma", "quantum_lr", "spsa_epsilon")
@@ -111,18 +108,18 @@ class RunSpec:
         ansatz: Name of the embedding (quantum heads only). The field predates
             the variational block registry, hence its name.
         block: Name of the variational block, or `None` for the base paper's
-            block (Qiskit head only). `DEFAULT_BLOCK` is stored as `None`, so
+            block (quantum heads only). `DEFAULT_BLOCK` is stored as `None`, so
             one circuit has one ID.
         reupload: `True` to repeat the embedding before every layer, or
-            `None` to apply it once (Qiskit head only). `False` is stored as
+            `None` to apply it once (quantum heads only). `False` is stored as
             `None`.
         n_qubits: Number of qubits (quantum heads only).
         n_layers: Number of variational block layers (quantum heads only).
         quantum_lr: Learning rate of the circuit weights, or `None` to share `lr`
             (quantum heads only).
-        gradient: Gradient method, for example "adjoint" or "spsa" (quantum heads
+        gradient: Gradient method, for example "spsa_loss_level" (quantum heads
             only).
-        spsa_epsilon: SPSA perturbation size (Qiskit head only).
+        spsa_epsilon: SPSA perturbation size (quantum heads only).
         backbone_id: `run_id` of the baseline the head was built on (heads only).
     """
 
@@ -253,7 +250,7 @@ def label(spec: RunSpec, include_seed: bool = True) -> str:
             legends that cover all seeds of a configuration.
 
     Returns:
-        For example `pl_qtl | paper | 6q x 4L | lr 0.0001 | seed 3`.
+        For example `qiskit_qtl | paper | 6q x 4L | lr 0.0001 | seed 3`.
     """
     parts = [spec.paradigm.value]
     if spec.ansatz is not None:

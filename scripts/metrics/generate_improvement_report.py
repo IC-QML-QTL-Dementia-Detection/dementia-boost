@@ -1,8 +1,8 @@
 """Comparative improvement report generator across paradigms on NIfTI data.
 
 This script aggregates evaluation results across the Classical Baseline, Classical
-Transfer Learning (CTL), PennyLane Quantum Transfer Learning (QTL), and Qiskit
-Quantum Transfer Learning (Qiskit QTL) runs on NIfTI data. It reports the mean
+Transfer Learning (CTL), and Qiskit Quantum Transfer Learning (Qiskit QTL) runs
+on NIfTI data. It reports the mean
 and standard deviation of every metric across seeds on the test cohort and on
 the validation cohort, shows the test metrics of the run selected on the
 validation cohort, calculates the relative percentage change between the means

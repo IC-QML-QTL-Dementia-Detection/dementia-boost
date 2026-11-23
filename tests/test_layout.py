@@ -19,21 +19,23 @@ from dementia_boost.core.layout import ConfigCollisionError, ResultsLayout
 
 
 def _qtl(**overrides) -> RunSpec:
-    """The PennyLane QTL spec used as the worked example (6 qubits, 4 layers)."""
+    """The Qiskit QTL spec of the full-dataset runs, used as the worked example
+    (6 qubits, 4 layers; `config_id` `ed2f03b85c3f`)."""
     fields = {
-        "paradigm": Paradigm.PL_QTL,
+        "paradigm": Paradigm.QISKIT_QTL,
         "lr": 1e-4,
         "lr_step_size": 10,
         "lr_gamma": 0.75,
         "epochs": 100,
         "batch_size": 64,
-        "split_id": "5192b1b7c0d3",
+        "split_id": "a67d86da5bb4",
         "seed": 3,
         "ansatz": "paper",
         "n_qubits": 6,
         "n_layers": 4,
-        "gradient": "adjoint",
-        "backbone_id": "c8375944e970",
+        "gradient": "spsa_loss_level",
+        "spsa_epsilon": 0.01,
+        "backbone_id": "9bd3dd1a4c35",
     }
     return RunSpec(**{**fields, **overrides})
 
@@ -53,7 +55,7 @@ class TestPaths:
         """Checkpoint, history, config, metrics, and plots sit under
         `<kind>/<paradigm>/<config_id>/`."""
         spec = _qtl()
-        base = "pl_qtl/9e93de0f8105"
+        base = "qiskit_qtl/ed2f03b85c3f"
         assert layout.checkpoint_path(spec) == str(
             tmp_path / "checkpoints" / base / "seed_3.pt"
         )
@@ -63,13 +65,13 @@ class TestPaths:
         assert layout.config_path(spec) == str(
             tmp_path / "histories" / base / "config.json"
         )
-        assert layout.metrics_path("pl_qtl", "9e93de0f8105", "val") == str(
+        assert layout.metrics_path("qiskit_qtl", "ed2f03b85c3f", "val") == str(
             tmp_path / "metrics" / base / "val_results.json"
         )
-        assert layout.metrics_path("pl_qtl", "9e93de0f8105", "test") == str(
+        assert layout.metrics_path("qiskit_qtl", "ed2f03b85c3f", "test") == str(
             tmp_path / "metrics" / base / "test_results.json"
         )
-        assert layout.plots_dir("pl_qtl", "9e93de0f8105") == str(
+        assert layout.plots_dir("qiskit_qtl", "ed2f03b85c3f") == str(
             tmp_path / "plots" / base
         )
 
@@ -100,13 +102,13 @@ class TestPaths:
     ) -> None:
         """Paths do not depend on how the paradigm is spelled."""
         assert layout.metrics_path(
-            Paradigm.PL_QTL, "abc", "val"
-        ) == layout.metrics_path("pl_qtl", "abc", "val")
+            Paradigm.QISKIT_QTL, "abc", "val"
+        ) == layout.metrics_path("qiskit_qtl", "abc", "val")
 
     def test_unknown_cohort_for_metrics_raises(self, layout: ResultsLayout) -> None:
         """Only validation and test have a results file."""
         with pytest.raises(ValueError, match="cohort"):
-            layout.metrics_path("pl_qtl", "abc", "train")
+            layout.metrics_path("qiskit_qtl", "abc", "train")
 
 
 class TestHistoryFiles:
@@ -136,14 +138,15 @@ class TestHistoryFiles:
             n_qubits=None,
             n_layers=None,
             gradient=None,
+            spsa_epsilon=None,
             backbone_id=None,
         )
         for spec in (first, other_layers, baseline):
             self._touch(layout.history_path(spec))
 
         assert len(layout.history_files()) == 3
-        assert len(layout.history_files("pl_qtl")) == 2
-        assert layout.history_files("pl_qtl", config_id(first)) == [
+        assert len(layout.history_files("qiskit_qtl")) == 2
+        assert layout.history_files("qiskit_qtl", config_id(first)) == [
             layout.history_path(first)
         ]
 

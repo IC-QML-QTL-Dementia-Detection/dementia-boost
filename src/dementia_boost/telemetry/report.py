@@ -24,11 +24,8 @@ REPORT_METRICS = ("accuracy", "precision", "recall", "f1_score", "auc")
 SELECTION_RULE = "validation AUC-ROC, then F1-score, then lowest log loss"
 DELTA_PAIRS = (
     (Paradigm.CTL, Paradigm.BASELINE),
-    (Paradigm.PL_QTL, Paradigm.BASELINE),
-    (Paradigm.PL_QTL, Paradigm.CTL),
     (Paradigm.QISKIT_QTL, Paradigm.BASELINE),
     (Paradigm.QISKIT_QTL, Paradigm.CTL),
-    (Paradigm.QISKIT_QTL, Paradigm.PL_QTL),
 )
 
 

@@ -1,9 +1,8 @@
 """Dressed Quantum Network (DQN) classification head using Qiskit.
 
 Composes the classical pre-net, angle scaling, Qiskit quantum layer, and
-classical post-net into an interchangeable PyTorch `nn.Module`, mirroring the
-`PennylaneQuantumClassifierHead` contract while executing the variational
-circuit through Qiskit Primitives V2.
+classical post-net into a PyTorch `nn.Module` that replaces the classical
+dense head, executing the variational circuit through Qiskit Primitives V2.
 """
 
 import math
@@ -81,7 +80,8 @@ class QiskitQuantumClassifierHead(nn.Module):
             seed: Seed of the SPSA perturbation generator. If None, follows the
                 seed locked by `core.reproducibility.set_seed`.
             estimator: Optional Qiskit Primitives V2 estimator executing the
-                circuit. If None, resolves to a noiseless `StatevectorEstimator`.
+                circuit. If None, resolves to Aer's noiseless state-vector
+                `EstimatorV2`.
             embedding: Registry name of the embedding (see
                 `qiskit_embeddings`). Defaults to the paper's angle embedding.
             block: Registry name of the variational block (see

@@ -218,12 +218,11 @@ def create_qiskit_quantum_layer(
 ) -> QiskitQuantumLayer:
     """Instantiates the Qiskit variational layer for the Bhowmik et al. (2025) ansatz.
 
-    Mirrors `create_quantum_layer` on the PennyLane side. Expectation values
-    are exact and noiseless. Gradients flow to both the circuit weights and the
-    upstream classical inputs, so autograd can backpropagate through the
-    pre-net feeding this layer. They are SPSA estimates, because exact
-    parameter-shift needs 204 shifted circuits per sample at the default
-    6-qubit, 4-layer depth.
+    Expectation values are exact and noiseless. Gradients flow to both the
+    circuit weights and the upstream classical inputs, so autograd can
+    backpropagate through the pre-net feeding this layer. They are SPSA
+    estimates, because exact parameter-shift needs 204 shifted circuits per
+    sample at the default 6-qubit, 4-layer depth.
 
     Args:
         n_qubits: Number of qubits in the circuit. Defaults to 6.

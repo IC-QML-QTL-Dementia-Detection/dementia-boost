@@ -3,8 +3,8 @@
 Owns a single responsibility: given a circuit, its Pauli observables, and a
 batch of parameter values, return the expectation values. Which
 `BaseEstimatorV2` implementation executes the circuit is a dependency chosen by
-the caller, mirroring how `resolve_quantum_device` selects the PennyLane
-device. Gradient estimation stays with the layer that uses this runner.
+the caller (`resolve_qiskit_estimator`). Gradient estimation stays with the
+layer that uses this runner.
 """
 
 from collections.abc import Sequence
