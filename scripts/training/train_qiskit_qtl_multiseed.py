@@ -5,9 +5,6 @@ validation metrics, extracts and caches the train and validation feature
 representations once, and trains a hybrid Qiskit v2.x Dressed Quantum Network
 (DQN) classification head across multiple random seeds (0 to 100) using
 BCEWithLogitsLoss on NIfTI axial slices. The test cohort is never loaded here.
-Independent and interchangeable with `train_qtl_multiseed.py`, sharing the same
-classical backbone and ansatz formulation while executing on Qiskit Primitives V2
-instead of PennyLane.
 
 Gradient strategy: exact parameter-shift scales linearly with the number of
 differentiable parameters (72 circuit weights + 6 angle-embedded inputs at the

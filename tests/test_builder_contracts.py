@@ -2,7 +2,7 @@
 
 This module validates:
 - ``load_baseline_backbone`` weight restoration and parameter freezing.
-- ``build_ctl_model`` and ``build_pl_qtl_model`` structural
+- ``build_ctl_model`` and ``build_qiskit_qtl_model`` structural
   contracts (frozen backbone, freshly initialized head, device placement).
 - ``build_qiskit_qtl_model`` passing the embedding, variational block, and
   re-uploading choice through to the circuit builder.
@@ -28,7 +28,6 @@ import torch
 from dementia_boost.models.builder import (
     assemble_dementia_classifier,
     build_ctl_model,
-    build_pl_qtl_model,
     build_qiskit_qtl_model,
     load_baseline_backbone,
 )
@@ -38,7 +37,7 @@ from dementia_boost.models.classical_cnn import (
     LeNetFeatureExtractor,
 )
 from dementia_boost.models.quantum_cnn import (
-    PennylaneQuantumClassifierHead,
+    QiskitQuantumClassifierHead,
     build_qiskit_ansatz,
     qiskit_heads,
 )
@@ -118,20 +117,19 @@ class TestBuildQuantumTlModel:
         tmp_path: Path,
     ) -> None:
         """Asserts that the returned model has a frozen backbone and an
-        active `PennylaneQuantumClassifierHead`."""
+        active `QiskitQuantumClassifierHead`."""
         device = torch.device("cpu")
         checkpoint_path = _write_mock_baseline_checkpoint(tmp_path)
 
-        model = build_pl_qtl_model(
+        model = build_qiskit_qtl_model(
             checkpoint_path,
             device,
             n_qubits=_TEST_QUBITS,
             n_layers=_TEST_LAYERS,
-            quantum_device="default.qubit",
         )
 
         assert isinstance(model, DementiaClassifier)
-        assert isinstance(model.classifier_head, PennylaneQuantumClassifierHead)
+        assert isinstance(model.classifier_head, QiskitQuantumClassifierHead)
 
         for param in model.feature_extractor.parameters():
             assert param.requires_grad is False

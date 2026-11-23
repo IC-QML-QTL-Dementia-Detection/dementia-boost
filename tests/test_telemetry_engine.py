@@ -250,12 +250,12 @@ class TestTrainingHistorySerialization:
         assert MetricsAnalyzer.load_history(str(filepath)) == history
 
     def _history(self) -> TrainingHistory:
-        """A two-epoch PL QTL history with a spec and extras."""
+        """A two-epoch Qiskit QTL history with a spec and extras."""
         return TrainingHistory(
             spec=build_spec(
-                "pl_qtl", seed=7, lr=1e-4, batch_size=64, n_qubits=6, n_layers=4
+                "qiskit_qtl", seed=7, lr=1e-4, batch_size=64, n_qubits=6, n_layers=4
             ),
-            extras={"quantum_device": "lightning.qubit"},
+            extras={"estimator": "EstimatorV2"},
             epochs=[
                 EpochRecord(1, 0.69, 0.51, 0.70, 0.50, 1e-4, 1.5),
                 EpochRecord(2, 0.65, 0.58, None, None, 1e-4, 1.4),

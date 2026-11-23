@@ -15,7 +15,6 @@ from dementia_boost.core.identity import Paradigm
 PARADIGM_NAMES: dict[str, str] = {
     Paradigm.BASELINE: "Baseline",
     Paradigm.CTL: "CTL",
-    Paradigm.PL_QTL: "QTL (PennyLane)",
     Paradigm.QISKIT_QTL: "QTL (Qiskit)",
 }
 

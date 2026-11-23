@@ -59,28 +59,17 @@ def _ctl(**overrides) -> RunSpec:
 
 
 def _qtl(**overrides) -> RunSpec:
-    """A valid PennyLane quantum transfer learning spec (6 qubits, 4 layers)."""
+    """A valid Qiskit quantum transfer learning spec (6 qubits, 4 layers)."""
     return _baseline(
         **{
-            "paradigm": Paradigm.PL_QTL,
+            "paradigm": Paradigm.QISKIT_QTL,
             "ansatz": "paper",
             "n_qubits": 6,
             "n_layers": 4,
-            "gradient": "adjoint",
-            "backbone_id": _BACKBONE_ID,
-            "seed": 3,
-            **overrides,
-        }
-    )
-
-
-def _qiskit(**overrides) -> RunSpec:
-    """A valid Qiskit quantum transfer learning spec."""
-    return _qtl(
-        **{
-            "paradigm": Paradigm.QISKIT_QTL,
             "gradient": "spsa",
             "spsa_epsilon": 0.1,
+            "backbone_id": _BACKBONE_ID,
+            "seed": 3,
             **overrides,
         }
     )
@@ -90,17 +79,12 @@ class TestParadigm:
     """Validates the single definition of paradigm names."""
 
     def test_members_and_values(self) -> None:
-        """The four paradigms exist under their current names."""
-        assert {p.value for p in Paradigm} == {
-            "baseline",
-            "ctl",
-            "pl_qtl",
-            "qiskit_qtl",
-        }
+        """The three paradigms exist under their current names."""
+        assert {p.value for p in Paradigm} == {"baseline", "ctl", "qiskit_qtl"}
 
     def test_is_a_string(self) -> None:
         """A paradigm compares equal to its name, so it can sit in a path or JSON."""
-        assert Paradigm.PL_QTL == "pl_qtl"
+        assert Paradigm.QISKIT_QTL == "qiskit_qtl"
         assert Paradigm("ctl") is Paradigm.CTL
 
 
@@ -130,11 +114,18 @@ class TestIdentity:
     """Validates `config_id` and `run_id`."""
 
     def test_golden_values(self) -> None:
-        """Fixed spec, fixed IDs: guards the canonical serialisation. The values
-        were computed independently of the implementation."""
-        spec = _qtl()
-        assert config_id(spec) == "9e93de0f8105"
-        assert run_id(spec) == "dc65824ec4d4"
+        """Fixed spec, fixed IDs: guards the canonical serialisation. The spec
+        is the Qiskit head with the paper's circuit as trained on the full
+        dataset, and the IDs are the ones its stored results carry, so a
+        change here would orphan existing results."""
+        spec = _qtl(
+            gradient="spsa_loss_level",
+            spsa_epsilon=0.01,
+            backbone_id="9bd3dd1a4c35",
+            split_id="a67d86da5bb4",
+        )
+        assert config_id(spec) == "ed2f03b85c3f"
+        assert run_id(spec) == "4682f2231a0c"
 
     def test_same_spec_same_ids(self) -> None:
         """Two equal specs give equal IDs."""
@@ -186,37 +177,37 @@ class TestIdentity:
 
 
 class TestVariationalBlockAndReupload:
-    """Validates the block and re-uploading fields of the Qiskit head."""
+    """Validates the block and re-uploading fields of the quantum head."""
 
     def test_defaults_are_stored_as_none_and_keep_existing_ids(self) -> None:
         """Naming the paper's block or turning re-uploading off describes the
         circuit every existing run used, so it must give the same IDs."""
-        explicit = _qiskit(block="paper", reupload=False)
+        explicit = _qtl(block="paper", reupload=False)
         assert explicit.block is None
         assert explicit.reupload is None
-        assert config_id(explicit) == config_id(_qiskit())
-        assert run_id(explicit) == run_id(_qiskit())
+        assert config_id(explicit) == config_id(_qtl())
+        assert run_id(explicit) == run_id(_qtl())
 
     @pytest.mark.parametrize("overrides", [{"block": "other"}, {"reupload": True}])
     def test_another_block_or_reuploading_is_another_configuration(
         self, overrides: dict
     ) -> None:
         """A different block, or re-uploading, gives a new `config_id`."""
-        assert config_id(_qiskit(**overrides)) != config_id(_qiskit())
+        assert config_id(_qtl(**overrides)) != config_id(_qtl())
 
     @pytest.mark.parametrize("overrides", [{"block": "other"}, {"reupload": True}])
-    @pytest.mark.parametrize("make", [_baseline, _ctl, _qtl])
-    def test_only_the_qiskit_head_accepts_them(self, make, overrides: dict) -> None:
-        """Blocks and re-uploading exist only on the Qiskit side for now."""
+    @pytest.mark.parametrize("make", [_baseline, _ctl])
+    def test_classical_paradigms_reject_them(self, make, overrides: dict) -> None:
+        """Blocks and re-uploading belong to the quantum head only."""
         with pytest.raises(ValueError, match="must not set"):
             make(**overrides)
 
     def test_label_names_a_non_default_block_and_reuploading(self) -> None:
         """The label shows the block and re-uploading only when they are set."""
-        assert label(_qiskit(block="other", reupload=True)) == (
+        assert label(_qtl(block="other", reupload=True)) == (
             "qiskit_qtl | paper | block other | reupload | 6q x 4L | lr 0.0001 | seed 3"
         )
-        assert "block" not in label(_qiskit())
+        assert "block" not in label(_qtl())
 
 
 class TestBackbone:
@@ -242,7 +233,7 @@ class TestBackbone:
 class TestSerialisation:
     """Validates the JSON round trip of the spec."""
 
-    @pytest.mark.parametrize("make", [_baseline, _ctl, _qtl, _qiskit])
+    @pytest.mark.parametrize("make", [_baseline, _ctl, _qtl])
     def test_round_trip_through_json(self, make) -> None:
         """A spec written to JSON and read back is equal to the original."""
         spec = make()
@@ -267,7 +258,7 @@ class TestValidation:
             {"n_layers": 4},
             {"ansatz": "paper"},
             {"quantum_lr": 1e-2},
-            {"gradient": "adjoint"},
+            {"gradient": "spsa"},
             {"backbone_id": _BACKBONE_ID},
         ],
     )
@@ -288,22 +279,14 @@ class TestValidation:
             _ctl(**overrides)
 
     @pytest.mark.parametrize(
-        "field", ["ansatz", "n_qubits", "n_layers", "gradient", "backbone_id"]
+        "field",
+        ["ansatz", "n_qubits", "n_layers", "gradient", "spsa_epsilon", "backbone_id"],
     )
     def test_qtl_requires_its_fields(self, field: str) -> None:
-        """A PennyLane quantum head needs ansatz, qubits, layers, gradient, backbone."""
+        """A quantum head needs ansatz, qubits, layers, gradient, SPSA step,
+        and backbone."""
         with pytest.raises(ValueError, match=field):
             _qtl(**{field: None})
-
-    def test_qtl_rejects_spsa_epsilon(self) -> None:
-        """The SPSA step belongs to the Qiskit path only."""
-        with pytest.raises(ValueError, match="spsa_epsilon"):
-            _qtl(spsa_epsilon=0.1)
-
-    def test_qiskit_requires_spsa_epsilon(self) -> None:
-        """The Qiskit path records its SPSA step in the spec."""
-        with pytest.raises(ValueError, match="spsa_epsilon"):
-            _qiskit(spsa_epsilon=None)
 
     def test_a_string_paradigm_is_accepted(self) -> None:
         """A paradigm given as its name is converted to the enum."""
@@ -315,12 +298,13 @@ class TestLabel:
 
     def test_qtl_label(self) -> None:
         """The label names the paradigm, ansatz, size, learning rate, and seed."""
-        assert label(_qtl()) == "pl_qtl | paper | 6q x 4L | lr 0.0001 | seed 3"
+        assert label(_qtl()) == "qiskit_qtl | paper | 6q x 4L | lr 0.0001 | seed 3"
 
     def test_label_without_seed_for_config_legends(self) -> None:
         """A config-level label leaves the seed out."""
         assert (
-            label(_qtl(), include_seed=False) == "pl_qtl | paper | 6q x 4L | lr 0.0001"
+            label(_qtl(), include_seed=False)
+            == "qiskit_qtl | paper | 6q x 4L | lr 0.0001"
         )
 
     def test_quantum_lr_appears_when_set(self) -> None:

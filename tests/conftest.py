@@ -27,13 +27,6 @@ _SPEC_DEFAULTS: dict[str, Any] = {
 _HEAD_DEFAULTS: dict[Paradigm, dict[str, Any]] = {
     Paradigm.BASELINE: {},
     Paradigm.CTL: {"backbone_id": "c8375944e970"},
-    Paradigm.PL_QTL: {
-        "ansatz": "paper",
-        "n_qubits": 2,
-        "n_layers": 1,
-        "gradient": "adjoint",
-        "backbone_id": "c8375944e970",
-    },
     Paradigm.QISKIT_QTL: {
         "ansatz": "paper",
         "n_qubits": 2,

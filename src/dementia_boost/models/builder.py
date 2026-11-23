@@ -13,7 +13,6 @@ from qiskit.primitives import BaseEstimatorV2
 from dementia_boost.models.quantum_cnn import (
     DEFAULT_BLOCK,
     DEFAULT_EMBEDDING,
-    PennylaneQuantumClassifierHead,
     QiskitQuantumClassifierHead,
 )
 
@@ -97,57 +96,6 @@ def build_ctl_model(
     return model.to(device)
 
 
-def build_pl_qtl_model(
-    baseline_weights_path: str,
-    device: torch.device,
-    n_qubits: int = PennylaneQuantumClassifierHead.DEFAULT_N_QUBITS,
-    n_layers: int = PennylaneQuantumClassifierHead.DEFAULT_N_LAYERS,
-    quantum_device: str | None = None,
-) -> nn.Module:
-    """Builds a Quantum Transfer Learning (QTL) hybrid model.
-
-    Loads a pre-trained classical baseline CNN checkpoint, freezes its
-    convolutional backbone parameters, and substitutes its classification head
-    with a Dressed Quantum Network (pre-net + VQC + post-net) initialized
-    with Glorot Uniform weights.
-
-    Args:
-        baseline_weights_path: Filepath to the saved baseline `.pt` weight file.
-        device: The target hardware accelerator device (CPU, CUDA, MPS).
-        n_qubits: Number of qubits in the variational quantum circuit.
-        n_layers: Number of variational repetitions (depth) in the ansatz.
-        quantum_device: Optional PennyLane simulation device backend name.
-
-    Returns:
-        The prepared hybrid PyTorch module with frozen backbone and initialized
-        quantum head, allocated on the target device.
-    """
-    model = DementiaClassifier(
-        feature_extractor=LeNetFeatureExtractor(),
-        classifier_head=ClassicalClassifierHead(use_sigmoid=False),
-    )
-
-    state_dict = torch.load(
-        baseline_weights_path,
-        map_location=device,
-        weights_only=True,
-    )
-    model.load_state_dict(state_dict)
-
-    for param in model.feature_extractor.parameters():
-        param.requires_grad = False
-
-    model.classifier_head = PennylaneQuantumClassifierHead(
-        in_features=PennylaneQuantumClassifierHead.DEFAULT_IN_FEATURES,
-        n_qubits=n_qubits,
-        n_layers=n_layers,
-        quantum_device=quantum_device,
-    )
-
-    model.classifier_head.apply(PennylaneQuantumClassifierHead.apply_glorot_init)
-    return model.to(device)
-
-
 def build_qiskit_qtl_model(
     baseline_weights_path: str,
     device: torch.device,
@@ -163,10 +111,7 @@ def build_qiskit_qtl_model(
     Loads a pre-trained classical baseline CNN checkpoint, freezes its
     convolutional backbone parameters, and substitutes its classification head
     with a Qiskit v2.x Dressed Quantum Network (pre-net + VQC + post-net)
-    initialized with Glorot Uniform weights. Independent and interchangeable
-    with `build_pl_qtl_model`, sharing the same classical backbone and
-    ansatz formulation while executing on Qiskit Primitives V2 instead of
-    PennyLane.
+    initialized with Glorot Uniform weights.
 
     Args:
         baseline_weights_path: Filepath to the saved baseline `.pt` weight file.
@@ -174,7 +119,8 @@ def build_qiskit_qtl_model(
         n_qubits: Number of qubits in the variational quantum circuit.
         n_layers: Number of variational repetitions (depth) in the ansatz.
         estimator: Optional Qiskit Primitives V2 estimator executing the
-            circuit. If None, resolves to a noiseless `StatevectorEstimator`.
+            circuit. If None, resolves to Aer's noiseless state-vector
+            `EstimatorV2`.
         embedding: Registry name of the embedding of the quantum head.
             Defaults to the paper's angle embedding.
         block: Registry name of the variational block of the quantum head.

@@ -9,8 +9,7 @@ This module validates:
   the SPSA perturbations.
 - ``QiskitQuantumClassifierHead`` end-to-end forward/backward pass and
   Glorot init isolation from quantum circuit weights.
-- Input and weight dependence of the circuit output, and agreement of the
-  PennyLane and Qiskit layers on identical parameters.
+- Input and weight dependence of the circuit output.
 
 Regression coverage
 --------------------
@@ -47,7 +46,6 @@ from dementia_boost.models.quantum_cnn import (
     QiskitExpectationRunner,
     QiskitQuantumClassifierHead,
 )
-from dementia_boost.models.quantum_cnn.pennylane_circuit import create_quantum_layer
 from dementia_boost.models.quantum_cnn.qiskit_circuit import build_qiskit_ansatz
 from dementia_boost.models.quantum_cnn.qiskit_layer import (
     QiskitQuantumLayer,
@@ -208,8 +206,7 @@ class TestQiskitAnsatzConstruction:
     def test_paper_block_keeps_the_gate_and_weight_order(self) -> None:
         """Asserts the registered `paper` block builds exactly the base paper's
         gate sequence after the Hadamard and RZ embedding, with the weights in
-        the flat `[theta, gamma, beta]` order that saved checkpoints and the
-        PennyLane parity mapping rely on."""
+        the flat `[theta, gamma, beta]` order that saved checkpoints rely on."""
         n_qubits, n_layers = 3, 2
         circuit, _, weight_params, _ = build_qiskit_ansatz(
             n_qubits=n_qubits, n_layers=n_layers, block="paper"
@@ -422,35 +419,6 @@ class TestQiskitQuantumLayerInputDependence:
         assert inputs.grad is not None
         assert layer.weight.grad.abs().max() > _MIN_GRADIENT
         assert inputs.grad.abs().max() > _MIN_GRADIENT
-
-
-class TestPennylaneQiskitParity:
-    """Validates that both frameworks evaluate the same circuit."""
-
-    def test_layers_agree_on_identical_inputs_and_weights(self) -> None:
-        """Binds the same angles and weights into the PennyLane layer and the
-        Qiskit layer and asserts equal `<Z_i>`. This pins the qubit ordering
-        of the observables and the mapping from PennyLane's
-        `(layer, kind, qubit)` weights to Qiskit's flat `[theta, gamma, beta]`
-        vector."""
-        n_qubits, n_layers = 3, 2
-        pennylane_layer = create_quantum_layer(
-            n_qubits=n_qubits, n_layers=n_layers, quantum_device="default.qubit"
-        )
-        qiskit_layer = _layer(n_qubits, n_layers, seed=0)
-
-        weights = pennylane_layer.weights.detach().double()
-        flat = torch.cat([weights[:, kind, :].flatten() for kind in range(3)])
-        qiskit_layer.weight.data = flat.to(qiskit_layer.weight.dtype)
-
-        inputs = ((torch.rand(4, n_qubits) - 0.5) * math.pi).double()
-        with torch.no_grad():
-            expected = pennylane_layer(inputs)
-            actual = qiskit_layer(inputs)
-
-        assert torch.allclose(
-            actual.double(), expected.double(), atol=_PARITY_TOLERANCE
-        )
 
 
 class TestQiskitQuantumLayerSpsaBackward:

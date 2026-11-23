@@ -3,8 +3,7 @@
 Composes a registered embedding (`qiskit_embeddings.py`) and `n_layers` layers
 of a registered variational block (`qiskit_blocks.py`) into one Qiskit v2.x
 `QuantumCircuit`, with `SparsePauliOp` Pauli-Z observables. With the defaults it
-is the circuit of Bhowmik et al. (2025) plus a Hadamard layer, the counterpart
-of the PennyLane circuit in `pennylane_circuit.py`.
+is the circuit of Bhowmik et al. (2025) plus a Hadamard layer.
 """
 
 from qiskit.circuit import ParameterVector, QuantumCircuit

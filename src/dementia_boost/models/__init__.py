@@ -7,7 +7,6 @@ builders for Classical Transfer Learning (CTL) and Quantum Transfer Learning (QT
 
 from .builder import (
     build_ctl_model,
-    build_pl_qtl_model,
     build_qiskit_qtl_model,
 )
 from .classical_cnn import (
@@ -15,14 +14,13 @@ from .classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
-from .quantum_cnn import PennylaneQuantumClassifierHead
+from .quantum_cnn import QiskitQuantumClassifierHead
 
 __all__ = [
     "ClassicalClassifierHead",
     "DementiaClassifier",
     "LeNetFeatureExtractor",
-    "PennylaneQuantumClassifierHead",
+    "QiskitQuantumClassifierHead",
     "build_ctl_model",
-    "build_pl_qtl_model",
     "build_qiskit_qtl_model",
 ]

@@ -65,15 +65,16 @@ class TestPlotParadigm:
     ) -> None:
         """The highlighted run is the best on validation, not the best on test."""
         layout = ResultsLayout(str(tmp_path))
-        spec_a, spec_b = build_spec("pl_qtl", seed=1), build_spec("pl_qtl", seed=2)
+        spec_a = build_spec("qiskit_qtl", seed=1)
+        spec_b = build_spec("qiskit_qtl", seed=2)
         _write_results(layout, spec_a, spec_b)
 
-        plot_paradigm(layout, Paradigm.PL_QTL)
+        plot_paradigm(layout, Paradigm.QISKIT_QTL)
 
-        plots = Path(layout.plots_dir("pl_qtl", config_id(spec_a)))
+        plots = Path(layout.plots_dir("qiskit_qtl", config_id(spec_a)))
         names = {path.name for path in plots.glob("*.png")}
-        assert f"pl_qtl_isolated_roc_{run_id(spec_b)}.png" in names
-        assert f"pl_qtl_cm_{run_id(spec_b)}.png" in names
+        assert f"qiskit_qtl_isolated_roc_{run_id(spec_b)}.png" in names
+        assert f"qiskit_qtl_cm_{run_id(spec_b)}.png" in names
         assert not any(run_id(spec_a) in name for name in names)
 
     def test_writes_every_plot_with_the_vector_formats(self, tmp_path: Path) -> None:
@@ -81,19 +82,22 @@ class TestPlotParadigm:
         extra formats with the PNG's name, and the caller learns which
         configurations got plots."""
         layout = ResultsLayout(str(tmp_path))
-        spec_a, spec_b = build_spec("pl_qtl", seed=1), build_spec("pl_qtl", seed=2)
+        spec_a = build_spec("qiskit_qtl", seed=1)
+        spec_b = build_spec("qiskit_qtl", seed=2)
         _write_results(layout, spec_a, spec_b)
 
-        plotted = plot_paradigm(layout, Paradigm.PL_QTL, vector_formats=("svg", "pdf"))
+        plotted = plot_paradigm(
+            layout, Paradigm.QISKIT_QTL, vector_formats=("svg", "pdf")
+        )
 
         assert plotted == [config_id(spec_a)]
-        plots = Path(layout.plots_dir("pl_qtl", config_id(spec_a)))
+        plots = Path(layout.plots_dir("qiskit_qtl", config_id(spec_a)))
         stems = {path.stem for path in plots.glob("*.png")}
         assert stems == {
-            "pl_qtl_distributions",
-            "pl_qtl_roc_curves",
-            f"pl_qtl_isolated_roc_{run_id(spec_b)}",
-            f"pl_qtl_cm_{run_id(spec_b)}",
+            "qiskit_qtl_distributions",
+            "qiskit_qtl_roc_curves",
+            f"qiskit_qtl_isolated_roc_{run_id(spec_b)}",
+            f"qiskit_qtl_cm_{run_id(spec_b)}",
         }
         assert all(path.stat().st_size > 0 for path in plots.glob("*.png"))
         for extension in ("svg", "pdf"):
@@ -140,8 +144,8 @@ class TestPlotLosses:
         per-run plots stay PNG."""
         layout = ResultsLayout(str(tmp_path))
         specs = [
-            build_spec("pl_qtl", seed=1),
-            build_spec("pl_qtl", seed=2),
+            build_spec("qiskit_qtl", seed=1),
+            build_spec("qiskit_qtl", seed=2),
             build_spec("ctl", seed=1),
         ]
         for spec in specs:
@@ -150,10 +154,11 @@ class TestPlotLosses:
 
         plotted = plot_losses(layout, vector_formats=("svg", "pdf"))
 
-        qtl_plots = Path(layout.plots_dir("pl_qtl", config_id(specs[0])))
+        qtl_plots = Path(layout.plots_dir("qiskit_qtl", config_id(specs[0])))
         for spec in specs[:2]:
-            assert (qtl_plots / f"pl_qtl_{run_id(spec)}_loss.png").stat().st_size > 0
-        assert (qtl_plots / "pl_qtl_loss_distribution.png").stat().st_size > 0
+            run_plot = qtl_plots / f"qiskit_qtl_{run_id(spec)}_loss.png"
+            assert run_plot.stat().st_size > 0
+        assert (qtl_plots / "qiskit_qtl_loss_distribution.png").stat().st_size > 0
         assert not list(qtl_plots.glob("*.svg"))
         plots = Path(layout.root) / "plots"
         for extension in ("png", "svg", "pdf"):
@@ -171,21 +176,23 @@ class TestPlotLosses:
         """An excluded configuration is missing from the comparison but keeps its
         own plots."""
         layout = ResultsLayout(str(tmp_path))
-        kept, excluded = build_spec("pl_qtl", seed=1), build_spec("ctl", seed=1)
+        kept, excluded = build_spec("qiskit_qtl", seed=1), build_spec("ctl", seed=1)
         for spec in (kept, excluded):
             self._write_history(layout, spec)
             layout.write_config(spec)
 
         plotted = plot_losses(layout, exclude=[config_id(excluded)])
 
-        assert list(plotted.values()) == [layout.history_dir("pl_qtl", config_id(kept))]
+        assert list(plotted.values()) == [
+            layout.history_dir("qiskit_qtl", config_id(kept))
+        ]
         own_plots = Path(layout.plots_dir("ctl", config_id(excluded)))
         assert (own_plots / "ctl_loss_distribution.png").stat().st_size > 0
 
     def test_unknown_excluded_configuration_is_refused(self, tmp_path: Path) -> None:
         """A mistyped ID fails instead of drawing the figure with everything."""
         layout = ResultsLayout(str(tmp_path))
-        spec = build_spec("pl_qtl", seed=1)
+        spec = build_spec("qiskit_qtl", seed=1)
         self._write_history(layout, spec)
         layout.write_config(spec)
 
@@ -203,7 +210,7 @@ class TestPlotMetricComparisons:
     def test_excluded_configuration_is_left_out(self, tmp_path: Path) -> None:
         """Only the configurations not excluded are drawn, on every cohort."""
         layout = ResultsLayout(str(tmp_path))
-        for paradigm in ("pl_qtl", "ctl"):
+        for paradigm in ("qiskit_qtl", "ctl"):
             _write_results(
                 layout,
                 build_spec(paradigm, seed=1),
@@ -215,13 +222,13 @@ class TestPlotMetricComparisons:
 
         assert set(drawn) == {"test", "val"}
         assert all(len(labels) == 1 for labels in drawn.values())
-        assert all("pl_qtl" in labels[0] for labels in drawn.values())
+        assert all("qiskit_qtl" in labels[0] for labels in drawn.values())
 
     def test_unknown_excluded_configuration_is_refused(self, tmp_path: Path) -> None:
         """A mistyped ID fails instead of drawing the figure with everything."""
         layout = ResultsLayout(str(tmp_path))
         _write_results(
-            layout, build_spec("pl_qtl", seed=1), build_spec("pl_qtl", seed=2)
+            layout, build_spec("qiskit_qtl", seed=1), build_spec("qiskit_qtl", seed=2)
         )
 
         with pytest.raises(ValueError, match="000000000000"):

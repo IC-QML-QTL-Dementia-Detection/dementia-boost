@@ -4,8 +4,8 @@ This script reads the evaluation results of every configuration of every
 paradigm (written by the `evaluate_*` scripts) and draws, for the test cohort and
 for the validation cohort, one figure with a box per configuration and metric to
 `data/results/plots/metric_comparison_<cohort>.png`. Use it to compare, for
-example, the embeddings of the Qiskit quantum head against the baseline, CTL, and
-PennyLane references. Configurations without results simply do not appear.
+example, the embeddings of the Qiskit quantum head against the baseline and CTL
+references. Configurations without results simply do not appear.
 
 By default the legend shows the full configuration labels, which say exactly what
 ran. `--production` writes a second set of figures, with short presentation names,

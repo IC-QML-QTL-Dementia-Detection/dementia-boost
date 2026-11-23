@@ -1,6 +1,6 @@
 [project]
 name = "dementia-boost"
-version = "1.12.0"
+version = "1.13.0"
 description = "QML for classifying patients with dementia "
 readme = "README.md"
 authors = [{ name = "Kaue Miziara", email = "kauemiziara@gmail.com" }]
@@ -10,7 +10,6 @@ dependencies = [
     "nibabel>=5.4.2",
     "numpy>=2.4.3",
     "pandas>=3.0.1",
-    "pennylane>=0.45.1",
     "qiskit>=2.5.2",
     "qiskit-aer>=0.17.2",
     "scikit-learn>=1.8.0",
@@ -77,6 +76,6 @@ addopts = [
 
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "quantum: marks tests exercising the PennyLane or Qiskit quantum layers",
+    "quantum: marks tests exercising the Qiskit quantum layers",
     "integration: marks end-to-end integration tests requiring model training",
 ]

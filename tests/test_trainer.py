@@ -30,7 +30,7 @@ from dementia_boost.models.classical_cnn import (
     DementiaClassifier,
     LeNetFeatureExtractor,
 )
-from dementia_boost.models.quantum_cnn import PennylaneQuantumClassifierHead
+from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.metrics import MetricsAnalyzer, TrainingHistory
 from dementia_boost.training.evaluator import ModelEvaluator
@@ -150,7 +150,7 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
     device = torch.device("cpu")
     layout = ResultsLayout(str(tmp_path))
     spec = _spec(
-        Paradigm.PL_QTL,
+        Paradigm.QISKIT_QTL,
         n_qubits=TEST_QTL_QUBITS,
         n_layers=TEST_QTL_LAYERS,
         epochs=1,
@@ -161,12 +161,13 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
         param.requires_grad = False
     raw_loader, train_loader, val_loader = _cached_loaders(extractor, device)
 
-    qtl_head = PennylaneQuantumClassifierHead(
+    qtl_head = QiskitQuantumClassifierHead(
         in_features=FEATURE_DIM,
         n_qubits=TEST_QTL_QUBITS,
         n_layers=TEST_QTL_LAYERS,
+        seed=0,
     ).to(device)
-    qtl_head.apply(PennylaneQuantumClassifierHead.apply_glorot_init)
+    qtl_head.apply(QiskitQuantumClassifierHead.apply_glorot_init)
     full_model = assemble_dementia_classifier(
         feature_extractor=extractor, classifier_head=qtl_head
     )
@@ -197,7 +198,7 @@ def test_baseline_trainer_with_quantum_head_and_cached_embeddings(
 
     evaluator_model = DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
-        classifier_head=PennylaneQuantumClassifierHead(
+        classifier_head=QiskitQuantumClassifierHead(
             in_features=FEATURE_DIM,
             n_qubits=TEST_QTL_QUBITS,
             n_layers=TEST_QTL_LAYERS,
@@ -296,7 +297,7 @@ def test_history_carries_the_spec_and_the_non_identity_extras(tmp_path: Path) ->
         nn.BCEWithLogitsLoss(),
         eval_every=2,
         history_save_every=3,
-        extras={"quantum_device": "lightning.qubit"},
+        extras={"estimator": "EstimatorV2"},
     )
 
     history = trainer.train()
@@ -306,7 +307,7 @@ def test_history_carries_the_spec_and_the_non_identity_extras(tmp_path: Path) ->
     assert history.extras == {
         "eval_every": 2,
         "history_save_every": 3,
-        "quantum_device": "lightning.qubit",
+        "estimator": "EstimatorV2",
     }
 
 
