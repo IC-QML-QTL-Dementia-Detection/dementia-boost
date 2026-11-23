@@ -16,9 +16,9 @@ from dementia_boost.core.identity import Paradigm, RunSpec
 from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.data.data_loader import OasisDataLoader
 from dementia_boost.models.classical_cnn import (
-    ClassicalClassifierHead,
     DementiaClassifier,
     LeNetFeatureExtractor,
+    classical_head_for,
 )
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.training.checkpoint_evaluation import evaluate_paradigm
@@ -43,15 +43,15 @@ def build_model(spec: RunSpec) -> DementiaClassifier:
     """Builds the CTL architecture the checkpoints of a configuration fit.
 
     Args:
-        spec: Spec of one run of the configuration (unused: the classical head
-            has no configurable size).
+        spec: Spec of one run of the configuration; its head and hidden width
+            define the classical head.
 
     Returns:
-        An untrained classifier with a classical head.
+        An untrained classifier with that classical head.
     """
     return DementiaClassifier(
         feature_extractor=LeNetFeatureExtractor(),
-        classifier_head=ClassicalClassifierHead(use_sigmoid=False),
+        classifier_head=classical_head_for(spec),
     )
 
 

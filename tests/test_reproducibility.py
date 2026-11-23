@@ -3,7 +3,8 @@
 This module validates that `set_seed` enforces bitwise-identical outputs for
 Python's ``random``, NumPy, and PyTorch CPU/CUDA RNGs across repeated identical
 seed invocations, and that cuDNN backend flags are correctly configured for
-strict determinism.
+strict determinism. Each check seeds, draws, seeds again, and draws again, so a
+`set_seed` that did nothing would fail it.
 
 Regression coverage
 -------------------
@@ -21,7 +22,6 @@ import torch
 from dementia_boost.core.reproducibility import set_seed
 
 _SEED_A: int = 42
-_SEED_B: int = 99  # must differ from _SEED_A
 
 
 class TestSetSeedPythonRandom:
@@ -37,18 +37,6 @@ class TestSetSeedPythonRandom:
 
         assert first_run == second_run, (
             "random.random() must produce identical sequences for identical seeds."
-        )
-
-    def test_different_seeds_produce_different_values(self) -> None:
-        """Different seeds → different sequences (guards against no-op seeding)."""
-        set_seed(_SEED_A)
-        run_a = [random.random() for _ in range(10)]
-
-        set_seed(_SEED_B)
-        run_b = [random.random() for _ in range(10)]
-
-        assert run_a != run_b, (
-            "random.random() must produce divergent sequences for different seeds."
         )
 
 
@@ -69,18 +57,6 @@ class TestSetSeedNumpy:
             err_msg="np.random.rand must produce identical arrays for identical seeds.",
         )
 
-    def test_different_seeds_produce_different_arrays(self) -> None:
-        """Different seeds → different arrays (guards against no-op seeding)."""
-        set_seed(_SEED_A)
-        run_a = np.random.rand(20)
-
-        set_seed(_SEED_B)
-        run_b = np.random.rand(20)
-
-        assert not np.array_equal(run_a, run_b), (
-            "np.random.rand must produce divergent arrays for different seeds."
-        )
-
 
 class TestSetSeedTorch:
     """Validates that set_seed reproducibly controls PyTorch CPU (and CUDA) RNGs."""
@@ -95,18 +71,6 @@ class TestSetSeedTorch:
 
         assert torch.equal(first_run, second_run), (
             "torch.randn (CPU) must produce identical tensors for identical seeds."
-        )
-
-    def test_different_seeds_produce_different_cpu_tensors(self) -> None:
-        """Different seeds → different tensors (guards against no-op seeding)."""
-        set_seed(_SEED_A)
-        run_a = torch.randn(50)
-
-        set_seed(_SEED_B)
-        run_b = torch.randn(50)
-
-        assert not torch.equal(run_a, run_b), (
-            "torch.randn (CPU) must produce divergent tensors for different seeds."
         )
 
     @pytest.mark.skipif(

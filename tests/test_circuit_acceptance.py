@@ -7,8 +7,11 @@ is tested without new test code:
 - each `<Z_i>` varies with the inputs at fixed weights;
 - the output varies with the circuit weights;
 - the SPSA backward pass gives clearly non-zero gradients for the scaled
-  inputs and for the circuit weights;
-- the default Aer estimator agrees with Qiskit's `StatevectorEstimator`.
+  inputs and for the circuit weights.
+
+The default estimator must be Aer's and agree with Qiskit's
+`StatevectorEstimator` on a set of configurations that contains every gate of
+every registered embedding and block.
 
 Regression coverage
 -------------------
@@ -26,9 +29,12 @@ from functools import partial
 import pytest
 import torch
 from qiskit.primitives import StatevectorEstimator
+from qiskit_aer.primitives import EstimatorV2 as AerEstimator
 
 from dementia_boost.models.quantum_cnn import (
     BLOCKS,
+    DEFAULT_BLOCK,
+    DEFAULT_EMBEDDING,
     EMBEDDINGS,
     QiskitExpectationRunner,
     build_qiskit_ansatz,
@@ -57,6 +63,14 @@ _CONFIGURATIONS = [
         sorted(EMBEDDINGS), sorted(BLOCKS), (False, True)
     )
 ]
+
+# Aer's mistakes depend on the gate types, and re-uploading adds none, so every
+# block with the paper's embedding and every embedding with the paper's block
+# put each gate in front of the parity check.
+_GATE_COVERING = sorted(
+    {(DEFAULT_EMBEDDING, block) for block in BLOCKS}
+    | {(embedding, DEFAULT_BLOCK) for embedding in EMBEDDINGS}
+)
 
 
 def _layer(
@@ -126,33 +140,33 @@ class TestEveryConfiguration:
         assert inputs.grad.abs().max() > _MIN_GRADIENT
         assert layer.weight.grad.abs().max() > _MIN_GRADIENT
 
-    def test_default_estimator_matches_the_reference(
-        self, embedding: str, block: str, reupload: bool
-    ) -> None:
-        """Asserts Aer and `StatevectorEstimator` give the same `<Z_i>` on the
-        same random parameters."""
-        circuit, input_params, weight_vectors, observables = build_qiskit_ansatz(
-            n_qubits=_N_QUBITS,
-            n_layers=_N_LAYERS,
-            embedding=embedding,
-            block=block,
-            reupload=reupload,
-        )
-        parameters = (*input_params, *(p for v in weight_vectors for p in v))
-        default = QiskitExpectationRunner(circuit, observables, parameters)
-        reference = QiskitExpectationRunner(
-            circuit, observables, parameters, estimator=StatevectorEstimator()
-        )
 
-        generator = torch.Generator().manual_seed(3)
-        values = (
-            torch.rand(8, len(parameters), generator=generator, dtype=torch.float64)
-            * 2
-            * math.pi
-        )
+@pytest.mark.parametrize(("embedding", "block"), _GATE_COVERING)
+def test_default_estimator_matches_the_reference(embedding: str, block: str) -> None:
+    """Asserts the default estimator is Aer's and gives the same `<Z_i>` as
+    `StatevectorEstimator` on the same random parameters."""
+    circuit, input_params, weight_vectors, observables = build_qiskit_ansatz(
+        n_qubits=_N_QUBITS,
+        n_layers=_N_LAYERS,
+        embedding=embedding,
+        block=block,
+    )
+    parameters = (*input_params, *(p for v in weight_vectors for p in v))
+    default = QiskitExpectationRunner(circuit, observables, parameters)
+    reference = QiskitExpectationRunner(
+        circuit, observables, parameters, estimator=StatevectorEstimator()
+    )
 
-        assert torch.allclose(
-            default.expectation_values(values),
-            reference.expectation_values(values),
-            atol=_PARITY_TOLERANCE,
-        )
+    generator = torch.Generator().manual_seed(3)
+    values = (
+        torch.rand(8, len(parameters), generator=generator, dtype=torch.float64)
+        * 2
+        * math.pi
+    )
+
+    assert isinstance(default.estimator, AerEstimator)
+    assert torch.allclose(
+        default.expectation_values(values),
+        reference.expectation_values(values),
+        atol=_PARITY_TOLERANCE,
+    )

@@ -35,6 +35,7 @@ import pytest
 from conftest import build_spec
 
 from dementia_boost.core.identity import run_id
+from dementia_boost.core.layout import CONFIG_NAME
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.metrics import (
     EpochRecord,
@@ -322,19 +323,23 @@ class TestSetupLogger:
 class TestMetricsVisualizerLossPlots:
     """Validates the loss plots refuse input they cannot draw.
 
-    The figures themselves are drawn in `test_run_plots.py`, from histories with
-    missing validation epochs and unequal lengths.
+    The figures themselves are not drawn in the tests; a drawing mistake is
+    fixed by plotting the saved histories again.
     """
 
     def test_loss_distribution_rejects_directory_without_histories(
         self,
         tmp_path: Path,
     ) -> None:
-        """Asserts that an empty history directory raises instead of silently
-        writing a blank figure."""
+        """Asserts that a history directory holding only the configuration file
+        raises instead of silently writing a blank figure: `config.json` is not
+        read as a history."""
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
+        (empty_dir / CONFIG_NAME).write_text("{}")
         visualizer = MetricsVisualizer(output_dir=str(tmp_path / "plots"))
 
         with pytest.raises(ValueError, match="No training histories"):
-            visualizer.plot_loss_distribution(str(empty_dir), prefix="qtl")
+            visualizer.plot_loss_distribution(
+                str(empty_dir), prefix="qiskit_qtl", name="QTL (Qiskit)"
+            )

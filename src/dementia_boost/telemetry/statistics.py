@@ -7,7 +7,7 @@ from the same files as the report and regenerated with every evaluation.
 - `majority_class_accuracy`: the accuracy of always answering the most frequent
   class of the cohort, the reference for "no skill".
 - `count_collapsed_runs`: runs that predict a single class, or score at or
-  below that reference.
+  below that reference, and runs whose output is the same for every slice.
 - `compare_paired`: two configurations compared seed by seed (Wilcoxon
   signed-rank test, Hodges-Lehmann estimate with an interval, Holm-adjusted
   p-values over the metrics). Seeds are recovered from the run IDs with
@@ -33,6 +33,10 @@ SEED_SEARCH_LIMIT: int = 10_000
 CONFIDENCE: float = 0.95
 DEFAULT_RESAMPLES: int = 2_000
 THRESHOLD: float = 0.5
+# Largest spread of a run's probabilities that still counts as one output. Far
+# below any difference a working head makes between slices, and above the
+# float32 noise of a head that outputs the same logit for every slice.
+CONSTANT_TOLERANCE: float = 1e-6
 
 # The stored accuracy of an all-majority run and `majority_class_accuracy` are
 # the same ratio computed two ways; they may differ in the last bit.
@@ -70,18 +74,23 @@ def count_collapsed_runs(
     """Counts the runs that learned nothing usable.
 
     Read from each run's confusion matrix `[[TN, FP], [FN, TP]]` (scikit-learn's
-    order, positive class 1 = Demented) at the 0.5 threshold.
+    order, positive class 1 = Demented) at the 0.5 threshold, and from its
+    probabilities. A run predicts a single class in one of two ways: its
+    outputs vary but all fall on one side of the threshold, or its output is
+    the same for every slice (for example a head whose hidden units are all
+    inactive); `constant_output` counts the second kind.
 
     Args:
-        runs: Run entries with `confusion_matrix` and `accuracy`.
+        runs: Run entries with `confusion_matrix`, `accuracy`, and `y_prob`.
         majority: The majority-class accuracy of the cohort.
 
     Returns:
         `runs` (how many), `only_negative` (every slice predicted Nondemented),
         `only_positive` (every slice predicted Demented), `recall_zero` (no
-        Demented slice found, which includes `only_negative`), and
+        Demented slice found, which includes `only_negative`),
         `at_or_below_majority` (accuracy no better than always answering the
-        most frequent class).
+        most frequent class), and `constant_output` (probabilities spread by
+        at most `CONSTANT_TOLERANCE`, which implies a single class).
     """
     counts = {
         "runs": len(runs),
@@ -89,6 +98,7 @@ def count_collapsed_runs(
         "only_positive": 0,
         "recall_zero": 0,
         "at_or_below_majority": 0,
+        "constant_output": 0,
     }
     for run in runs:
         (true_negative, false_positive), (false_negative, true_positive) = run[
@@ -102,6 +112,8 @@ def count_collapsed_runs(
             counts["recall_zero"] += 1
         if run["accuracy"] <= majority + _ROUNDING:
             counts["at_or_below_majority"] += 1
+        if np.ptp(run["y_prob"]) <= CONSTANT_TOLERANCE:
+            counts["constant_output"] += 1
     return counts
 
 
@@ -142,8 +154,8 @@ def share_initial_weights(first: RunSpec, second: RunSpec) -> bool:
 
     The weights are drawn in a fixed order, so the same seed gives the same
     draws when the heads have the same parameters: same paradigm, qubits,
-    layers, and variational block. The embedding and the learning rates do not
-    change the shapes.
+    layers, and variational block, or the same classical head and width. The
+    embedding and the learning rates do not change the shapes.
 
     Args:
         first: Spec of a run of the first configuration.
@@ -152,7 +164,7 @@ def share_initial_weights(first: RunSpec, second: RunSpec) -> bool:
     Returns:
         True if seed `s` starts both configurations from the same weights.
     """
-    fields = ("paradigm", "n_qubits", "n_layers", "block")
+    fields = ("paradigm", "n_qubits", "n_layers", "block", "head", "hidden_features")
     return all(getattr(first, name) == getattr(second, name) for name in fields)
 
 

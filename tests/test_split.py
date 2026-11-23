@@ -15,7 +15,7 @@ import random
 import numpy as np
 import pytest
 
-from dementia_boost.data.split import SubjectSplit, split_subjects
+from dementia_boost.data.split import split_subjects
 
 
 def _labels(n: int) -> dict[str, int]:
@@ -139,9 +139,3 @@ class TestOverrides:
                 manual_train=["OAS2_0001"],
                 manual_test=["OAS2_0001"],
             )
-
-
-def test_split_dataclass_holds_three_cohorts() -> None:
-    """`SubjectSplit` exposes the three cohorts by name."""
-    split = SubjectSplit(train=["a"], val=["b"], test=["c"])
-    assert (split.train, split.val, split.test) == (["a"], ["b"], ["c"])

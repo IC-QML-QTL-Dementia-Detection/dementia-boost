@@ -31,8 +31,11 @@ class Paradigm(StrEnum):
 
 
 DEFAULT_BLOCK = "paper"
+DEFAULT_CLASSICAL_HEAD = "paper"
 
+_CLASSICAL_HEAD_FIELDS = ("head", "hidden_features")
 _HEAD_FIELDS = (
+    *_CLASSICAL_HEAD_FIELDS,
     "ansatz",
     "block",
     "reupload",
@@ -67,7 +70,7 @@ _FORBIDDEN: dict[Paradigm, tuple[str, ...]] = {
         "gradient",
         "spsa_epsilon",
     ),
-    Paradigm.QISKIT_QTL: (),
+    Paradigm.QISKIT_QTL: _CLASSICAL_HEAD_FIELDS,
 }
 _FLOAT_FIELDS = ("lr", "lr_gamma", "quantum_lr", "spsa_epsilon")
 
@@ -121,6 +124,12 @@ class RunSpec:
             only).
         spsa_epsilon: SPSA perturbation size (quantum heads only).
         backbone_id: `run_id` of the baseline the head was built on (heads only).
+        head: Registry name of the classical head, or `None` for the base
+            paper's head (classical transfer heads only).
+            `DEFAULT_CLASSICAL_HEAD` is stored as `None`, so one head has one
+            ID.
+        hidden_features: Width of the classical head's hidden layer, or `None`
+            for the head's own default width (classical transfer heads only).
     """
 
     paradigm: Paradigm
@@ -140,14 +149,16 @@ class RunSpec:
     gradient: str | None = None
     spsa_epsilon: float | None = None
     backbone_id: str | None = None
+    head: str | None = None
+    hidden_features: int | None = None
 
     def __post_init__(self) -> None:
         """Normalises the paradigm, the defaults, and the float fields, then
         validates the spec.
 
         The base paper's block and "no re-uploading" are stored as `None`, the
-        circuit every run used before these fields existed, so naming them
-        explicitly keeps the existing IDs.
+        circuit every run used before these fields existed, and so is the base
+        paper's classical head; naming them explicitly keeps the existing IDs.
 
         Raises:
             ValueError: If a field the paradigm needs is `None`, or a field it
@@ -158,6 +169,8 @@ class RunSpec:
             object.__setattr__(self, "block", None)
         if self.reupload is False:
             object.__setattr__(self, "reupload", None)
+        if self.head == DEFAULT_CLASSICAL_HEAD:
+            object.__setattr__(self, "head", None)
         for name in _FLOAT_FIELDS:
             value = getattr(self, name)
             if value is not None:
@@ -253,6 +266,10 @@ def label(spec: RunSpec, include_seed: bool = True) -> str:
         For example `qiskit_qtl | paper | 6q x 4L | lr 0.0001 | seed 3`.
     """
     parts = [spec.paradigm.value]
+    if spec.head is not None:
+        parts.append(f"head {spec.head}")
+    if spec.hidden_features is not None:
+        parts.append(f"width {spec.hidden_features}")
     if spec.ansatz is not None:
         parts.append(spec.ansatz)
     if spec.block is not None:

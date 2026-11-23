@@ -9,8 +9,14 @@ selected baseline as its `backbone_id`; checkpoints, per-epoch histories, and
 configuration are written where `ResultsLayout` puts them, and a run whose
 checkpoint exists is skipped. Loss plots are rendered from the histories by
 `scripts/viz/visualize_loss.py`.
+
+`--head` picks the classical head from the registry (the base paper's head by
+default, or `tanh_bottleneck`, the quantum head's classical layers without the
+circuit), `--hidden_features` sets its hidden width, and `--seeds N` runs only
+the first N seeds.
 """
 
+import argparse
 import sys
 
 import torch
@@ -18,7 +24,13 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 
-from dementia_boost.core.identity import Paradigm, RunSpec, label, run_id
+from dementia_boost.core.identity import (
+    DEFAULT_CLASSICAL_HEAD,
+    Paradigm,
+    RunSpec,
+    label,
+    run_id,
+)
 from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.core.reproducibility import set_seed
 from dementia_boost.data.data_loader import OasisDataLoader
@@ -28,7 +40,12 @@ from dementia_boost.models.builder import (
     assemble_dementia_classifier,
     load_baseline_backbone,
 )
-from dementia_boost.models.classical_cnn import ClassicalClassifierHead
+from dementia_boost.models.classical_cnn import (
+    CLASSICAL_HEADS,
+    ClassicalClassifierHead,
+    classical_head_for,
+    stored_hidden_features,
+)
 from dementia_boost.telemetry.logger import setup_logger
 from dementia_boost.telemetry.selection import select_backbone
 from dementia_boost.training.trainer import BaselineTrainer
@@ -39,7 +56,6 @@ DEFAULT_BATCH_SIZE: int = 64
 DEFAULT_LEARNING_RATE: float = 1e-4
 DEFAULT_LR_STEP_SIZE: int = 10
 DEFAULT_LR_GAMMA: float = 0.75
-DEFAULT_FEATURE_DIM: int = 2304
 DEFAULT_EVAL_EVERY: int = 1
 
 
@@ -56,12 +72,71 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
-def build_spec(seed: int, backbone: RunSpec) -> RunSpec:
+def _positive_int(text: str) -> int:
+    """Parses a strictly positive integer for the command line.
+
+    Args:
+        text: The argument as typed.
+
+    Returns:
+        The integer.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value is not a positive integer.
+    """
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"expected a positive integer, got {text}")
+    return value
+
+
+def parse_arguments() -> argparse.Namespace:
+    """Parses the command-line options of the sweep.
+
+    Returns:
+        The namespace with `head` (the classical head name), `hidden_features`
+        (its width, or None for the head's default), and `seeds` (how many of
+        the default seeds to run, or None for all).
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--head",
+        choices=sorted(CLASSICAL_HEADS),
+        default=DEFAULT_CLASSICAL_HEAD,
+        help="Classical head on the frozen backbone; part of the configuration.",
+    )
+    parser.add_argument(
+        "--hidden_features",
+        type=_positive_int,
+        default=None,
+        metavar="N",
+        help="Hidden width of the head (default: the head's own, 5 for paper and "
+        "6 for tanh_bottleneck); part of the configuration.",
+    )
+    parser.add_argument(
+        "--seeds",
+        type=_positive_int,
+        default=None,
+        metavar="N",
+        help="Run only the first N seeds. Extending later reuses the same "
+        "configuration.",
+    )
+    return parser.parse_args()
+
+
+def build_spec(
+    seed: int,
+    backbone: RunSpec,
+    head: str = DEFAULT_CLASSICAL_HEAD,
+    hidden_features: int | None = None,
+) -> RunSpec:
     """Builds the specification of one CTL run on a selected baseline.
 
     Args:
         seed: Random seed of the run.
         backbone: Spec of the baseline run the head is built on.
+        head: Registry name of the classical head.
+        hidden_features: Hidden width of the head, or None for its default.
 
     Returns:
         The CTL spec, trained on the same split as its backbone.
@@ -76,11 +151,15 @@ def build_spec(seed: int, backbone: RunSpec) -> RunSpec:
         split_id=backbone.split_id,
         seed=seed,
         backbone_id=run_id(backbone),
+        head=head,
+        hidden_features=stored_hidden_features(head, hidden_features),
     )
 
 
 def main() -> None:
     """Executes Classical Transfer Learning on cached baseline embeddings."""
+    arguments = parse_arguments()
+    seeds = DEFAULT_EXPERIMENT_SEEDS[: arguments.seeds]
     logger = setup_logger("classical_ctl_multiseed_nifti")
     device = get_device()
     layout = ResultsLayout()
@@ -139,13 +218,10 @@ def main() -> None:
         shuffle=False,
     )
 
-    logger.info(
-        "Beginning fast in-memory CTL sweep across "
-        f"{len(DEFAULT_EXPERIMENT_SEEDS)} seeds..."
-    )
+    logger.info(f"Beginning fast in-memory CTL sweep across {len(seeds)} seeds...")
 
-    for seed in DEFAULT_EXPERIMENT_SEEDS:
-        spec = build_spec(seed, backbone)
+    for seed in seeds:
+        spec = build_spec(seed, backbone, arguments.head, arguments.hidden_features)
 
         if layout.is_done(spec):
             logger.info(
@@ -158,10 +234,7 @@ def main() -> None:
 
         set_seed(seed)
 
-        head = ClassicalClassifierHead(
-            in_features=DEFAULT_FEATURE_DIM,
-            use_sigmoid=False,
-        ).to(device)
+        head = classical_head_for(spec).to(device)
         head.apply(ClassicalClassifierHead.apply_glorot_init)
 
         full_model = assemble_dementia_classifier(

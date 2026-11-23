@@ -22,7 +22,7 @@ from dementia_boost.core.identity import Paradigm, label
 from dementia_boost.core.layout import ResultsLayout
 from dementia_boost.telemetry.run_listing import group_by_config, load_runs
 from dementia_boost.telemetry.selection import select_best_validation_run
-from dementia_boost.viz.display_names import production_labels
+from dementia_boost.viz.display_names import production_label, production_labels
 from dementia_boost.viz.visualizer import MetricsVisualizer
 
 _DEFAULT_LOGGER = logging.getLogger(__name__)
@@ -55,7 +55,8 @@ def plot_paradigm(
 
     For each configuration with test results it writes the metric distributions
     and the comparative ROC curves over all seeds, and an isolated ROC curve and
-    confusion matrix for the run that is best on the validation results.
+    confusion matrix for the run that is best on the validation results. Every
+    title names the configuration by its presentation name and the test cohort.
 
     Args:
         layout: The results layout to read from and write plots to.
@@ -90,15 +91,21 @@ def plot_paradigm(
             output_dir=layout.plots_dir(paradigm, config),
             vector_formats=vector_formats,
         )
-        prefix = paradigm.value
+        with open(test_path) as file:
+            spec = json.load(file)["configuration"]["spec"]
+        titles = {
+            "prefix": paradigm.value,
+            "name": production_label(spec),
+            "cohort": "test",
+        }
 
         logger.info(
             f"Plotting configuration {config}; run selected on validation: {selected}"
         )
-        visualizer.plot_metric_distributions(test_path, prefix=prefix)
-        visualizer.plot_comparative_roc(test_path, prefix=prefix)
-        visualizer.plot_isolated_roc(test_path, run_id=selected, prefix=prefix)
-        visualizer.plot_confusion_matrix(test_path, run_id=selected, prefix=prefix)
+        visualizer.plot_metric_distributions(test_path, **titles)
+        visualizer.plot_comparative_roc(test_path, **titles)
+        visualizer.plot_isolated_roc(test_path, run_id=selected, **titles)
+        visualizer.plot_confusion_matrix(test_path, run_id=selected, **titles)
         plotted.append(config)
 
     return plotted
@@ -236,11 +243,14 @@ def plot_losses(
             logger.info(
                 f"Plotting {len(histories)} loss curve(s) for {label(first, False)}"
             )
+            name = production_label(first.to_dict())
             for history in histories:
                 visualizer.plot_loss_curve(
-                    layout.history_path(history.spec), prefix=paradigm.value
+                    layout.history_path(history.spec), prefix=paradigm.value, name=name
                 )
-            visualizer.plot_loss_distribution(history_dir, prefix=paradigm.value)
+            visualizer.plot_loss_distribution(
+                history_dir, prefix=paradigm.value, name=name
+            )
         if config in exclude:
             continue
         available[label(first, include_seed=False)] = history_dir

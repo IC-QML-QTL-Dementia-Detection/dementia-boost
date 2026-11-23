@@ -36,6 +36,13 @@ BLOCK_NAMES: dict[str, str] = {
 
 REUPLOAD_NAME: str = "Re-uploading"
 
+CLASSICAL_HEAD_NAMES: dict[str, str] = {
+    "paper": "Paper Head",
+    "tanh_bottleneck": "Tanh Bottleneck",
+}
+
+WIDTH_NAME: str = "Width"
+
 METRIC_NAMES: dict[str, str] = {
     "accuracy": "Accuracy",
     "precision": "Precision",
@@ -48,18 +55,26 @@ METRIC_NAMES: dict[str, str] = {
 def production_label(spec: Mapping[str, Any]) -> str:
     """Builds the short presentation name of a configuration.
 
-    The variational block and re-uploading are named only when they differ
-    from the default (the base paper's block, embedding applied once).
+    The variational block, re-uploading, the classical head, and its width are
+    named only when they differ from the default (the base paper's block and
+    head, embedding applied once, the head's own width).
 
     Args:
         spec: A serialised run specification (`RunSpec.to_dict`), with or
             without the seed.
 
     Returns:
-        For example `QTL (Qiskit), ZZ-Feature Map`, or `CTL`.
+        For example `QTL (Qiskit), ZZ-Feature Map`, `CTL, Tanh Bottleneck`, or
+        `CTL`.
     """
     paradigm: str = spec["paradigm"]
     parts: list[str] = [PARADIGM_NAMES.get(paradigm, paradigm)]
+    head: str | None = spec.get("head")
+    if head is not None:
+        parts.append(CLASSICAL_HEAD_NAMES.get(head, head))
+    hidden_features: int | None = spec.get("hidden_features")
+    if hidden_features is not None:
+        parts.append(f"{WIDTH_NAME} {hidden_features}")
     ansatz: str | None = spec.get("ansatz")
     if ansatz is not None:
         parts.append(EMBEDDING_NAMES.get(ansatz, ansatz))

@@ -40,9 +40,22 @@ _LABELS = [0, 0, 0, 1, 1]
 _METRICS = ("accuracy", "auc")
 
 
-def _run(confusion: list[list[int]], accuracy: float, labels=_LABELS) -> dict:
+_VARYING = [0.1, 0.2, 0.3, 0.4, 0.45]
+
+
+def _run(
+    confusion: list[list[int]],
+    accuracy: float,
+    labels=_LABELS,
+    probabilities=_VARYING,
+) -> dict:
     """Builds one run entry as the results files store it."""
-    return {"confusion_matrix": confusion, "accuracy": accuracy, "y_true": labels}
+    return {
+        "confusion_matrix": confusion,
+        "accuracy": accuracy,
+        "y_true": labels,
+        "y_prob": probabilities,
+    }
 
 
 class TestMajorityClassAccuracy:
@@ -81,7 +94,25 @@ class TestCountCollapsedRuns:
             "only_positive": 1,
             "recall_zero": 2,
             "at_or_below_majority": 3,
+            "constant_output": 0,
         }
+
+    def test_constant_output_is_told_apart_from_a_biased_threshold(self) -> None:
+        """A head that outputs one value for every slice (a dead head) is
+        counted as single-class and as constant; a head whose outputs vary but
+        all stay below 0.5 is single-class only. Both looked alike in the
+        single-class counts."""
+        single_class = [[3, 0], [2, 0]]
+        runs = [
+            _run(single_class, 0.6, probabilities=[0.31] * 5),
+            _run(single_class, 0.6, probabilities=[0.31, 0.31, 0.31, 0.31, 0.3100005]),
+            _run(single_class, 0.6),
+        ]
+
+        counts = count_collapsed_runs(runs, majority=0.6)
+
+        assert counts["only_negative"] == 3
+        assert counts["constant_output"] == 2
 
 
 def _results(
@@ -396,4 +427,16 @@ class TestPairingAssumption:
         assert not share_initial_weights(
             build_spec("qiskit_qtl"),
             build_spec("qiskit_qtl", block="trainable_zz"),
+        )
+
+    @pytest.mark.parametrize(
+        "overrides", [{"head": "tanh_bottleneck"}, {"hidden_features": 8}]
+    )
+    def test_another_classical_head_or_width_starts_elsewhere(
+        self, overrides: dict
+    ) -> None:
+        """The paper's head and the bottleneck control, or two widths, have
+        weights of other shapes, so one seed does not start them alike."""
+        assert not share_initial_weights(
+            build_spec("ctl"), build_spec("ctl", **overrides)
         )

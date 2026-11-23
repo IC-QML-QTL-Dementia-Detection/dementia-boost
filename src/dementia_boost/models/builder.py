@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 from qiskit.primitives import BaseEstimatorV2
 
+from dementia_boost.core.identity import DEFAULT_CLASSICAL_HEAD
 from dementia_boost.models.quantum_cnn import (
     DEFAULT_BLOCK,
     DEFAULT_EMBEDDING,
@@ -20,6 +21,7 @@ from .classical_cnn import (
     ClassicalClassifierHead,
     DementiaClassifier,
     LeNetFeatureExtractor,
+    build_classical_head,
 )
 
 
@@ -59,18 +61,24 @@ def build_ctl_model(
     baseline_weights_path: str,
     device: torch.device,
     use_sigmoid: bool = False,
+    head: str = DEFAULT_CLASSICAL_HEAD,
+    hidden_features: int | None = None,
 ) -> nn.Module:
     """Builds a Classical Transfer Learning (CTL) model.
 
     Loads a pre-trained baseline CNN checkpoint, freezes its convolutional
-    backbone parameters, and resets the weights of its classical dense
-    classification head using Glorot Uniform initialization.
+    backbone parameters, and replaces its classification head with a fresh
+    registered classical head initialized with Glorot Uniform weights.
 
     Args:
         baseline_weights_path: Filepath to the saved baseline `.pt` weight file.
         device: The target hardware accelerator device (CPU, CUDA, MPS).
         use_sigmoid: Whether to include a Sigmoid activation function in the
             classification head. Defaults to False.
+        head: Registry name of the classical head (see `CLASSICAL_HEADS`).
+            Defaults to the base paper's head.
+        hidden_features: Hidden width of the head, or `None` for the head's
+            own default.
 
     Returns:
         The prepared PyTorch module with frozen backbone and initialized head,
@@ -91,6 +99,9 @@ def build_ctl_model(
     for param in model.feature_extractor.parameters():
         param.requires_grad = False
 
+    model.classifier_head = build_classical_head(
+        head, hidden_features=hidden_features, use_sigmoid=use_sigmoid
+    )
     model.classifier_head.apply(ClassicalClassifierHead.apply_glorot_init)
 
     return model.to(device)

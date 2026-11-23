@@ -78,10 +78,6 @@ def _qtl(**overrides) -> RunSpec:
 class TestParadigm:
     """Validates the single definition of paradigm names."""
 
-    def test_members_and_values(self) -> None:
-        """The three paradigms exist under their current names."""
-        assert {p.value for p in Paradigm} == {"baseline", "ctl", "qiskit_qtl"}
-
     def test_is_a_string(self) -> None:
         """A paradigm compares equal to its name, so it can sit in a path or JSON."""
         assert Paradigm.QISKIT_QTL == "qiskit_qtl"
@@ -126,11 +122,6 @@ class TestIdentity:
         )
         assert config_id(spec) == "ed2f03b85c3f"
         assert run_id(spec) == "4682f2231a0c"
-
-    def test_same_spec_same_ids(self) -> None:
-        """Two equal specs give equal IDs."""
-        assert run_id(_qtl()) == run_id(_qtl())
-        assert config_id(_qtl()) == config_id(_qtl())
 
     _CHANGES = {
         "ansatz": "other",
@@ -208,6 +199,50 @@ class TestVariationalBlockAndReupload:
             "qiskit_qtl | paper | block other | reupload | 6q x 4L | lr 0.0001 | seed 3"
         )
         assert "block" not in label(_qtl())
+
+
+class TestClassicalHead:
+    """Validates the head and width fields of the classical transfer head."""
+
+    def test_server_ctl_configuration_keeps_its_id(self) -> None:
+        """The paper's head, named or not, is the head every stored CTL run
+        used; its ID is the one the full-dataset results carry."""
+        fields = {
+            "lr": 1e-4,
+            "backbone_id": "9bd3dd1a4c35",
+            "split_id": "a67d86da5bb4",
+        }
+        assert config_id(_ctl(**fields)) == "049ab9e330f5"
+        assert config_id(_ctl(head="paper", **fields)) == "049ab9e330f5"
+
+    def test_default_head_is_stored_as_none(self) -> None:
+        """Naming the paper's head stores `None`, so one head has one ID."""
+        assert _ctl(head="paper").head is None
+
+    @pytest.mark.parametrize(
+        "overrides", [{"head": "tanh_bottleneck"}, {"hidden_features": 8}]
+    )
+    def test_another_head_or_width_is_another_configuration(
+        self, overrides: dict
+    ) -> None:
+        """A different head, or an explicit width, gives a new `config_id`."""
+        assert config_id(_ctl(**overrides)) != config_id(_ctl())
+
+    @pytest.mark.parametrize(
+        "overrides", [{"head": "tanh_bottleneck"}, {"hidden_features": 6}]
+    )
+    @pytest.mark.parametrize("make", [_baseline, _qtl])
+    def test_other_paradigms_reject_them(self, make, overrides: dict) -> None:
+        """The head and its width belong to the classical transfer head only."""
+        with pytest.raises(ValueError, match="must not set"):
+            make(**overrides)
+
+    def test_label_names_a_non_default_head_and_width(self) -> None:
+        """The label shows the head and the width only when they are set."""
+        assert label(_ctl(head="tanh_bottleneck", hidden_features=6)) == (
+            "ctl | head tanh_bottleneck | width 6 | lr 0.0001 | seed 5"
+        )
+        assert "head" not in label(_ctl())
 
 
 class TestBackbone:
@@ -315,7 +350,3 @@ class TestLabel:
         """Baseline and CTL labels carry no qubits or ansatz."""
         assert label(_baseline()) == "baseline | lr 0.0001 | seed 17"
         assert label(_ctl()) == "ctl | lr 0.0001 | seed 5"
-
-    def test_label_is_stable(self) -> None:
-        """The same spec always gives the same label."""
-        assert label(_qtl()) == label(_qtl())

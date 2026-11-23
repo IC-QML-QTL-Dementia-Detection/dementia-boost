@@ -9,13 +9,13 @@ This module validates:
   the SPSA perturbations.
 - ``QiskitQuantumClassifierHead`` end-to-end forward/backward pass and
   Glorot init isolation from quantum circuit weights.
-- Input and weight dependence of the circuit output.
+
+Input and weight dependence of the circuit output, and the agreement of the
+default Aer estimator with the reference, are checked on every registered
+circuit in ``test_circuit_acceptance.py``.
 
 Regression coverage
 --------------------
-- The circuit degenerating into a constant function (every `<Z_i>` equal to
-  1, zero gradients), as the paper's gate sequence does without a Hadamard
-  layer.
 - Drift in the ansatz's theta/gamma/beta parameter counts breaking dynamic
   qubit/layer configuration.
 - Parameter or qubit ordering mismatches between the layer's flat weight
@@ -40,12 +40,8 @@ from qiskit.primitives import (
 )
 from qiskit.primitives.containers.estimator_pub import EstimatorPubLike
 from qiskit.quantum_info import Statevector
-from qiskit_aer.primitives import EstimatorV2 as AerEstimator
 
-from dementia_boost.models.quantum_cnn import (
-    QiskitExpectationRunner,
-    QiskitQuantumClassifierHead,
-)
+from dementia_boost.models.quantum_cnn import QiskitQuantumClassifierHead
 from dementia_boost.models.quantum_cnn.qiskit_circuit import build_qiskit_ansatz
 from dementia_boost.models.quantum_cnn.qiskit_layer import (
     QiskitQuantumLayer,
@@ -53,11 +49,8 @@ from dementia_boost.models.quantum_cnn.qiskit_layer import (
 )
 
 _EXPECTATION_TOLERANCE: float = 1e-5
-_PARITY_TOLERANCE: float = 1e-10
 _FINITE_DIFFERENCE_STEP: float = 1e-3
 _MIN_SPSA_COSINE_SIMILARITY: float = 0.9
-_MIN_SPREAD: float = 1e-3
-_MIN_GRADIENT: float = 1e-6
 
 
 def _layer(n_qubits: int, n_layers: int, seed: int) -> QiskitQuantumLayer:
@@ -373,54 +366,6 @@ class TestQiskitQuantumLayerForward:
         )
 
 
-class TestQiskitQuantumLayerInputDependence:
-    """Guards against the circuit degenerating into a constant function.
-
-    The paper's gate sequence applied to `|0...0>` keeps the state in the
-    `|0...0>` subspace, so every `<Z_i>` equals 1 for all inputs and weights.
-    """
-
-    def test_every_expectation_value_varies_with_the_inputs(self) -> None:
-        """Asserts that each qubit's `<Z_i>` takes clearly different values
-        across a batch of random inputs at fixed weights."""
-        n_qubits = 4
-        layer = _layer(n_qubits, n_layers=2, seed=0)
-
-        with torch.no_grad():
-            outputs = layer((torch.rand(32, n_qubits) - 0.5) * math.pi)
-
-        assert torch.all(outputs.std(dim=0) > _MIN_SPREAD)
-
-    def test_expectation_values_vary_with_the_weights(self) -> None:
-        """Asserts that two different weight draws give clearly different
-        outputs on the same inputs, so the trainable weights matter."""
-        n_qubits = 4
-        inputs = (torch.rand(8, n_qubits) - 0.5) * math.pi
-
-        def evaluate(seed: int) -> torch.Tensor:
-            torch.manual_seed(seed)
-            layer = _layer(n_qubits, n_layers=2, seed=0)
-            with torch.no_grad():
-                return layer(inputs)
-
-        assert (evaluate(0) - evaluate(1)).abs().max() > _MIN_SPREAD
-
-    def test_spsa_gradients_are_clearly_nonzero(self) -> None:
-        """Asserts the backward pass returns gradients well above float noise
-        for the circuit weights and the inputs, so training can move both."""
-        n_qubits = 3
-        layer = _layer(n_qubits, n_layers=2, seed=0)
-        inputs = ((torch.rand(8, n_qubits) - 0.5) * math.pi).requires_grad_()
-
-        output = layer(inputs)
-        (output * torch.randn_like(output)).sum().backward()
-
-        assert layer.weight.grad is not None
-        assert inputs.grad is not None
-        assert layer.weight.grad.abs().max() > _MIN_GRADIENT
-        assert inputs.grad.abs().max() > _MIN_GRADIENT
-
-
 class TestQiskitQuantumLayerSpsaBackward:
     """Validates the loss-level SPSA backward pass of the autograd function."""
 
@@ -499,33 +444,6 @@ class TestQiskitQuantumClassifierHeadEndToEnd:
         assert head.pre_net.weight.grad is not None
         assert head.post_net.weight.grad is not None
         assert head.qnn.weight.grad is not None
-
-
-class TestDefaultEstimatorParity:
-    """Validates the default Aer estimator against the reference estimator."""
-
-    def test_default_estimator_is_aer_and_matches_statevector_estimator(self) -> None:
-        """Asserts the default estimator is Aer's and that it returns the same
-        expectation values as `StatevectorEstimator` on identical parameters,
-        so a qiskit-aer upgrade cannot silently change the forward pass."""
-        n_qubits, n_layers, batch = 4, 2, 8
-        circuit, input_params, weight_vectors, observables = build_qiskit_ansatz(
-            n_qubits=n_qubits, n_layers=n_layers
-        )
-        parameters = (*input_params, *(p for vec in weight_vectors for p in vec))
-
-        default_runner = QiskitExpectationRunner(circuit, observables, parameters)
-        reference_runner = QiskitExpectationRunner(
-            circuit, observables, parameters, estimator=StatevectorEstimator()
-        )
-
-        values = torch.rand(batch, len(parameters), dtype=torch.float64) * 2 * math.pi
-        assert isinstance(default_runner.estimator, AerEstimator)
-        assert torch.allclose(
-            default_runner.expectation_values(values),
-            reference_runner.expectation_values(values),
-            atol=_PARITY_TOLERANCE,
-        )
 
 
 class _CountingEstimator(StatevectorEstimator):
