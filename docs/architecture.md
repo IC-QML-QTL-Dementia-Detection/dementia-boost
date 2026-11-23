@@ -22,8 +22,7 @@ flowchart TD
     subgraph Models ["Model Architectures Layer"]
         FE["LeNetFeatureExtractor<br/>(Convolutional Spatial Backbone)"]
         CH["ClassicalClassifierHead<br/>(Linear Dense Head)"]
-        QH["PennylaneQuantumClassifierHead<br/>(Dressed Quantum Network - DQN)"]
-        QKH["QiskitQuantumClassifierHead<br/>(DQN on Qiskit Primitives V2)"]
+        QKH["QiskitQuantumClassifierHead<br/>(Dressed Quantum Network - DQN, on Qiskit Primitives V2)"]
         DC["DementiaClassifier<br/>(Dependency-Injected Orchestrator)"]
         BUILDER["Model Builder<br/>(Weight Loading, Freezing & Swapping)"]
     end
@@ -71,9 +70,9 @@ flowchart TD
 
 A run is not identified by a name, because a name says nothing about its qubits, layers, learning rate, backbone, or split, and two different configurations would collide on disk. Identity is split into three separate things:
 
-- **The specification** (`RunSpec`, a frozen dataclass): the paradigm, the embedding (the field is named `ansatz`), the variational block and re-uploading (Qiskit head only, section 3.2), qubits and layers, the learning rates, the `StepLR` settings, epochs, batch size, the gradient method, the `backbone_id`, the `split_id`, and the `seed`. Fields that do not apply to a paradigm are `None`, and each paradigm validates that its required fields are set (a baseline has no quantum fields and no backbone, a head needs its backbone). The spec is stored in every training history, so it is the source of truth for what a run was.
+- **The specification** (`RunSpec`, a frozen dataclass): the paradigm, the embedding (the field is named `ansatz`), the variational block and re-uploading (section 3.2), qubits and layers, the learning rates, the `StepLR` settings, epochs, batch size, the gradient method, the `backbone_id`, the `split_id`, and the `seed`. Fields that do not apply to a paradigm are `None`, and each paradigm validates that its required fields are set (a baseline has no quantum fields and no backbone, a head needs its backbone). The spec is stored in every training history, so it is the source of truth for what a run was.
 - **The IDs** (opaque hashes of the spec): `config_id` hashes every field except the seed, so all seeds of one configuration share it; `run_id` hashes every field. Both are the first 12 hex characters of a SHA-256 over the canonical JSON of the spec (sorted keys, `None` fields dropped, so adding a new optional field later does not change existing IDs). The `backbone_id` of a head is the `run_id` of the baseline it was built on, which pins its checkpoint and, through it, its split. `split_id` uses the same hash helper.
-- **The label** (output only): a readable rendering such as `pl_qtl | paper | 6q x 4L | lr 0.0001 | seed 3`, for plots and logs. Nothing parses it.
+- **The label** (output only): a readable rendering such as `qiskit_qtl | paper | 6q x 4L | lr 0.0001 | seed 3`, for plots and logs. Nothing parses it.
 
 No code recovers configuration from a file name. The trainer refuses a spec that disagrees with its optimizer's learning rate, its loader's batch size, or its `StepLR` settings, so an ID never names a configuration that did not run. Details that do not define a run (devices, evaluation cadence) are stored as non-hashed extras in the history.
 
@@ -185,7 +184,7 @@ flowchart TD
         FLAT_C --> D1 --> D2 --> SIG
     end
 
-    subgraph QuantumHead ["Option B: Quantum Head (PennylaneQuantumClassifierHead or QiskitQuantumClassifierHead)"]
+    subgraph QuantumHead ["Option B: Quantum Head (QiskitQuantumClassifierHead)"]
         FLAT_Q["Flatten -> 2304"]
         PRE["Pre-Net: Linear(2304 -> n_qubits)"]
         SCALE["Angle Scaling: tanh(x) * (pi / 2)"]
@@ -224,7 +223,7 @@ flowchart TD
 3. **Embedding**: the scaled features are loaded into a state $|\psi_e(\tilde{z})\rangle$ by the embedding $e$ (section 3.2). The default, `paper`, is the angle embedding:
    $$|\psi_{\text{paper}}(\tilde{z})\rangle = \bigotimes_{i=1}^{n} R_z(\tilde{z}_i)\, H\, |0\rangle = \bigotimes_{i=1}^{n} \tfrac{1}{\sqrt{2}}\left(e^{-i\tilde{z}_i/2}|0\rangle + e^{i\tilde{z}_i/2}|1\rangle\right)$$
 
-4. **Variational block**, the same for every embedding. Layer $l = 1, \dots, L$ has weights $\theta_{l,i}, \gamma_{l,i}, \beta_{l,i}$ (the three rows of `weights[l]` in PennyLane, the three vectors of the flat weight in Qiskit):
+4. **Variational block**, the same for every embedding. Layer $l = 1, \dots, L$ has weights $\theta_{l,i}, \gamma_{l,i}, \beta_{l,i}$ (the three vectors of the flat weight, in that order):
    $$V_l = \Big[\prod_{i=0}^{n-1} \mathrm{CRY}_{(i+1) \bmod n \to i}(\beta_{l,i})\Big] \Big[\bigotimes_{i} R_z(\gamma_{l,i})\Big] \Big[\prod_{i=0}^{n-1} \mathrm{CNOT}_{i \to (i+1) \bmod n}\Big] \Big[\bigotimes_{i} R_z(\theta_{l,i})\Big], \qquad |\phi_{\theta}(\tilde{z})\rangle = V_L \cdots V_1\, |\psi_e(\tilde{z})\rangle$$
    Each product over $i$ is applied in increasing $i$ (the CNOT and CRY rings do not commute), and $\mathrm{CRY}_{c \to t}(\beta)$ rotates qubit $t$ about $y$ by $\beta$ when qubit $c$ is $|1\rangle$. There are $3Ln$ weights (72 at $n = 6$, $L = 4$), initialised uniformly in $[-\pi, \pi]$.
 
@@ -235,11 +234,11 @@ flowchart TD
    $$\hat{y}_{\text{logit}} = W_{\text{post}} \begin{bmatrix} \langle Z_1 \rangle \\ \vdots \\ \langle Z_n \rangle \end{bmatrix} + b_{\text{post}}$$
 
 > [!IMPORTANT]
-> **The Hadamard layer is not in the paper's figure.** Starting from $|0\rangle^{\otimes n}$, the gate sequence of Bhowmik et al. (2025) (RZ, CNOT, CRY) never leaves the set of states equal to $|0\rangle^{\otimes n}$ up to a global phase: RZ only adds a phase, CNOT fixes the state, and CRY never fires because its control stays in $|0\rangle$. Every $\langle Z_i\rangle$ would then be 1 for all inputs and weights, the pre-net and circuit weights would get zero gradient, and the head would only learn a bias. Preparing each qubit in $|+\rangle$ first turns the embedding angle into a relative phase, so the output depends on the inputs and the weights. Regression tests on both the PennyLane and the Qiskit circuits fail if any $\langle Z_i\rangle$ becomes constant or the gradients vanish.
+> **The Hadamard layer is not in the paper's figure.** Starting from $|0\rangle^{\otimes n}$, the gate sequence of Bhowmik et al. (2025) (RZ, CNOT, CRY) never leaves the set of states equal to $|0\rangle^{\otimes n}$ up to a global phase: RZ only adds a phase, CNOT fixes the state, and CRY never fires because its control stays in $|0\rangle$. Every $\langle Z_i\rangle$ would then be 1 for all inputs and weights, the pre-net and circuit weights would get zero gradient, and the head would only learn a bias. Preparing each qubit in $|+\rangle$ first turns the embedding angle into a relative phase, so the output depends on the inputs and the weights. Regression tests over every registered embedding and block fail if any $\langle Z_i\rangle$ becomes constant or the gradients vanish.
 
 ### 3.2 Embeddings (Feature Maps)
 
-The embedding is the `ansatz` field of the run specification, so each embedding is its own configuration with its own `config_id`; `paper` is the default and the name inside every existing configuration ID. The PennyLane head implements only `paper`; the Qiskit head implements all of the embeddings below (see 3.4 for how).
+The embedding is the `ansatz` field of the run specification, so each embedding is its own configuration with its own `config_id`; `paper` is the default and the name inside every existing configuration ID. Section 3.3 shows how the embeddings are executed.
 
 - **`paper` (angle embedding, formula in 3.1).** Each qubit sits on the equator of the Bloch sphere at azimuth $\tilde{z}_i$. A product state, so the embedding creates no correlation between features. $n$ angles.
 
@@ -253,7 +252,7 @@ The embedding is the `ansatz` field of the run specification, so each embedding 
 
 - **`zz_feature_map_linear`.** The same map with $E = \{(i, i+1)\}$, nearest neighbours only: 5 pairs and $n + (n-1) = 11$ angles at $n = 6$.
 
-**Variational blocks and data re-uploading (Qiskit head only).** The variational block after the embedding is chosen the same way, by the `block` field of the run specification, from the registry in `qiskit_blocks.py`. One layer $V_l$ of each block, with every weight drawn uniformly in $[-\pi, \pi]$ at initialisation:
+**Variational blocks and data re-uploading.** The variational block after the embedding is chosen the same way, by the `block` field of the run specification, from the registry in `qiskit_blocks.py`. One layer $V_l$ of each block, with every weight drawn uniformly in $[-\pi, \pi]$ at initialisation:
 
 - **`paper`** (the default): the block of section 3.1, $3n$ weights per layer.
 - **`hardware_efficient_linear`, `hardware_efficient_ring`, `hardware_efficient_full`**: $V_l = \big[\prod_{(i,j) \in E} \mathrm{CNOT}_{i \to j}\big] \bigotimes_i R_z(\phi_{l,i})\, R_y(\theta_{l,i})$, with $E$ the pairs $(i, i+1)$ (linear, $n-1$ CNOTs), those plus $(n-1, 0)$ (ring, $n$ CNOTs), or every $i < j$ (full, $n(n-1)/2$ CNOTs). $2n$ weights per layer.
@@ -264,13 +263,9 @@ Data re-uploading (the `reupload` field) applies the whole embedding again befor
 $$|\psi(\tilde{z})\rangle = V_L\, S(\tilde{z})\, \cdots\, V_2\, S(\tilde{z})\, V_1\, S(\tilde{z})\, |0\rangle^{\otimes n},$$
 where $S$ is the embedding (with `paper`, the Hadamard layer is repeated too) and $V_l$ a layer of the block. The same input angles are reused, so the number of inputs and of circuit weights does not change. With a single upload each feature enters through one rotation, so $\langle Z_i\rangle$ is a trigonometric polynomial of degree 1 in each $\tilde{z}_j$; $L$ uploads allow degree $L$ (for `paper` and `rx`). The default values, the `paper` block and no re-uploading, are stored as `None` in the specification, so every configuration that existed before these fields keeps its `config_id`.
 
-### 3.3 PennyLane Execution Path
+### 3.3 Qiskit Execution Path
 
-`resolve_quantum_device` (`pennylane_circuit.py`) picks the simulator: `lightning.qubit` by default, `default.qubit` as a fallback, or an injected device, which the heads and `builder.py` accept as `quantum_device`. Gradients are exact (adjoint). At 6 qubits the state has $2^6 = 64$ amplitudes, so CPU simulation is faster than the GPU simulator (`lightning.gpu`), whose memory transfers and kernel launches dominate at this size.
-
-### 3.4 Qiskit Execution Path
-
-`QiskitQuantumClassifierHead` is an independent, interchangeable counterpart of `PennylaneQuantumClassifierHead`. It uses the same pre-net, angle scaling, ansatz, and post-net, but runs the circuit through Qiskit Primitives V2, hand-written against `BaseEstimatorV2` with no `qiskit-machine-learning` dependency.
+`QiskitQuantumClassifierHead` runs the circuit through Qiskit Primitives V2, hand-written against `BaseEstimatorV2` with no `qiskit-machine-learning` dependency. Qiskit is the only quantum framework, because the hardware and noise studies need it; an earlier PennyLane version of the head, trained with exact gradients, gave the same means and was removed.
 
 ```mermaid
 flowchart LR
@@ -286,12 +281,12 @@ flowchart LR
 - **`qiskit_embeddings.py`**: The registry of embeddings (section 3.2). Each entry has a PyTorch angle function from $\tilde{z}$ to the gate angles, the number of angles, and the gates that consume them, one circuit parameter per angle. Computing the angles outside the circuit keeps every circuit parameter a plain input column (no products of run-time parameters in the simulator), and autograd differentiates the angle function exactly back to the pre-net. The head applies the angle function after the $\tanh$ scaling, so `QiskitQuantumLayer` only sees the angle columns.
 - **`qiskit_blocks.py`**: The registry of variational blocks (section 3.2). Each entry creates its weight `ParameterVector`s, in the order of the layer's flat weight tensor, and appends one layer of gates. The default `paper` block keeps its weights laid out as `[theta, gamma, beta]`, which saved checkpoints rely on.
 - **`qiskit_circuit.py` (`build_qiskit_ansatz`)**: Builds the `QuantumCircuit` (the chosen embedding followed by `n_layers` layers of the chosen variational block, with the embedding repeated before every layer when re-uploading), the input and weight `ParameterVector`s, and the per-qubit Pauli-Z `SparsePauliOp` observables. Pauli strings are reversed relative to the qubit index because Qiskit orders them from the most significant qubit.
-- **`qiskit_runner.py`**: `QiskitExpectationRunner` owns only "circuit, observables, parameter batch in, expectation values out". Each call is one broadcast PUB with parameters shaped `(N, 1, P)` and observables shaped `(1, n_qubits)`, so every state is evolved once and all expectation values are read from it. `resolve_qiskit_estimator` is the Qiskit counterpart of `resolve_quantum_device`: it returns an injected estimator or, by default, Aer's `EstimatorV2` on the state-vector method with no noise model attached. `StatevectorEstimator` is the slower reference implementation and is injected explicitly where a reference is wanted, such as unit tests. Controlled rotations (`cry`, `crz`, `cp`) are decomposed once at construction, because qiskit-aer 0.17.2 evaluates them wrongly when their angle is bound at run time.
+- **`qiskit_runner.py`**: `QiskitExpectationRunner` owns only "circuit, observables, parameter batch in, expectation values out". Each call is one broadcast PUB with parameters shaped `(N, 1, P)` and observables shaped `(1, n_qubits)`, so every state is evolved once and all expectation values are read from it. `resolve_qiskit_estimator` returns an injected estimator or, by default, Aer's `EstimatorV2` on the state-vector method with no noise model attached. `StatevectorEstimator` is the slower reference implementation and is injected explicitly where a reference is wanted, such as unit tests. Controlled rotations (`cry`, `crz`, `cp`) are decomposed once at construction, because qiskit-aer 0.17.2 evaluates them wrongly when their angle is bound at run time.
 - **`qiskit_layer.py`**: `QiskitQuantumLayer` holds the flat weight vector, in the order of the block's weight vectors (`[theta, gamma, beta]` for `paper`), and a custom `torch.autograd.Function`. The backward pass is a loss-level SPSA estimate: one Rademacher direction per sample is shared by all outputs by folding the upstream gradient into the finite difference, which costs one PUB of `2 * Batch` states. The directions come from a generator seeded with the run seed, so a seed reproduces its gradient noise. Exact parameter-shift is avoided because it needs 204 shifted circuits per sample at the default 6-qubit, 4-layer depth.
 - **`qiskit_heads.py` & `builder.py`**: Accept an optional `estimator` (and, on the head, `spsa_epsilon` and `seed`), so the backend is configuration rather than code.
 - **`train_qiskit_qtl_multiseed.py`**: Records the gradient method and SPSA step in each run's spec (they change the maths, so they are part of the configuration ID) and the estimator class as a non-hashed extra in the history.
 
-### 3.5 Trainability Diagnostic (`src/dementia_boost/analysis/`)
+### 3.4 Trainability Diagnostic (`src/dementia_boost/analysis/`)
 
 `trainability.py` measures a circuit at initialisation, without training, so circuits can be compared before any run: weights uniform in $[-\pi, \pi]$ and scaled features uniform in $[-\pi/2, \pi/2]$, as at the start of training, simulated exactly on the default estimator. Two costs are read from the expectation values, the global $C_g = \frac{1}{n}\sum_i \langle Z_i\rangle$ and the local $C_l = \langle Z_0\rangle$, because barren-plateau results differ between global and local costs. Per circuit and qubit count it reports:
 
@@ -306,7 +301,7 @@ Derivatives are central differences (step $10^{-4}$) on the exact simulation, ev
 
 ## 4. Transfer Learning Pipeline
 
-The baseline is trained first; CTL and the quantum heads are then built on its frozen backbone through `builder.py`. Every paradigm trains on the `train` cohort and is monitored on the `val` cohort. The `test` cohort appears only in the evaluation step, and nothing is chosen with it:
+The baseline is trained first; CTL and the quantum head are then built on its frozen backbone through `builder.py`. Every paradigm trains on the `train` cohort and is monitored on the `val` cohort. The `test` cohort appears only in the evaluation step, and nothing is chosen with it:
 
 ```mermaid
 sequenceDiagram
@@ -422,11 +417,11 @@ dementia-boost/
 │   ├── data/                              # ETL, patient-level split, manifest, guards, loaders, feature cache (2.2)
 │   ├── models/                            # Backbone, classical and quantum heads, builder (3)
 │   │   ├── classical_cnn/                 # LeNet backbone, classical head, DementiaClassifier
-│   │   └── quantum_cnn/                   # PennyLane and Qiskit circuits, heads, embeddings, runner (3.3, 3.4)
+│   │   └── quantum_cnn/                   # Qiskit embeddings, blocks, circuit, layer, head, runner (3.2, 3.3)
 │   ├── training/                          # Trainer, evaluator, evaluation of every checkpoint (4, 5)
 │   ├── telemetry/                         # Metrics, histories, run listing, selection, report, logger (5)
 │   ├── viz/                               # All plotting code; the viz scripts only call it (5)
-│   └── analysis/                          # Diagnostics that train nothing: circuit trainability (3.5)
+│   └── analysis/                          # Diagnostics that train nothing: circuit trainability (3.4)
 ├── scripts/                               # Entry points, all run with uv run
 │   ├── etl_pipeline.py, audit_cohorts.py  # Build the split; check that no subject is in two cohorts
 │   ├── list_runs.py                       # Look up configurations and runs by hash ID

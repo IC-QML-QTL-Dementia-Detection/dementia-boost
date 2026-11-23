@@ -12,7 +12,7 @@ The core hypothesis is that a **Dressed Quantum Neural Network (DQNN)**, compose
 
 The 12-month plan (`docs/qtl_research_goals_activities.md`) has six activities: reproduce the paper's model (A1), implement alternative feature maps such as the $ZZ$-Feature Map (A2), optimise how the features are delivered to the circuit (A3), run on IBM quantum hardware (A4), measure noise resilience (A5), and write up the results (A6).
 
-- **A1, done.** OASIS-II ETL with a deterministic patient-level split, the LeNet baseline, classical transfer learning (CTL), and the Dressed Quantum Network on PennyLane and Qiskit, each over 100 seeds. A Hadamard layer precedes the RZ embedding, because the circuit as drawn in the paper is a constant function (`docs/architecture.md`, section 3.1). Results below.
+- **A1, done.** OASIS-II ETL with a deterministic patient-level split, the LeNet baseline, classical transfer learning (CTL), and the Dressed Quantum Network on Qiskit, each over 100 seeds. A Hadamard layer precedes the RZ embedding, because the circuit as drawn in the paper is a constant function (`docs/architecture.md`, section 3.1). Results below.
 - **A2, in progress.** The RX embedding and the ZZ feature map (full and nearest-neighbour) run on the Qiskit head. Results below.
 
 ---
@@ -25,10 +25,10 @@ The code under `src/dementia_boost` is split into layers with one responsibility
 
 ## Activity 1 Results
 
-The numbers below come from 100 seeds per paradigm on one patient-level split of the OASIS-II subset (76 training, 19 validation, and 41 test subjects; 698, 171, and 365 slices). Each paradigm has one configuration: learning rate 1e-4, 100 epochs, and for the quantum heads 6 qubits and 4 layers. The transfer-learning heads use the baseline backbone selected on validation. Every cell is the mean ± standard deviation across seeds, and the last three columns are the change of each paradigm's mean against the baseline's mean, in percent. The values come from `data/results/metrics/comparative_report.json`.
+The numbers below come from 100 seeds per paradigm on one patient-level split of the OASIS-II subset (76 training, 19 validation, and 41 test subjects; 698, 171, and 365 slices). Each paradigm has one configuration: learning rate 1e-4, 100 epochs, and for the quantum head 6 qubits and 4 layers. The transfer-learning heads use the baseline backbone selected on validation. Every cell is the mean ± standard deviation across seeds, and the last two columns are the change of each paradigm's mean against the baseline's mean, in percent. The values come from `data/results/metrics/comparative_report.json`.
 
 > [!IMPORTANT]
-> **These results do not reproduce the base paper.** The paper reports 73.1% accuracy for the baseline, 86.4% for CTL, and 91.3% for QTL. Under the protocol used here, all four paradigms stay between 59% and 63% accuracy on test, and predicting the majority class (Nondemented) for every slice already gives 55.9%. We report the numbers as measured, and the next section lists the points where we deviate from the paper and why.
+> **These results do not reproduce the base paper.** The paper reports 73.1% accuracy for the baseline, 86.4% for CTL, and 91.3% for QTL. Under the protocol used here, all three paradigms stay between 59% and 63% accuracy on test, and predicting the majority class (Nondemented) for every slice already gives 55.9%. We report the numbers as measured, and the next section lists the points where we deviate from the paper and why.
 
 ### Quantitative Comparison Across Paradigms
 
@@ -36,27 +36,27 @@ The numbers below come from 100 seeds per paradigm on one patient-level split of
 
 The test cohort is never used for training, monitoring, or selection.
 
-| Metric           | Baseline      | CTL           | PL QTL        | Qiskit QTL    | CTL $\Delta$ vs Baseline (%) | PL QTL $\Delta$ vs Baseline (%) | Qiskit QTL $\Delta$ vs Baseline (%) |
-| :--------------- | :-----------: | :-----------: | :-----------: | :-----------: | :--------------------------: | :-----------------------------: | :---------------------------------: |
-| **Accuracy**     | 0.595 ± 0.073 | 0.608 ± 0.031 | 0.632 ± 0.012 | 0.625 ± 0.032 |             +2.3             |              +6.3               |                +5.2                 |
-| **Precision**    | 0.494 ± 0.219 | 0.494 ± 0.232 | 0.604 ± 0.016 | 0.607 ± 0.072 |             -0.1             |              +22.3              |                +22.8                |
-| **Recall**       | 0.478 ± 0.284 | 0.356 ± 0.217 | 0.482 ± 0.045 | 0.416 ± 0.124 |             -25.6            |               +0.7              |                -13.0                |
-| **F1-Score**     | 0.459 ± 0.209 | 0.398 ± 0.209 | 0.535 ± 0.030 | 0.485 ± 0.095 |             -13.4            |              +16.5              |                +5.6                 |
-| **AUC-ROC**      | 0.639 ± 0.076 | 0.653 ± 0.045 | 0.632 ± 0.016 | 0.663 ± 0.020 |             +2.2             |               -1.1              |                +3.7                 |
+| Metric           | Baseline      | CTL           | Qiskit QTL    | CTL $\Delta$ vs Baseline (%) | Qiskit QTL $\Delta$ vs Baseline (%) |
+| :--------------- | :-----------: | :-----------: | :-----------: | :--------------------------: | :---------------------------------: |
+| **Accuracy**     | 0.595 ± 0.073 | 0.608 ± 0.031 | 0.625 ± 0.032 |             +2.3             |                +5.2                 |
+| **Precision**    | 0.494 ± 0.219 | 0.494 ± 0.232 | 0.607 ± 0.072 |             -0.1             |                +22.8                |
+| **Recall**       | 0.478 ± 0.284 | 0.356 ± 0.217 | 0.416 ± 0.124 |             -25.6            |                -13.0                |
+| **F1-Score**     | 0.459 ± 0.209 | 0.398 ± 0.209 | 0.485 ± 0.095 |             -13.4            |                +5.6                 |
+| **AUC-ROC**      | 0.639 ± 0.076 | 0.653 ± 0.045 | 0.663 ± 0.020 |             +2.2             |                +3.7                 |
 
 #### Validation cohort (development result)
 
 The validation cohort selects the backbone and monitors training, so these values are higher than a fresh cohort would give. They are shown to make that gap visible.
 
-| Metric           | Baseline      | CTL           | PL QTL        | Qiskit QTL    | CTL $\Delta$ vs Baseline (%) | PL QTL $\Delta$ vs Baseline (%) | Qiskit QTL $\Delta$ vs Baseline (%) |
-| :--------------- | :-----------: | :-----------: | :-----------: | :-----------: | :--------------------------: | :-----------------------------: | :---------------------------------: |
-| **Accuracy**     | 0.628 ± 0.090 | 0.685 ± 0.077 | 0.758 ± 0.022 | 0.720 ± 0.048 |             +8.9             |              +20.7              |                +14.5                |
-| **Precision**    | 0.575 ± 0.263 | 0.689 ± 0.342 | 0.831 ± 0.068 | 0.851 ± 0.129 |             +19.8            |              +44.7              |                +48.0                |
-| **Recall**       | 0.511 ± 0.284 | 0.437 ± 0.243 | 0.607 ± 0.027 | 0.496 ± 0.129 |             -14.5            |              +18.9              |                 -2.9                |
-| **F1-Score**     | 0.510 ± 0.229 | 0.511 ± 0.253 | 0.699 ± 0.017 | 0.610 ± 0.105 |             +0.2             |              +37.1              |                +19.6                |
-| **AUC-ROC**      | 0.649 ± 0.088 | 0.739 ± 0.067 | 0.798 ± 0.016 | 0.767 ± 0.029 |             +13.8            |              +22.8              |                +18.1                |
+| Metric           | Baseline      | CTL           | Qiskit QTL    | CTL $\Delta$ vs Baseline (%) | Qiskit QTL $\Delta$ vs Baseline (%) |
+| :--------------- | :-----------: | :-----------: | :-----------: | :--------------------------: | :---------------------------------: |
+| **Accuracy**     | 0.628 ± 0.090 | 0.685 ± 0.077 | 0.720 ± 0.048 |             +8.9             |                +14.5                |
+| **Precision**    | 0.575 ± 0.263 | 0.689 ± 0.342 | 0.851 ± 0.129 |             +19.8            |                +48.0                |
+| **Recall**       | 0.511 ± 0.284 | 0.437 ± 0.243 | 0.496 ± 0.129 |             -14.5            |                 -2.9                |
+| **F1-Score**     | 0.510 ± 0.229 | 0.511 ± 0.253 | 0.610 ± 0.105 |             +0.2             |                +19.6                |
+| **AUC-ROC**      | 0.649 ± 0.088 | 0.739 ± 0.067 | 0.767 ± 0.029 |             +13.8            |                +18.1                |
 
-The report also gives the percentage changes against CTL and between the two quantum heads. Relative changes of small, noisy means can look large (the recall of CTL is 0.356 ± 0.217), so read them next to the raw values and the spread.
+The report also gives the percentage changes against CTL. Relative changes of small, noisy means can look large (the recall of CTL is 0.356 ± 0.217), so read them next to the raw values and the spread.
 
 ![Validation loss across paradigms, median and interquartile range over seeds](docs/figures/loss_comparison.png)
 
@@ -66,12 +66,12 @@ The report also gives the percentage changes against CTL and between the two qua
 
 ### Key Observations & Findings
 
-- **The paper's accuracies are not reproduced.** Test accuracy is 59.5% to 63.2% for all four paradigms, against 55.9% for always predicting the majority class, and AUC-ROC is 0.63 to 0.66. The gaps between paradigms are smaller than the baseline's spread across seeds (0.076), so with one split, one backbone, and 41 test subjects they are within the noise. Validation values are higher, as expected for the cohort that selects the backbone.
-- **The baseline is unstable**: test accuracy ranges from 44% to 72% across seeds, and 15 of 100 runs predict a single class (recall 0 on test).
-- **CTL is steadier, not better**: accuracy standard deviation falls to 0.031, the mean barely moves (+2.3%), recall falls (0.356), and 18 of 101 runs collapse to a single class.
-- **QTL reduces the variance; the large gain does not reproduce**: PL QTL has the smallest spread on every metric (accuracy standard deviation 0.012) and no collapsed run (one on Qiskit). Precision rises (+22%) and accuracy slightly (+6.3%), but recall stays at the baseline level and AUC-ROC is not above CTL's. Part of the effect may come from the 6-dimensional bottleneck rather than the circuit; a classical head with the same bottleneck has not been run.
-- **PennyLane and Qiskit agree on the means** (accuracy 0.632 and 0.625), but the Qiskit head has two to three times the spread and a higher final validation loss. It uses loss-level SPSA gradients (exact parameter-shift needs about 204 circuits per sample at 6 qubits and 4 layers), while PennyLane uses exact adjoint gradients, so the difference is mostly the gradient estimator.
-- **Training had not converged at epoch 100**: the quantum heads' validation loss is still falling, possibly because of the learning rate (1e-4, decayed every 10 epochs), which has not been studied yet.
+- **The paper's accuracies are not reproduced.** Test accuracy is 59.5% to 62.5% for all three paradigms, against 55.9% for always predicting the majority class, and AUC-ROC is 0.64 to 0.66. The gaps between paradigms are smaller than the baseline's spread across seeds (0.076), so with one split, one backbone, and 41 test subjects they are within the noise. Validation values are higher, as expected for the cohort that selects the backbone.
+- **The baseline is unstable**: test accuracy ranges from 44% to 72% across seeds, and 29 of 100 runs predict a single class on test (15 only Nondemented, 14 only Demented).
+- **CTL is steadier, not better**: accuracy standard deviation falls to 0.031, the mean barely moves (+2.3%), recall falls (0.356), and 17 of 101 runs predict only Nondemented on test.
+- **QTL is more stable; the large gain does not reproduce**: against CTL, the quantum head has the same accuracy spread (0.032 against 0.031) but half the AUC-ROC spread (0.020 against 0.045), a smaller recall spread (0.124 against 0.217), and 2 of 101 runs predicting a single class against 17. Precision rises (+22.8% over the baseline) and accuracy slightly (+5.2%), but recall stays below the baseline and AUC-ROC barely above CTL's. Part of the effect may come from the 6-dimensional bottleneck rather than the circuit; a classical head with the same bottleneck has not been run.
+- **Gradients**: the quantum head trains with loss-level SPSA gradient estimates, because exact parameter-shift needs about 204 circuits per sample at 6 qubits and 4 layers. An earlier version of the head ran on PennyLane with exact gradients; its means matched the Qiskit head's, so PennyLane was dropped and Qiskit, which the hardware and noise studies need anyway, is the only framework.
+- **Training had not converged at epoch 100**: the quantum head's validation loss is still falling, possibly because of the learning rate (1e-4, decayed every 10 epochs), which has not been studied yet.
 
 ### Deviations from the Base Paper
 
@@ -91,7 +91,7 @@ The scripts of the Quickstart reproduce every number above: the split is set by 
 The embedding is the part of the circuit that loads the 6 scaled features into the qubits (`docs/architecture.md`, section 3.2, gives the mathematics). The Dressed Quantum Network above uses the paper's angle embedding. To see whether another embedding helps, the Qiskit head was also run with an RX embedding, the ZZ feature map (full entanglement, two repetitions), and a ZZ feature map with nearest-neighbour entanglement. The variational block, the backbone, the split, and every hyperparameter are the same, so the embedding is the only difference. Each configuration has 101 seeds (0 to 100).
 
 > [!NOTE]
-> **These embeddings were run only with the Qiskit head** (loss-level SPSA gradients). The PennyLane head has only been run with the angle embedding. The comparison is therefore between embeddings on one framework, and it says nothing about how the same embeddings would behave with PennyLane's exact gradients. The values come from the comparative report written for each configuration.
+> **The head trains with loss-level SPSA gradient estimates.** Whether exact gradients would change the ranking, in particular for the ZZ feature maps, has not been tested. The values come from the comparative report written for each configuration.
 
 #### Test cohort
 
@@ -158,7 +158,6 @@ The split is set by the constants at the top of `scripts/etl_pipeline.py`: the s
 uv run scripts/training/train_baseline.py
 uv run scripts/metrics/evaluate_baseline.py        # its validation metrics select the backbone
 uv run scripts/training/train_ctl_multiseed.py     # heads on the backbone selected on validation
-uv run scripts/training/train_pl_qtl_multiseed.py
 uv run scripts/training/train_qiskit_qtl_multiseed.py
 
 # Qiskit head with another embedding: paper (default), rx, zz_feature_map,
@@ -172,14 +171,14 @@ uv run scripts/training/train_qiskit_qtl_multiseed.py --ansatz zz_feature_map
 uv run scripts/training/train_qiskit_qtl_multiseed.py --block strongly_entangling --reupload
 ```
 
-Each training script writes a checkpoint and a per-epoch history (with the full run specification) per seed and skips runs that already finished. The PennyLane head implements only the `paper` embedding and block, without re-uploading (`docs/architecture.md`, section 3.2).
+Each training script writes a checkpoint and a per-epoch history (with the full run specification) per seed and skips runs that already finished.
 
 Runs are identified by hashes of their specification: `config_id` for a configuration (all its seeds), `run_id` for one seed, so changing any hyperparameter gives a new configuration that never overwrites an old one. Everything is written under `data/results/<kind>/<paradigm>/<config_id>/` (layout in `docs/architecture.md`, section 2.1.1). To look a hash up:
 
 ```bash
 uv run scripts/list_runs.py                    # one row per configuration
 uv run scripts/list_runs.py --runs             # one row per run
-uv run scripts/list_runs.py --paradigm pl_qtl  # one paradigm only
+uv run scripts/list_runs.py --paradigm ctl     # one paradigm only
 uv run scripts/list_runs.py --find dc658242    # full spec and files of an ID prefix
 uv run scripts/list_runs.py --runs --csv runs.csv
 ```
@@ -189,7 +188,6 @@ uv run scripts/list_runs.py --runs --csv runs.csv
 ```bash
 # val_results.json and test_results.json per configuration
 uv run scripts/metrics/evaluate_ctl.py
-uv run scripts/metrics/evaluate_pl_qtl.py
 uv run scripts/metrics/evaluate_qiskit_qtl.py
 uv run scripts/metrics/evaluate_qiskit_qtl.py --config <config_id>   # one configuration only
 
@@ -207,7 +205,6 @@ uv run scripts/metrics/compare_configurations.py <config_id> <other_config_id> -
 # Per configuration: metric distributions, ROC curves, confusion matrix
 uv run scripts/viz/visualize_baselines.py
 uv run scripts/viz/visualize_ctl.py
-uv run scripts/viz/visualize_pl_qtl.py
 uv run scripts/viz/visualize_qiskit_qtl.py
 
 # Loss curves from the histories, and the metrics of all configurations side by side
