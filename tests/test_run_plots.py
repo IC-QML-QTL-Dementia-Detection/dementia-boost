@@ -81,27 +81,11 @@ def _capture_titles(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 class TestPlotParadigm:
     """Validates the plots written for each configuration of a paradigm."""
 
-    def test_isolated_plots_use_the_run_selected_on_validation(
-        self, tmp_path: Path
-    ) -> None:
-        """The highlighted run is the best on validation, not the best on test."""
-        layout = ResultsLayout(str(tmp_path))
-        spec_a = build_spec("qiskit_qtl", seed=1)
-        spec_b = build_spec("qiskit_qtl", seed=2)
-        _write_results(layout, spec_a, spec_b)
-
-        plot_paradigm(layout, Paradigm.QISKIT_QTL)
-
-        plots = Path(layout.plots_dir("qiskit_qtl", config_id(spec_a)))
-        names = {path.name for path in plots.glob("*.png")}
-        assert f"qiskit_qtl_isolated_roc_{run_id(spec_b)}.png" in names
-        assert f"qiskit_qtl_cm_{run_id(spec_b)}.png" in names
-        assert not any(run_id(spec_a) in name for name in names)
-
     def test_writes_every_plot_with_the_vector_formats(self, tmp_path: Path) -> None:
         """The all-seeds and isolated plots are written, every one also in the
         extra formats with the PNG's name, and the caller learns which
-        configurations got plots."""
+        configurations got plots. The isolated plots show run B, the best on
+        validation, and none shows run A, the best on test."""
         layout = ResultsLayout(str(tmp_path))
         spec_a = build_spec("qiskit_qtl", seed=1)
         spec_b = build_spec("qiskit_qtl", seed=2)

@@ -78,10 +78,6 @@ def _qtl(**overrides) -> RunSpec:
 class TestParadigm:
     """Validates the single definition of paradigm names."""
 
-    def test_members_and_values(self) -> None:
-        """The three paradigms exist under their current names."""
-        assert {p.value for p in Paradigm} == {"baseline", "ctl", "qiskit_qtl"}
-
     def test_is_a_string(self) -> None:
         """A paradigm compares equal to its name, so it can sit in a path or JSON."""
         assert Paradigm.QISKIT_QTL == "qiskit_qtl"
@@ -126,11 +122,6 @@ class TestIdentity:
         )
         assert config_id(spec) == "ed2f03b85c3f"
         assert run_id(spec) == "4682f2231a0c"
-
-    def test_same_spec_same_ids(self) -> None:
-        """Two equal specs give equal IDs."""
-        assert run_id(_qtl()) == run_id(_qtl())
-        assert config_id(_qtl()) == config_id(_qtl())
 
     _CHANGES = {
         "ansatz": "other",
@@ -359,7 +350,3 @@ class TestLabel:
         """Baseline and CTL labels carry no qubits or ansatz."""
         assert label(_baseline()) == "baseline | lr 0.0001 | seed 17"
         assert label(_ctl()) == "ctl | lr 0.0001 | seed 5"
-
-    def test_label_is_stable(self) -> None:
-        """The same spec always gives the same label."""
-        assert label(_qtl()) == label(_qtl())

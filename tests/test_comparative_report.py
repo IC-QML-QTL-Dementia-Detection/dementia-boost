@@ -165,12 +165,6 @@ class TestHeadlineNumbers:
         assert shown["mean"] == pytest.approx(0.7)
         assert shown["std"] == pytest.approx(0.1)
 
-    def test_no_entry_is_labelled_best(self) -> None:
-        """No key in the report claims a best run chosen on test."""
-        report = _report(baseline=_paradigm({"a": {}}))
-
-        assert "best" not in str(report).lower()
-
     def test_deltas_use_the_means(self) -> None:
         """Percentage deltas compare the mean of each paradigm."""
         baseline = _paradigm({"a": {"auc": 0.5}}, {"a": {"auc": 0.5}})

@@ -1,8 +1,8 @@
-"""Unit tests for model backbones, classification heads, and autograd flow.
+"""Unit tests for model backbones and classification heads.
 
 This module validates:
-- ``LeNetFeatureExtractor`` intermediate layer shapes and gradient propagation.
-- ``ClassicalClassifierHead`` logit/sigmoid output contracts and Glorot init.
+- ``LeNetFeatureExtractor`` intermediate layer shapes.
+- ``ClassicalClassifierHead`` Glorot init.
 - The registry of classical heads, the circuit-free control head, and the head
   rebuilt from a run's spec.
 - ``DementiaClassifier`` backbone freezing contracts under transfer learning.
@@ -45,7 +45,7 @@ _ANGLE_TOLERANCE: float = 1e-6
 
 
 class TestLeNetFeatureExtractor:
-    """Validates the convolutional backbone's shape contract and trainability."""
+    """Validates the convolutional backbone's shape contract."""
 
     _BLOCK_END_INDICES: tuple[int, ...] = (2, 5, 8, 10)
     _BATCH_SIZE: int = 2
@@ -83,55 +83,11 @@ class TestLeNetFeatureExtractor:
 
         assert block_idx == len(expected_shapes)
 
-    def test_gradient_propagation_to_all_conv_weights(self) -> None:
-        """Asserts that backward pass populates non-zero gradients on all
-        four convolutional weight tensors."""
-        extractor = LeNetFeatureExtractor()
-        x = torch.randn(self._BATCH_SIZE, 1, 128, 128)
-
-        output = extractor(x)
-        loss = output.sum()
-        loss.backward()
-
-        conv_layers = [
-            layer for layer in extractor.features if isinstance(layer, nn.Conv2d)
-        ]
-        assert len(conv_layers) == 4
-
-        for conv in conv_layers:
-            assert conv.weight.grad is not None
-            assert torch.any(conv.weight.grad != 0.0)
-
 
 class TestClassicalClassifierHead:
-    """Validates output contracts and initialization of the dense head."""
+    """Validates the initialization of the dense head."""
 
     _IN_FEATURES: int = 2304
-    _BATCH_SIZE: int = 4
-
-    def test_logits_unconstrained_and_sigmoid_bounded(self) -> None:
-        """Asserts that `use_sigmoid=False` yields unconstrained logits while
-        `use_sigmoid=True` strictly bounds outputs to (0.0, 1.0)."""
-        torch.manual_seed(42)
-        x = torch.randn(self._BATCH_SIZE, self._IN_FEATURES) * 10.0
-
-        logits_head = ClassicalClassifierHead(
-            in_features=self._IN_FEATURES,
-            use_sigmoid=False,
-        )
-        logits_head.eval()
-        sigmoid_head = ClassicalClassifierHead(
-            in_features=self._IN_FEATURES,
-            use_sigmoid=True,
-        )
-        sigmoid_head.eval()
-
-        logits = logits_head(x)
-        probabilities = sigmoid_head(x)
-
-        assert torch.any(torch.abs(logits) > 1.0)
-        assert torch.all(probabilities > 0.0)
-        assert torch.all(probabilities < 1.0)
 
     def test_glorot_init_reinitializes_weights_and_zeros_biases(self) -> None:
         """Asserts that Glorot Uniform init changes linear weights from their

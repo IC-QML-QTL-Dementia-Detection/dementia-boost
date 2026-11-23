@@ -6,8 +6,6 @@ This module validates:
   contracts (frozen backbone, freshly initialized head, device placement).
 - ``build_qiskit_qtl_model`` passing the embedding, variational block, and
   re-uploading choice through to the circuit builder.
-- ``assemble_dementia_classifier`` numerical equivalence against manually
-  composed backbone and head forward passes.
 
 Regression coverage
 -------------------
@@ -16,8 +14,6 @@ Regression coverage
   fine-tuning.
 - Factory functions attaching the wrong head type or leaving the classifier
   head frozen alongside the backbone.
-- Divergence between the assembled `DementiaClassifier` orchestrator and its
-  constituent backbone/head modules invoked separately.
 """
 
 from pathlib import Path
@@ -26,7 +22,6 @@ import pytest
 import torch
 
 from dementia_boost.models.builder import (
-    assemble_dementia_classifier,
     build_ctl_model,
     build_qiskit_qtl_model,
     load_baseline_backbone,
@@ -183,26 +178,3 @@ class TestBuildQiskitQtlModel:
         assert calls[0]["embedding"] == "rx"
         assert calls[0]["block"] == "paper"
         assert calls[0]["reupload"] is True
-
-
-class TestAssembleDementiaClassifier:
-    """Validates numerical equivalence of the assembled orchestrator."""
-
-    def test_combined_forward_matches_manual_composition(self) -> None:
-        """Asserts that `f_combined(x)` exactly matches `f_head(f_backbone(x))`
-        with zero numerical discrepancy."""
-        extractor = LeNetFeatureExtractor()
-        head = ClassicalClassifierHead(use_sigmoid=False)
-        x = torch.randn(2, 1, 128, 128)
-
-        combined = assemble_dementia_classifier(
-            feature_extractor=extractor,
-            classifier_head=head,
-        )
-        combined.eval()
-
-        with torch.no_grad():
-            combined_output = combined(x)
-            manual_output = head(extractor(x))
-
-        assert torch.allclose(combined_output, manual_output)

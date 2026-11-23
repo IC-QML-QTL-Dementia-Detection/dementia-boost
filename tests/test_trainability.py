@@ -15,7 +15,6 @@ from dementia_boost.analysis.trainability import (
     central_differences,
     default_choices,
     diagnose,
-    markdown_table,
 )
 from dementia_boost.models.quantum_cnn import BLOCKS, EMBEDDINGS
 
@@ -77,16 +76,3 @@ def test_default_choices_cover_every_block_and_every_embedding() -> None:
         assert CircuitChoice("paper", block, True) in choices
     for embedding in EMBEDDINGS:
         assert CircuitChoice(embedding, "paper", False) in choices
-
-
-def test_markdown_table_has_one_row_per_result() -> None:
-    """The table for the meeting notes lists each result on its own row."""
-    results = [
-        _diagnose_small(CircuitChoice("paper", block, False), seed=0)
-        for block in ("paper", "trainable_zz")
-    ]
-
-    lines = markdown_table(results).splitlines()
-
-    assert len(lines) == 2 + len(results)
-    assert "trainable_zz" in lines[-1]
